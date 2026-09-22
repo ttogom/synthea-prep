@@ -1,0 +1,8 @@
+# Synthea source clone
+.synthea/
+
+# Generated data
+data/
+
+# Claude Code session memory (stored in ~/.claude, not the repo)
+memory/
