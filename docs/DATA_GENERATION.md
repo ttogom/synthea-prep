@@ -13,8 +13,9 @@ This pipeline generates synthetic EHR data using Synthea for a clinical-reasonin
 | FHIR export disabled | Unused; substantial overhead |
 | Pinned commit, seeds (`-s`, `-cs`), reference date (`-r`) | Required for identical output across runs; `-r` prevents Synthea from using the wall clock as the simulation start time |
 | Multithreaded generation + canonicalization | Threads write rows in nondeterministic finish order; `canonicalize_csvs.py` sorts every CSV after generation; `--single-thread` is substantially slower with no reproducibility benefit |
+| JVM timezone pinned to UTC | Synthea writes date-only fields (`conditions.START`, `DEATHDATE`, note headers, …) in the JVM's default timezone and datetimes in UTC; unpinned, the same seed gives different dates on machines in different zones. Pinning makes date-only fields the UTC date of the same instant |
 | Open encounters get empty STOP | Synthea fills the STOP of in-progress encounters from the wall clock; `canonicalize_csvs.py` clears any STOP value later than the reference date |
-| `manifest.json` written per run | Records commit, seeds, reference date, and full command so any dataset can be traced back to exactly how it was generated |
+| `manifest.json` written per run | Records commit, seeds, reference date, timezone, and full command so any dataset can be traced back to exactly how it was generated |
 
 ## How to Run
 
@@ -39,7 +40,7 @@ All output goes to `data/<run-name>/`.
 
 | Path | Key columns |
 |------|-------------|
-| `manifest.json` | Commit, seeds, reference date, full command, timestamp |
+| `manifest.json` | Commit, seeds, reference date, timezone, full command, timestamp |
 | `SUMMARY.md` | Auto-generated descriptive statistics |
 | `csv/patients.csv` | Id, BIRTHDATE, DEATHDATE (empty for living patients), GENDER, RACE, ETHNICITY, MARITAL, INCOME |
 | `csv/conditions.csv` | START, STOP, PATIENT, CODE, DESCRIPTION |
@@ -63,7 +64,7 @@ Dead patients are included in all output files; filter on `DEATHDATE IS NOT NULL
 
 ## Reproducibility
 
-Runs are byte-identical after canonicalization given the same commit, seeds, reference date, and Java major version. `check_reproducibility.sh` verifies this by generating 200 patients twice and diffing every CSV and note file.
+Runs are byte-identical after canonicalization given the same commit, seeds, reference date, and Java major version, on any machine (the JVM timezone is pinned to UTC). `check_reproducibility.sh` verifies this by generating 200 patients twice and diffing every CSV and note file; because both runs use the same machine, it can't detect timezone dependence on its own. Runs generated before the timezone was pinned have no `timezone` in `manifest.json` and carry the generating machine's local dates.
 
 ## Scripts
 

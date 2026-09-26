@@ -26,6 +26,14 @@ SYNTHEA_COMMIT="d9d07a6eef91ee5144293b42ab64224d84d124f8"
 # shifts all encounter timestamps, breaking byte-identical reproducibility.
 REFERENCE_DATE="20260921"
 
+# ── Pinned JVM timezone ────────────────────────────────────────────────────────
+# Synthea writes datetimes in UTC but date-only fields (conditions.START,
+# DEATHDATE, note headers, ...) in the JVM's default timezone
+# (ExportHelper.dateFromTimestamp). Unpinned, that is the generating machine's
+# zone, so the same seed gives different dates on different machines. Pinning
+# it to UTC makes date-only fields the UTC date of the same instant.
+SYNTHEA_TZ="UTC"
+
 # ── Parse --single-thread flag ─────────────────────────────────────────────────
 SINGLE_THREAD=0
 if [ "${1:-}" = "--single-thread" ]; then
@@ -37,6 +45,21 @@ fi
 POPULATION=${1:-10000}
 SEED=${2:-20260916}
 AGE_RANGE=${3:-""}
+
+# Synthea rejects malformed values with a usage message but Gradle still reports
+# success, so validate here and fail with a clear message instead.
+if ! [[ "$POPULATION" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: population must be a positive integer, got '$POPULATION'" >&2
+    exit 1
+fi
+if ! [[ "$SEED" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: seed must be an integer, got '$SEED'" >&2
+    exit 1
+fi
+if [ -n "$AGE_RANGE" ] && ! [[ "$AGE_RANGE" =~ ^[0-9]+-[0-9]+$ ]]; then
+    echo "ERROR: age_range must look like MIN-MAX (e.g. 30-40), got '$AGE_RANGE'" >&2
+    exit 1
+fi
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,7 +124,11 @@ echo "Threads  : $([ "$SINGLE_THREAD" = "1" ] && echo "1 (--single-thread)" || e
 echo "Command  : ${CMD[*]}"
 echo ""
 
-(cd "$SYNTHEA_DIR" && "${CMD[@]}")
+# TZ and -Duser.timezone both reach the JVM that Gradle forks for `run`.
+(cd "$SYNTHEA_DIR" && \
+    TZ="$SYNTHEA_TZ" \
+    JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Duser.timezone=$SYNTHEA_TZ" \
+    "${CMD[@]}")
 
 # ── Verify symptoms output ─────────────────────────────────────────────────────
 SYMPTOMS_CSV="$OUTPUT_DIR/symptoms/csv/symptoms.csv"
@@ -126,7 +153,7 @@ FULL_CMD="${CMD[*]}"
 JAVA_VERSION="$_JAVA_LINE"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-export OUTPUT_DIR SYNTHEA_COMMIT REFERENCE_DATE POPULATION SEED AGE_RANGE RUN_NAME FULL_CMD JAVA_VERSION TIMESTAMP SINGLE_THREAD
+export OUTPUT_DIR SYNTHEA_COMMIT REFERENCE_DATE POPULATION SEED AGE_RANGE RUN_NAME FULL_CMD JAVA_VERSION TIMESTAMP SINGLE_THREAD SYNTHEA_TZ
 
 python3 << 'PYEOF'
 import json, os
@@ -134,6 +161,7 @@ od = os.environ["OUTPUT_DIR"]
 manifest = {
     "synthea_commit": os.environ["SYNTHEA_COMMIT"],
     "reference_date": os.environ["REFERENCE_DATE"],
+    "timezone": os.environ["SYNTHEA_TZ"],
     "population": int(os.environ["POPULATION"]),
     "seed": int(os.environ["SEED"]),
     "clinician_seed": int(os.environ["SEED"]),
