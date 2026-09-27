@@ -251,11 +251,66 @@ Angeles, UTC scored 65.7%.
 - **All-positive** by construction (see D9).
 - **Patients with only a `REASONCODE` for the target aren't emitted** (see
   [Cutoff](#cutoff)). Whether they should count as positives is open.
-- **Related diagnoses aren't cut.** Only listed codes are matched, so a
-  condition that names the target under another code survives before the
-  cutoff. For example, "Microalbuminuria due to type 2 diabetes mellitus"
-  6 years before a type 2 diabetes row, or "Childhood asthma" for Asthma.
-  List such codes in the codes file.
+- **Text that names the target survives before the cutoff.** Only the listed
+  codes are matched. A kept row or note that names the target under another
+  code, or lists it as a symptom, stays in. A sweep of all 273 pop1000 codes
+  (2026-09-26) found 13 targets with such text. The scan checked the
+  description, reason, allergy-reaction and symptom columns and the notes for
+  the target's name (without its `(disorder)`-style tag, word order ignored).
+  Row counts cover every place the text appears; patient counts are minimums.
+
+  *Another condition or treatment names the target:*
+
+  | Target (code) | Kept text (code) | Rows | Patients |
+  |---|---|---|---|
+  | Asthma (195967001) | Childhood asthma (233678006) | 1,114 | ≥43 |
+  | | Asthma self management (699728000) | 86 | 43 |
+  | | Asthma follow-up (394701000) | 32 | ≥11 |
+  | | Emergency hospital admission for asthma (183478001) | 6 | ≥5 |
+  | Sinusitis (36971009) | Viral sinusitis (444814009) | 454 | ≥23 |
+  | | Acute bacterial sinusitis (75498004) | 36 | ≥6 |
+  | | Chronic sinusitis (40055000) | 11 | ≥5 |
+  | Sore throat (267102003) | Streptococcal sore throat (43878008) | 33 | ≥2 |
+  | Diabetes mellitus type 2 (44054006) | Microalbuminuria due to type 2 diabetes mellitus (90781000119102) | 3 | 1 |
+
+  *Tests, referrals or screening name the target* (genuine pre-diagnosis
+  work-up, but they name what is being looked for):
+
+  | Target (code) | Kept text (code) | Rows | Patients |
+  |---|---|---|---|
+  | Sleep apnea (73430006) | Sleep apnea assessment (103750000) | 12 | ≥3 |
+  | | Referral to sleep apnea clinic (698560000) | 6 | ≥3 |
+  | | Home-use sleep apnea recording system (720253003) | 3 | 3 |
+  | Malignant neoplasm of colon (363406005) | Screening for malignant neoplasm of colon (encounter reason) | 10 | ≥8 |
+
+  *The target is recorded as a symptom before it is coded as a finding*
+  (note chief complaints, `symptoms.csv` `SYMPTOMS`, allergy `REACTION1/2`):
+
+  | Target (code) | Note lines | `symptoms.csv` rows | Allergy reactions |
+  |---|---|---|---|
+  | Fever (386661006) | 100 | ~70 | – |
+  | Cough (49727002) | 95 | ~64 | 2 |
+  | Fatigue (84229001) | 30 | ~20 | – |
+  | Sore throat (267102003) | – | 15 | – |
+  | Headache (25064002) | – | 9 | – |
+  | Nausea (422587007) | – | 4 (as "Nausea/Vomiting") | – |
+  | Dyspnea (267036007) | – | – | 1 |
+
+  *Borderline:* Unemployed (73438004): a social-history survey answer,
+  "Otherwise unemployed but not seeking work", is kept in `observations.csv`
+  `VALUE` (164 rows, ≥92 patients) before the Unemployed finding is coded.
+
+  Not counted: name matches with another meaning (Stress ← "Stress level",
+  "Posttraumatic stress disorder", "Cardiovascular stress testing"; Refugee ←
+  the question "Are you a refugee"), and relations that don't name the target
+  ("Disorder of kidney due to diabetes mellitus" for type 2 diabetes;
+  nonproliferative for proliferative diabetic retinopathy).
+
+  Listing the related codes in the codes file removes them, but it also
+  moves the cutoff to the related diagnosis, which can be years earlier. The
+  type 2 diabetes patient above has "Microalbuminuria due to type 2 diabetes
+  mellitus" in 2018 and "Disorder of kidney due to diabetes mellitus" in
+  2004, before a 2024 type 2 diabetes row.
 - **Symptoms `AGE_BEGIN` isn't the onset age.** It can be 1–7 years below the
   age at the condition's `START`, so the age rule kept 211 rows for conditions
   starting after the cutoff across 77 of 273 codes on pop1000.
@@ -265,8 +320,10 @@ Angeles, UTC scored 65.7%.
 - **End-of-simulation snapshots** in `patients.csv` (marital status, address,
   income) describe the patient at the end, not at the cutoff.
 - **Reference-table aggregates** include post-cutoff activity (see above).
-- **Scale.** Source CSVs are read into memory, twice for the scrubbed
-  patients' date scan. Fine for pop10; check memory and runtime on the 10k run.
+- **Scale.** Each dated source CSV is read into memory three times (the
+  `REASONCODE` scan, the date scan and the filter), and every note is read
+  for the timezone check. On pop1000 a run takes about 6 s and 800 MB,
+  mostly parsing `observations.csv`. Check memory and runtime on the 10k run.
 
 ## Verification
 
@@ -309,12 +366,39 @@ v1.3 on `pop1000-seed20260916` (no manifest, UTC data):
   target code in `REASONCODE` before the cutoff for 20 codes, which led to the
   `REASONCODE` cutoff rule; the other leaks it found are listed under Known
   limitations.
-- With the `REASONCODE` rule, the sweep was re-run on 73 of the 273 codes
-  (stopped early). None had the target code, a date, a row or a note entry on
-  or after the cutoff, and no pre-cutoff rows were lost. Those 73 include 6 of
-  the 20 codes that leaked in v1.2 (among them Overdose and Complete
-  miscarriage). **The remaining 200 codes, including the other 14 that leaked,
-  are not yet re-verified.**
+- **Full v1.3 sweep (2026-09-26): all 273 codes**, each scrubbed on its own
+  (21,253 patient/code cutoffs, 0 exclusions, 0 warnings). A separate checker
+  that doesn't import `scrub.py` recomputed every cutoff from `conditions.csv`
+  and the `REASONCODE` rows. From those cutoffs it rebuilt the expected output
+  and compared it cell for cell:
+  - every dated CSV;
+  - `patients.csv`;
+  - `symptoms.csv`;
+  - every note file.
+
+  Results for every code:
+  - Kept rows match the expected rows exactly: no pre-cutoff row is lost and
+    none is added.
+  - No date value in any output CSV and no note entry date is on or after the
+    cutoff.
+  - No row belongs to an encounter on or after the cutoff.
+  - The reference tables are byte-identical to the source.
+  - The per-code `REASONCODE` counts match the manifest (18 codes, 109
+    patients cut earlier).
+
+  Target traces still kept before the cutoff all fall under Known
+  limitations: text naming the target (13 codes) and symptoms rows for later
+  conditions (211 rows across 77
+  codes, confirming the figure above). The checker was confirmed to catch
+  leaks by injecting three faults into a copy of the type 2 diabetes output:
+  - a re-added diagnosis row;
+  - a deleted pre-cutoff observation;
+  - a post-cutoff note entry.
+
+  It flagged all three.
+- Also confirmed on pop1000: the 673 `REASONCODE`-only patient/code pairs
+  over 43 codes, and the 33 Overdose ER visits before the first Overdose
+  condition row (see [Cutoff](#cutoff)).
 
 To re-verify after changes, re-run the sweep above (reimplement the cutoff
 independently; don't reuse `scrub.py`'s code), and use a copy of the source
