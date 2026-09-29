@@ -172,7 +172,6 @@ list can't fix this without deleting most of their history.
 3. **Negatives:** every patient is a positive. If matched negatives are added, apply the same drop lists to them. Otherwise, for example, NYHA would appear only in negatives and become a shortcut.
 4. **Short histories:** 198 of 848 diabetes patients have fewer than 5 visits. Filter them with `--min-encounters 5`?
 5. **Tokenizer:** token counts assume 4 characters per token until a model is chosen.
-6. **pop1000 count:** local run has 1,131 patients; LABELS.md says 1,130. The heart failure count (34) matches.
 
 > `extract_labels.py` names its labels file by condition only, so 1k and 10k
 > runs overwrite each other. `run_condition.sh` works around this by writing
