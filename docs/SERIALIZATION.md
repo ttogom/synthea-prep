@@ -137,6 +137,42 @@ It exits with code 1 if any check fails.
 
 REVIEW hits are not failures. Each one needs a decision, recorded below.
 
+## Tests on the output
+
+`test_serialization.py` checks a JSONL file against the data it was built
+from. Settings are read from `<file>.stats.json`.
+
+```bash
+python3 serialization/test_serialization.py \
+    data/serialized/pop10000-seed20260916-heart_failure.jsonl \
+    data/pop10000-seed20260916__train-9e8474 \
+    data/pop10000-seed20260916__labels-9e8474.json
+```
+
+| # | Test | What it catches |
+|---|---|---|
+| 1 | Same patients, labels match | Lost or duplicated patients; a label or cutoff attached to the wrong patient |
+| 2 | No absolute dates, no negative times | A date that would reveal the cutoff; an event after it |
+| 3 | Every condition and medication appears | History lost by compression |
+| 4 | Latest vital/lab value shown first | Wrong ordering of readings |
+| 5 | Drop list honoured | Dropped terms still in the text |
+| 6 | Deterministic | Different output on a re-run |
+| 7 | Compression never adds items | Compression that makes a record longer |
+
+All 7 tests pass on all six datasets (2026-09-29). Test 4 found a bug in the
+first version: readings of one test on the same day (e.g. during a hospital
+stay) were ordered by value, not by time, so an earlier reading could be
+shown as the latest. Readings are now ordered by full timestamp.
+
+Compression reduces total text by 52% (heart failure, 10k), 24% (type 2
+diabetes, 10k) and 15–56% on the pop1000 sets.
+
+The Drive copy of `pop10000-seed20260916__train-9e8474`
+(`pop10000-seed20260916__UTC.zip`) was compared file by file with the local
+one:
+- **Patient files:** 327 of 329 are byte-identical.
+- **`organizations.csv` and `providers.csv`:** 26 rows each differ, and only in the visit-count columns (`UTILIZATION`, `ENCOUNTERS`), by at most 6. These reference-table totals vary between multithreaded runs, and `serialize.py` doesn't read them.
+
 ## Data check (2026-09-29)
 
 Both runs were generated with `generate_synthea.sh` after the UTC fix
@@ -157,7 +193,7 @@ reference date 20260921). The generator and `scrub.py` are identical on
 | pop10000 heart failure | 313 | 2,430 / 4,300 / 6,218 | PASS, 4 to review |
 | pop10000 heart failure, `--no-compress` | 313 | 3,221 / 9,740 / 60,148 | — |
 | pop1000 type 2 diabetes | 74 | 304 / 2,424 / 5,474 | PASS, 2 to review |
-| pop10000 type 2 diabetes | 848 | 352 / 2,413 / 5,568 | PASS, 2 to review |
+| pop10000 type 2 diabetes | 848 | 352 / 2,413 / 5,567 | PASS, 2 to review |
 | pop1000 essential hypertension | 250 | 264 / 2,003 / 3,826 | PASS |
 | pop1000 asthma | 46 | 284 / 2,361 / 3,870 | FAIL: 43 patients keep "Childhood asthma" (SCRUBBING.md: ≥43); no drop list yet |
 
@@ -173,8 +209,8 @@ The earlier version of this document said the heart-failure-related tests
 
 | Item | Patients before diagnosis | Check | Decision |
 |---|---|---|---|
-| KCCQ-12 (Kansas City Cardiomyopathy Questionnaire) | 2 | The instrument exists to grade heart failure; its name points to the target | **Dropped** (`configs/drop/heart_failure.txt`) |
-| NYHA functional class, and "Assessment using New York Heart Association Classification" | 2 | Heart failure classification; one patient was Class IV | **Dropped** |
+| KCCQ-12 (Kansas City Cardiomyopathy Questionnaire) | 2 | Also in 37 patients who never get heart failure (valve/bypass work-up), so in this data it is not specific. But the model reads the name with medical knowledge: KCCQ exists to grade heart failure. | **Dropped** (`configs/drop/heart_failure.txt`) |
+| NYHA functional class, and "Assessment using New York Heart Association Classification" | 2 (Class II, Class IV) | Also in 37 patients who never get heart failure (mostly Class III). As with KCCQ, the name is a heart failure grading scale. | **Dropped** |
 | Left ventricular ejection fraction | 11 in text (14 in data; 3 fall outside the window) | Low values are not specific to heart failure: patients who never get it have lower EF (median 39.5%, 54% below 40%) than heart failure patients before diagnosis (median 43.6%, 29% below 40%). All pre-diagnosis values in both groups are 30–50%. | **Kept** |
 | NT-proBNP | 12 in text (15 in data) | Before diagnosis, values are 1.1–1.9 pg/mL, the same as patients who never get heart failure (1.0–2.0). All 313 are 238–2,000 after diagnosis, and the scrub removes those. | **Kept** |
 | Dyspnea as an allergy reaction (fish, latex, lisinopril) | 5 | Reaction to an allergen, unrelated to heart failure | **Kept** |
@@ -185,6 +221,15 @@ Where these tests come from: 905 patients in pop10000 have EF, NT-proBNP,
 NYHA or KCCQ at some point, and 592 of them never get heart failure. In
 Synthea they come from the work-up for aortic valve replacement and bypass
 surgery.
+
+Why EF and NT-proBNP are kept but NYHA and KCCQ are dropped: the model sees
+EF and NT-proBNP as numbers, and before diagnosis those numbers look the same
+in both groups. NYHA and KCCQ carry the answer in their names, whatever the
+value. The drop costs little: 2 of 313 patients.
+
+**If matched negatives are added later,** apply the same drop list to them.
+Otherwise NYHA/KCCQ would appear only in negatives, and their presence would
+become a shortcut to "not heart failure".
 
 ### Type 2 diabetes (pop10000, 848 patients)
 

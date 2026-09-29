@@ -241,19 +241,21 @@ def observations(rows, cutoff, since, max_values):
         d = parse_date(r["DATE"])
         if since is not None and d < since and not social_item:
             continue
-        by_desc[desc].append((d, fmt_value(r["VALUE"], r["UNITS"])))
+        # Keep the full timestamp: several readings of one test on the same
+        # day (e.g. during a hospital stay) must be ordered by time.
+        by_desc[desc].append((r["DATE"], d, fmt_value(r["VALUE"], r["UNITS"])))
         is_social[desc] = social_item
     measures, social = [], []
     for desc in sorted(by_desc):
-        readings = sorted(by_desc[desc], reverse=True)
+        readings = sorted(by_desc[desc], key=lambda x: x[0], reverse=True)
         if is_social[desc]:
-            d, value = readings[0]
+            _, d, value = readings[0]
             social.append(f"{desc}: {value} ({ago(d, cutoff)})")
             continue
         if max_values:
             readings = readings[:max_values]
-        latest = f"{readings[0][1]} ({ago(readings[0][0], cutoff)})"
-        earlier = ", ".join(f"{v} ({ago(d, cutoff)})" for d, v in readings[1:])
+        latest = f"{readings[0][2]} ({ago(readings[0][1], cutoff)})"
+        earlier = ", ".join(f"{v} ({ago(d, cutoff)})" for _, d, v in readings[1:])
         measures.append(f"{desc}: {latest}" + (f"; earlier {earlier}" if earlier else ""))
     return measures, social
 
