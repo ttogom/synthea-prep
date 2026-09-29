@@ -31,6 +31,34 @@ Python 3.9+, standard library only.
 > only, so a 1k and a 10k run of the same condition collide. Pass
 > `--labels data/<run>__labels-<sha6>.json` to keep them apart.
 
+## Any condition, one command
+
+Nothing in `serialize.py` or `check_text_leaks.py` is specific to one
+condition: the target comes from each patient's label. For a new condition,
+write a codes file and run the whole pipeline:
+
+```bash
+printf '195967001   # Asthma (disorder)\n' > configs/asthma.txt
+serialization/run_condition.sh data/pop1000-seed20260916 configs/asthma.txt
+# → data/serialized/pop1000-seed20260916-asthma.jsonl  (+ .stats.json, .leaks.md)
+```
+
+`run_condition.sh` runs scrub → labels → serialize → text leak check. It
+passes any extra options to `serialize.py`, and it picks up
+`configs/leak_terms/<codes-stem>.txt` if one exists. Condition-specific
+knowledge lives only in that optional terms file.
+
+Tried on pop1000:
+
+| Condition | Patients | Leak check |
+|---|---|---|
+| Essential hypertension | 250 | PASS |
+| Asthma | 46 | FAIL: 43 patients keep "Childhood asthma", matching SCRUBBING.md's ≥43 |
+
+For a multi-condition dataset, run each condition and concatenate the JSONL
+files. A patient can then appear once per condition, each time with its own
+cutoff.
+
 ## Output
 
 `<name>.jsonl`, one line per patient:
@@ -112,13 +140,20 @@ are not failures. They need a human decision.
 
 Findings for the team:
 
-1. **Heart-failure work-up survives before the cutoff.** In the 10k heart failure set, some patients have these before diagnosis:
-   - Left ventricular ejection fraction: 11 patients
-   - NT-proBNP: 12 patients
-   - NYHA functional class: 2 patients, one of them Class IV
-   - KCCQ-12 (Kansas City Cardiomyopathy Questionnaire): 2 patients
+1. **Some heart-failure-related tests appear before the cutoff, but they are not a leak.** 22 of the 313 heart failure patients (10k) have at least one of these before diagnosis:
+   - left ventricular ejection fraction (11 patients)
+   - NT-proBNP (12 patients)
+   - NYHA functional class (2 patients)
+   - KCCQ-12 (2 patients)
 
-   None of these contain the target code or its description, so `check_leaks.py` does not flag them. They are strong hints for about 4% of the cohort. This may be the "work-up config" case: decide whether to drop these tests, cut at them, or keep them.
+   `check_leaks.py` doesn't flag them because they don't name the target. In Synthea they come from the work-up for aortic valve and bypass surgery, not from a heart failure diagnosis. 592 patients who never get heart failure have them too, so the rate is similar in both groups:
+
+   | Group | With these tests |
+   |---|---|
+   | Heart failure patients, before diagnosis | 7% |
+   | Patients who never get heart failure, at any time | 5% |
+
+   Their values are mostly normal (for example NT-proBNP 1.3 pg/mL). They are kept as genuine history. If a later condition has a work-up that *is* specific to it, drop those tests or cut at them there.
 2. **Type 2 diabetes fails as expected.** 12 patients keep "Microalbuminuria/Proteinuria due to type 2 diabetes mellitus", the known related-code limitation in SCRUBBING.md. The check catches it, which confirms the text check works.
 3. **Type 2 diabetes histories are thin.** The median is 8 pre-diagnosis visits (heart failure: 36), and 198 of 848 patients have fewer than 5. `--min-encounters 5` would drop them.
 4. **The presenting symptoms are missing.** As CHF_FINDINGS.md notes, CHF symptoms are scrubbed with the diagnosis. Chief complaints in the text come from earlier, unrelated visits.
