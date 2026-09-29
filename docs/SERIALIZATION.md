@@ -62,6 +62,10 @@ python3 serialization/test_serialization.py data/serialized/<run>-<condition>.js
     data/<run>__train-<sha6> data/<run>__labels-<sha6>.json
 ```
 
+> `extract_labels.py` names its labels file by condition only, so 1k and 10k
+> runs overwrite each other. `run_condition.sh` works around this by writing
+> `data/<run>__labels-<sha6>.json`.
+
 ## 2. What the output looks like
 
 Each run writes three files to `data/serialized/`:
@@ -326,15 +330,3 @@ who never get heart failure also have.
 **Asthma: not usable yet.** 43 of 46 patients had childhood asthma first:
 the condition itself, asthma care plans, inhalers and follow-up visits. A drop
 list can't fix this without deleting most of their history.
-
-## 7. Open questions for the team
-
-1. **Asthma:** treat childhood asthma as the same condition (cut earlier in `scrub.py`)?
-2. **Diabetes complications:** should the cutoff move to the first diabetes complication instead of dropping the rows?
-3. **Negatives:** every patient is a positive. If matched negatives are added, apply the same drop lists to them. Otherwise, for example, NYHA would appear only in negatives and become a shortcut.
-4. **Short histories:** 198 of 848 diabetes patients have fewer than 5 visits. Filter them with `--min-encounters 5`?
-5. **Tokenizer:** token counts assume 4 characters per token until a model is chosen.
-
-> `extract_labels.py` names its labels file by condition only, so 1k and 10k
-> runs overwrite each other. `run_condition.sh` works around this by writing
-> `data/<run>__labels-<sha6>.json`.
