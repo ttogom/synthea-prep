@@ -34,7 +34,9 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 DATE = re.compile(r"\b(19|20)\d{2}-\d{2}-\d{2}\b")
-YEAR = re.compile(r"\b(19|20)\d{2}\b")
+# A 4-digit number that looks like a year, unless a unit follows it
+# (e.g. income "1967 /a", "2000 MG").
+YEAR = re.compile(r"\b(19|20)\d{2}\b(?!\.\d|\s*(/|[A-Za-z%{\[]))")
 AGO = re.compile(r"(-?\d+) (day|month|year)s? ago")
 
 
@@ -109,7 +111,7 @@ def main():
             problems.append(f"{pid}: date '{DATE.search(r['text']).group()}'")
         for line in r["text"].splitlines():
             m = YEAR.search(line)
-            if m and not re.search(r"\d\s*(mg|mL|MG|ML|UNT|%)", line):
+            if m:
                 problems.append(f"{pid}: possible year '{m.group()}' in: {line.strip()[:80]}")
         if any(int(n) < 0 for n, _ in AGO.findall(r["text"])):
             problems.append(f"{pid}: negative time")

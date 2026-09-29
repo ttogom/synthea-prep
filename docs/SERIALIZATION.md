@@ -159,19 +159,13 @@ python3 serialization/test_serialization.py \
 | 6 | Deterministic | Different output on a re-run |
 | 7 | Compression never adds items | Compression that makes a record longer |
 
-All 7 tests pass on all six datasets (2026-09-29). Test 4 found a bug in the
+All 7 tests pass on all 14 datasets run (2026-09-29). Test 4 found a bug in the
 first version: readings of one test on the same day (e.g. during a hospital
 stay) were ordered by value, not by time, so an earlier reading could be
 shown as the latest. Readings are now ordered by full timestamp.
 
 Compression reduces total text by 52% (heart failure, 10k), 24% (type 2
 diabetes, 10k) and 15–56% on the pop1000 sets.
-
-The Drive copy of `pop10000-seed20260916__train-9e8474`
-(`pop10000-seed20260916__UTC.zip`) was compared file by file with the local
-one:
-- **Patient files:** 327 of 329 are byte-identical.
-- **`organizations.csv` and `providers.csv`:** 26 rows each differ, and only in the visit-count columns (`UTILIZATION`, `ENCOUNTERS`), by at most 6. These reference-table totals vary between multithreaded runs, and `serialize.py` doesn't read them.
 
 ## Data check (2026-09-29)
 
@@ -195,10 +189,31 @@ reference date 20260921). The generator and `scrub.py` are identical on
 | pop1000 type 2 diabetes | 74 | 304 / 2,424 / 5,474 | PASS, 2 to review |
 | pop10000 type 2 diabetes | 848 | 352 / 2,413 / 5,567 | PASS, 2 to review |
 | pop1000 essential hypertension | 250 | 264 / 2,003 / 3,826 | PASS |
-| pop1000 asthma | 46 | 284 / 2,361 / 3,870 | FAIL: 43 patients keep "Childhood asthma" (SCRUBBING.md: ≥43); no drop list yet |
+| pop1000 asthma | 46 | 284 / 2,361 / 3,870 | FAIL: 43 patients keep "Childhood asthma" (see below) |
 
 Before its drop list, pop10000 type 2 diabetes failed: 12 patients kept
 "Microalbuminuria/Proteinuria due to type 2 diabetes mellitus".
+
+To check that the pipeline works for conditions it wasn't built around,
+`run_condition.sh` was also run with no drop or review lists on the 8 most
+common disorders in pop1000: gingivitis, viral sinusitis, gingival disease,
+acute viral pharyngitis, primary dental caries, acute bronchitis, anemia and
+chronic sinusitis (233–884 patients each).
+- **Leak check:** all 8 pass, with 0 items to review.
+- **Output tests:** all 8 pass all 7 tests.
+
+**Asthma still fails.** 43 of 46 patients have childhood asthma before their
+first "Asthma" row:
+- "Childhood asthma" as a condition
+- asthma care plans and asthma follow-up visits
+- asthma emergency admissions
+- inhaler prescriptions whose reason is childhood asthma
+
+A drop list can't fix this. Dropping everything that names asthma would
+remove most of these patients' history, and the inhalers would still point
+to asthma. Treating childhood asthma as the same condition is a scrub-level
+decision (list both codes, which cuts at the childhood diagnosis) for the
+team. Until then, asthma should not be used.
 
 ## Decisions on flagged items
 
@@ -257,4 +272,4 @@ complication is a scrub-level decision for the team.
 - **No negatives.** Every patient is a positive, as in the scrub. Matched negatives need a cutoff rule first (SCRUBBING.md D9).
 - **Tokenizer.** Token counts are estimates until the model is chosen.
 - **Probe on text.** `check_leaks.py`'s classifier probe runs on the CSVs. The same probe on serialized text would also cover notes.
-- **Asthma and other conditions** need their own drop and review lists before use.
+- **Other conditions** should get a review list, and a drop list if the leak check flags names; asthma needs a scrub-level decision first.
