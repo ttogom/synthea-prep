@@ -1,0 +1,316 @@
+{
+  "source": {
+    "scrub_dir": "data/pop10000-seed20260916__scrub-heart_failure-9e8474",
+    "src_dir": "data/pop10000-seed20260916",
+    "labels": "data/labels-9e8474.json"
+  },
+  "cohort": {
+    "n_pos": 313,
+    "n_neg_matched": 931,
+    "age_min": 20,
+    "age_median": 58,
+    "age_max": 85,
+    "age_bins": {
+      "<50": {
+        "n": 68,
+        "pct": 21.7
+      },
+      "50-59": {
+        "n": 101,
+        "pct": 32.3
+      },
+      "60-69": {
+        "n": 56,
+        "pct": 17.9
+      },
+      "70-79": {
+        "n": 17,
+        "pct": 5.4
+      },
+      "80+": {
+        "n": 71,
+        "pct": 22.7
+      }
+    },
+    "sex_M": {
+      "n": 170,
+      "pct": 54.3
+    },
+    "sex_F": {
+      "n": 143,
+      "pct": 45.7
+    },
+    "n_zero_antecedent": 120,
+    "pct_zero_antecedent": 38.3
+  },
+  "probe": {
+    "acc": 70.7,
+    "sd": 2.2,
+    "baseline": 75.0,
+    "lift": -4.3,
+    "shifted_acc": 100.0,
+    "source": "docs/LEAK_REPORT_10k.md"
+  },
+  "antecedents": [
+    {
+      "name": "ischemic_heart",
+      "kind": "cond",
+      "pos_n": 101,
+      "pos_pct": 32.3,
+      "neg_n": 261,
+      "neg_pct": 28.0,
+      "diff_pp": 4.2,
+      "z": 1.43,
+      "ci_lo": -1.7,
+      "ci_hi": 10.2,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "mi",
+      "kind": "cond",
+      "pos_n": 29,
+      "pos_pct": 9.3,
+      "neg_n": 77,
+      "neg_pct": 8.3,
+      "diff_pp": 1.0,
+      "z": 0.55,
+      "ci_lo": -2.7,
+      "ci_hi": 4.7,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "afib",
+      "kind": "cond",
+      "pos_n": 8,
+      "pos_pct": 2.6,
+      "neg_n": 8,
+      "neg_pct": 0.9,
+      "diff_pp": 1.7,
+      "z": 2.3,
+      "ci_lo": -0.1,
+      "ci_hi": 3.5,
+      "bonferroni": false,
+      "nominal": true
+    },
+    {
+      "name": "hypertension",
+      "kind": "cond",
+      "pos_n": 115,
+      "pos_pct": 36.7,
+      "neg_n": 361,
+      "neg_pct": 38.8,
+      "diff_pp": -2.0,
+      "z": -0.64,
+      "ci_lo": -8.2,
+      "ci_hi": 4.2,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "hyperlipidemia",
+      "kind": "cond",
+      "pos_n": 61,
+      "pos_pct": 19.5,
+      "neg_n": 167,
+      "neg_pct": 17.9,
+      "diff_pp": 1.6,
+      "z": 0.61,
+      "ci_lo": -3.5,
+      "ci_hi": 6.6,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "ckd",
+      "kind": "cond",
+      "pos_n": 45,
+      "pos_pct": 14.4,
+      "neg_n": 152,
+      "neg_pct": 16.3,
+      "diff_pp": -1.9,
+      "z": -0.82,
+      "ci_lo": -6.5,
+      "ci_hi": 2.6,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "diuretic",
+      "kind": "drug",
+      "pos_n": 74,
+      "pos_pct": 23.6,
+      "neg_n": 134,
+      "neg_pct": 14.4,
+      "diff_pp": 9.2,
+      "z": 3.79,
+      "ci_lo": 4.0,
+      "ci_hi": 14.5,
+      "bonferroni": true,
+      "nominal": true
+    },
+    {
+      "name": "ace_inhibitor",
+      "kind": "drug",
+      "pos_n": 83,
+      "pos_pct": 26.5,
+      "neg_n": 184,
+      "neg_pct": 19.8,
+      "diff_pp": 6.8,
+      "z": 2.52,
+      "ci_lo": 1.2,
+      "ci_hi": 12.3,
+      "bonferroni": false,
+      "nominal": true
+    },
+    {
+      "name": "beta_blocker",
+      "kind": "drug",
+      "pos_n": 105,
+      "pos_pct": 33.5,
+      "neg_n": 274,
+      "neg_pct": 29.4,
+      "diff_pp": 4.1,
+      "z": 1.37,
+      "ci_lo": -1.9,
+      "ci_hi": 10.1,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "arb",
+      "kind": "drug",
+      "pos_n": 14,
+      "pos_pct": 4.5,
+      "neg_n": 20,
+      "neg_pct": 2.1,
+      "diff_pp": 2.3,
+      "z": 2.18,
+      "ci_lo": -0.1,
+      "ci_hi": 4.8,
+      "bonferroni": false,
+      "nominal": true
+    },
+    {
+      "name": "nitrate",
+      "kind": "drug",
+      "pos_n": 103,
+      "pos_pct": 32.9,
+      "neg_n": 267,
+      "neg_pct": 28.7,
+      "diff_pp": 4.2,
+      "z": 1.42,
+      "ci_lo": -1.7,
+      "ci_hi": 10.2,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "antiplatelet",
+      "kind": "drug",
+      "pos_n": 84,
+      "pos_pct": 26.8,
+      "neg_n": 228,
+      "neg_pct": 24.5,
+      "diff_pp": 2.3,
+      "z": 0.83,
+      "ci_lo": -3.3,
+      "ci_hi": 8.0,
+      "bonferroni": false,
+      "nominal": false
+    },
+    {
+      "name": "statin",
+      "kind": "drug",
+      "pos_n": 115,
+      "pos_pct": 36.7,
+      "neg_n": 335,
+      "neg_pct": 36.0,
+      "diff_pp": 0.8,
+      "z": 0.24,
+      "ci_lo": -5.4,
+      "ci_hi": 6.9,
+      "bonferroni": false,
+      "nominal": false
+    }
+  ],
+  "drug_reason_check": {
+    "diuretic_total_rows": 1220,
+    "diuretic_chf_reason_rows": 0,
+    "ace_total_rows": 1509,
+    "ace_chf_reason_rows": 0
+  },
+  "hypertensives": {
+    "pos_n": 115,
+    "neg_n": 361,
+    "hctz": {
+      "pos_n": 71,
+      "pos_pct": 61.7,
+      "neg_n": 128,
+      "neg_pct": 35.5,
+      "diff_pp": 26.3,
+      "z": 4.98,
+      "ci_lo": 16.1,
+      "ci_hi": 36.4
+    },
+    "lisinopril": {
+      "pos_n": 76,
+      "pos_pct": 66.1,
+      "neg_n": 162,
+      "neg_pct": 44.9,
+      "diff_pp": 21.2,
+      "z": 3.96,
+      "ci_lo": 11.2,
+      "ci_hi": 31.3
+    }
+  },
+  "hctz_timing": {
+    "pos_n_on_hctz": 71,
+    "neg_n_on_hctz": 128,
+    "pos_bins": {
+      ">10": {
+        "n": 1,
+        "pct": 1.4
+      },
+      "5-10": {
+        "n": 51,
+        "pct": 71.8
+      },
+      "2-5": {
+        "n": 15,
+        "pct": 21.1
+      },
+      "1-2": {
+        "n": 3,
+        "pct": 4.2
+      },
+      "<1": {
+        "n": 1,
+        "pct": 1.4
+      }
+    },
+    "neg_bins": {
+      ">10": {
+        "n": 44,
+        "pct": 34.4
+      },
+      "5-10": {
+        "n": 51,
+        "pct": 39.8
+      },
+      "2-5": {
+        "n": 20,
+        "pct": 15.6
+      },
+      "1-2": {
+        "n": 4,
+        "pct": 3.1
+      },
+      "<1": {
+        "n": 9,
+        "pct": 7.0
+      }
+    }
+  }
+}

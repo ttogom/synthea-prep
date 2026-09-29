@@ -1,0 +1,2 @@
+# Chronic congestive heart failure
+88805009   # Chronic congestive heart failure (disorder)
