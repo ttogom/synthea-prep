@@ -8,8 +8,9 @@
 # Example:
 #   serialization/run_condition.sh data/pop10000-seed20260916 configs/heart_failure.txt
 #
-# If configs/leak_terms/<codes-file-stem>.txt exists, it is passed to the leak
-# check as --terms. Outputs go to data/serialized/<run>-<stem>.jsonl (+ .stats.json,
+# If configs/drop/<codes-file-stem>.txt exists, it is passed to serialize.py as
+# --drop. If configs/leak_terms/<codes-file-stem>.txt exists, it is passed to the
+# leak check as --terms. Outputs go to data/serialized/<run>-<stem>.jsonl (+ .stats.json,
 # .leaks.md). Existing scrub/label/training outputs are replaced.
 set -euo pipefail
 
@@ -46,7 +47,10 @@ echo "== 2/4 labels"
 python3 scripts/extract_labels.py "$SCRUB" --labels "$LABELS" --train-dir "$TRAIN" --force | grep -E "hits|ERROR" || true
 
 echo "== 3/4 serialize"
-python3 serialization/serialize.py "$TRAIN" "$LABELS" --out "$OUT" "$@"
+DROP="configs/drop/${STEM}.txt"
+DROP_ARG=()
+[[ -f "$DROP" ]] && DROP_ARG=(--drop "$DROP")
+python3 serialization/serialize.py "$TRAIN" "$LABELS" --out "$OUT" "${DROP_ARG[@]+"${DROP_ARG[@]}"}" "$@"
 
 echo "== 4/4 text leak check"
 TERMS_ARG=()

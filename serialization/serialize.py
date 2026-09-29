@@ -105,14 +105,32 @@ def times(n):
     return "once" if n == 1 else f"{n} times"
 
 
-def read_rows(path, patients):
-    """Rows of a CSV grouped by PATIENT, restricted to the given patients."""
+def read_terms(path):
+    """Lower-case terms, one per line; '#' starts a comment."""
+    if not path:
+        return []
+    terms = []
+    for line in path.read_text().splitlines():
+        term = line.split("#", 1)[0].strip().lower()
+        if term:
+            terms.append(term)
+    return terms
+
+
+def matches(row, drop):
+    text = f"{row.get('DESCRIPTION', '')} {row.get('REASONDESCRIPTION', '')}".lower()
+    return any(term in text for term in drop)
+
+
+def read_rows(path, patients, drop):
+    """Rows of a CSV grouped by PATIENT, restricted to the given patients,
+    without rows whose description or reason contains a --drop term."""
     grouped = defaultdict(list)
     if not path.exists():
         return grouped
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            if row.get("PATIENT") in patients:
+            if row.get("PATIENT") in patients and not matches(row, drop):
                 grouped[row["PATIENT"]].append(row)
     return grouped
 
@@ -334,6 +352,9 @@ def main():
                     help="skip patients with fewer pre-cutoff visits (default 0: keep all)")
     ap.add_argument("--no-compress", action="store_true",
                     help="full history, no caps (for comparison)")
+    ap.add_argument("--drop", type=Path,
+                    help="file of terms; rows whose description or reason contains one are left out "
+                         "(condition-specific, e.g. configs/drop/heart_failure.txt)")
     args = ap.parse_args()
     if args.no_compress:
         args.window_years = args.max_values = args.max_encounters = 0
@@ -345,13 +366,16 @@ def main():
         sys.exit("ERROR: --out must be outside the training directory")
     labels = json.loads(args.labels.read_text())
     patients = set(labels)
+    drop = read_terms(args.drop)
 
-    data = {name: read_rows(csv_dir / f"{name}.csv", patients) for name in (
+    data = {name: read_rows(csv_dir / f"{name}.csv", patients, drop) for name in (
         "conditions", "medications", "observations", "allergies", "careplans",
         "devices", "procedures", "immunizations", "encounters")}
     data["patients"] = {r["Id"]: r for r in csv.DictReader(open(csv_dir / "patients.csv", encoding="utf-8"))
                         if r["Id"] in patients}
-    data["complaints"] = read_chief_complaints(args.train_dir / "notes", patients)
+    data["complaints"] = {pid: [(d, c) for d, c in entries if not any(t in c.lower() for t in drop)]
+                          for pid, entries in read_chief_complaints(args.train_dir / "notes", patients).items()}
+    data["complaints"] = defaultdict(list, data["complaints"])
 
     missing = patients - set(data["patients"])
     if missing:
@@ -386,7 +410,8 @@ def main():
         "patients_skipped_min_encounters": skipped,
         "settings": {k: getattr(args, k) for k in (
             "window_years", "window_from", "max_values", "max_encounters",
-            "min_encounters", "no_compress")},
+            "min_encounters", "no_compress")} | {"drop": str(args.drop) if args.drop else None,
+                                                 "drop_terms": drop},
         "est_tokens": {
             "min": min(lengths),
             "median": round(statistics.median(lengths)),

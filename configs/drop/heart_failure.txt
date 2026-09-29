@@ -1,0 +1,8 @@
+# Rows left out of the serialized text when the target is heart failure.
+# Case-insensitive substring match on DESCRIPTION and REASONDESCRIPTION.
+# These instruments exist to grade heart failure; their names alone point to
+# the target. Only 2 of 313 patients (10k) have them before diagnosis.
+nyha                         # "Functional capacity NYHA"
+new york heart association   # "Assessment using New York Heart Association Classification"
+kccq                         # "Overall summary score [KCCQ-12]"
+kansas city
