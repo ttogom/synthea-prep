@@ -1,0 +1,15 @@
+# Extra terms flagged for review by serialization/check_text_leaks.py when the
+# target is heart failure. Matched as whole words, case-insensitive.
+cardiomyopathy
+kccq                 # Kansas City Cardiomyopathy Questionnaire (heart-failure specific)
+natriuretic          # BNP / NT-proBNP
+ntprobnp
+ejection fraction
+lvef
+nyha                 # NYHA heart-failure class
+orthopnea            # CHF presenting symptoms, scrubbed with the diagnosis
+dyspnea
+edema
+furosemide           # loop diuretics / HF-specific drugs
+sacubitril
+spironolactone

@@ -1,0 +1,6 @@
+# Extra terms flagged for review by serialization/check_text_leaks.py when the
+# target is type 2 diabetes. Matched as whole words, case-insensitive.
+diabetic
+diabetes
+metformin
+insulin
