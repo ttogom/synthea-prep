@@ -26,6 +26,28 @@ Output goes to `data/serialized/<run>-<condition>.jsonl`, with a
 `configs/asthma.txt` containing `195967001   # Asthma (disorder)`. Then run the
 same command. The code is not specific to any condition.
 
+**Which conditions:** the team has not fixed a list of target conditions yet.
+Codes come from the `CODE` column of Synthea's `csv/conditions.csv`, so any
+condition there can be run.
+
+The conditions tested here were chosen as follows:
+
+| Condition | Why |
+|---|---|
+| Heart failure | kenyaninamerica's case study (CHF_FINDINGS.md) |
+| Type 2 diabetes | SCRUBBING.md's main example |
+| Hypertension | A common condition, to test a new one |
+| Asthma | SCRUBBING.md lists a known leak for it (childhood asthma), to test that the leak check catches it |
+| 8 common disorders | See below |
+
+The 8 common disorders test that the pipeline works for conditions it wasn't
+built around, with no drop or review lists. They are the 8 `(disorder)`
+conditions with the most patients in pop1000, excluding the four above:
+gingivitis, viral sinusitis, gingival disease, acute viral pharyngitis,
+primary dental caries, acute bronchitis, anemia and chronic sinusitis
+(233–884 patients each). Their codes files were temporary and are not in
+`configs/`.
+
 **Optional per-condition files.** Most conditions don't need them.
 
 | File | What it does | When to add one |
