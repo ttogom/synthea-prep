@@ -64,7 +64,7 @@ Dead patients are included in all output files; filter on `DEATHDATE IS NOT NULL
 
 ## Reproducibility
 
-Runs are byte-identical after canonicalization given the same commit, seeds, reference date, and Java major version, on any machine (the JVM timezone is pinned to UTC). `check_reproducibility.sh` verifies this by generating 200 patients twice and diffing every CSV and note file; because both runs use the same machine, it can't detect timezone dependence on its own. Runs generated before the timezone was pinned have no `timezone` in `manifest.json` and carry the generating machine's local dates.
+Runs are byte-identical after canonicalization given the same commit, seeds, reference date, and Java major version, on any machine (the JVM timezone is pinned to UTC). `check_reproducibility.sh` verifies this by generating 200 patients twice and diffing every CSV and note file; because both runs use the same machine, it can't detect timezone dependence on its own. Runs generated before the timezone was pinned have no `timezone` in `manifest.json` and carry the generating machine's local dates. scrub.py rejects any run that does not pass a UTC date-match check (≥99.9% of note dates must match UTC encounter dates), so runs without the pin must be regenerated before proceeding.
 
 ## Scripts
 
