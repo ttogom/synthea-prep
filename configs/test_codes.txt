@@ -1,0 +1,8 @@
+# Test codes for scripts/scrub.py: one per edge case found in the v1.2 -> v1.3
+# review. All codes in one file cut each patient at the earliest of them, so
+# this is for exercising the scrubber, not a meaningful clinical cohort.
+44054006     # Diabetes mellitus type 2 (disorder): related diagnoses (e.g. diabetic kidney disease) predate it
+1149222004   # Overdose (disorder): earlier episodes only in encounters.REASONCODE
+840544004    # Suspected COVID-19 (situation): START up to ~2 years after its linked encounter
+307426000    # Acute infective cystitis (disorder): START later than the diagnosing visit
+49727002     # Cough (finding): also a symptoms.csv PATHOLOGY and an allergy reaction code
