@@ -1,0 +1,6 @@
+# Rows left out of the serialized text when the target is type 2 diabetes.
+# Case-insensitive substring match on DESCRIPTION and REASONDESCRIPTION.
+# Complications coded before the type 2 diabetes row name the target, or imply
+# established diabetes (SCRUBBING.md, Known limitations).
+due to type 2 diabetes                       # Microalbuminuria / Proteinuria / Macular edema ... due to type 2 diabetes mellitus
+disorder of kidney due to diabetes mellitus
