@@ -1,0 +1,35 @@
+#!/bin/sh
+
+PROTECTED_PATH="med_copilot/upstream/"
+
+if git diff --cached --name-only | grep -q "^${PROTECTED_PATH}"; then
+    echo ""
+    echo "============================================================"
+    echo "  WARNING: PROTECTED UPSTREAM CODE"
+    echo "============================================================"
+    echo ""
+    echo "This commit modifies files under:"
+    echo ""
+    echo "    ${PROTECTED_PATH}"
+    echo ""
+    echo "This directory contains MED-COPILOT upstream source code"
+    echo "and should normally NOT be modified."
+    echo ""
+    echo "Files staged for modification:"
+    git diff --cached --name-only | grep "^${PROTECTED_PATH}"
+    echo ""
+    echo "Commit BLOCKED."
+    echo ""
+    echo "If this modification is intentional, commit with:"
+    echo ""
+    echo "    ALLOW_UPSTREAM_CHANGE=1 git commit ..."
+    echo ""
+    echo "============================================================"
+    echo ""
+
+    if [ "$ALLOW_UPSTREAM_CHANGE" != "1" ]; then
+        exit 1
+    fi
+fi
+
+exit 0
