@@ -440,11 +440,19 @@ def _match_negatives(labels: dict, src_patients: list, ref_date: date,
 
 
 def _run_probe(pos_texts: list, neg_texts: list, label: str) -> dict:
-    """Fit TF-IDF + LogReg and return cross-validated accuracy + top features."""
+    """Fit TF-IDF + LogReg and return cross-validated accuracy, AUC, balanced
+    accuracy, and top features.
+
+    Accuracy alone is uninterpretable when the positive class is a minority:
+    a model that predicts "negative" for every sample scores at the majority-
+    class rate. AUC (insensitive to class balance) and balanced accuracy
+    (mean recall per class) give a complete picture.
+    """
     try:
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.linear_model import LogisticRegression
         from sklearn.model_selection import StratifiedKFold, cross_val_score
+        from sklearn.metrics import balanced_accuracy_score, roc_auc_score
         import numpy as np
     except ImportError:
         return {"error": "scikit-learn not installed"}
@@ -461,7 +469,11 @@ def _run_probe(pos_texts: list, neg_texts: list, label: str) -> dict:
     clf = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced",
                              random_state=42)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scores = cross_val_score(clf, X, y, cv=cv, scoring="accuracy")
+
+    acc_scores = cross_val_score(clf, X, y, cv=cv, scoring="accuracy")
+    bal_scores = cross_val_score(clf, X, y, cv=cv, scoring="balanced_accuracy")
+    auc_scores = cross_val_score(clf, X, y, cv=cv, scoring="roc_auc")
+
     baseline = max(sum(y) / len(y), 1 - sum(y) / len(y))
 
     clf.fit(X, y)
@@ -473,9 +485,13 @@ def _run_probe(pos_texts: list, neg_texts: list, label: str) -> dict:
     return {
         "label": label,
         "n_pos": len(pos_texts), "n_neg": len(neg_texts),
-        "accuracy_mean": float(np.mean(scores)),
-        "accuracy_std": float(np.std(scores)),
-        "cv_scores": scores.tolist(),
+        "accuracy_mean": float(np.mean(acc_scores)),
+        "accuracy_std": float(np.std(acc_scores)),
+        "balanced_accuracy_mean": float(np.mean(bal_scores)),
+        "balanced_accuracy_std": float(np.std(bal_scores)),
+        "auc_mean": float(np.mean(auc_scores)),
+        "auc_std": float(np.std(auc_scores)),
+        "cv_scores": acc_scores.tolist(),
         "baseline": float(baseline),
         "top_pos": top_p,
         "top_neg": top_n,
@@ -631,8 +647,12 @@ def write_report(path: Path, scrub_dir: Path, labels: dict,
         acc = probe["accuracy_mean"]
         base = probe["baseline"]
         lift = acc - base
+        bal = probe.get("balanced_accuracy_mean")
+        auc = probe.get("auc_mean")
+        bal_str = f", bal-acc {bal:.1%}" if bal is not None else ""
+        auc_str = f", AUC {auc:.3f}" if auc is not None else ""
         L.append(f"| 3. Classifier probe | acc {acc:.1%} ± {probe['accuracy_std']:.1%}, "
-                 f"baseline {base:.1%}, lift {lift:+.1%} |")
+                 f"baseline {base:.1%}, lift {lift:+.1%}{bal_str}{auc_str} |")
     else:
         L.append(f"| 3. Classifier probe | ERROR: {probe['error']} |")
 
@@ -703,9 +723,18 @@ def write_report(path: Path, scrub_dir: Path, labels: dict,
     if "error" in probe:
         L.append(f"ERROR: {probe['error']}")
     else:
+        bal = probe.get("balanced_accuracy_mean")
+        auc = probe.get("auc_mean")
         L.append(f"**Accuracy: {probe['accuracy_mean']:.1%} ± {probe['accuracy_std']:.1%}** "
                  f"(majority-class baseline: {probe['baseline']:.1%}, "
                  f"lift: {probe['accuracy_mean'] - probe['baseline']:+.1%})")
+        if bal is not None:
+            L.append(f"**Balanced accuracy: {bal:.1%} ± {probe['balanced_accuracy_std']:.1%}** "
+                     f"(chance = 50%)")
+        if auc is not None:
+            L.append(f"**AUC: {auc:.3f} ± {probe['auc_std']:.3f}** "
+                     f"(chance = 0.500; note: above 0.5 means better than random even when "
+                     f"accuracy is below the majority-class baseline)")
         L.append(f"\nn = {probe['n_pos']} positive, {probe['n_neg']} negative. "
                  f"CV scores: {', '.join(f'{s:.2f}' for s in probe['cv_scores'])}\n")
         L.extend(_feature_table(probe["top_pos"], f"{target_label}-positive (positive coefficient)"))

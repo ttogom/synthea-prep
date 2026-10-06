@@ -1,0 +1,2 @@
+87433001   # Pulmonary emphysema (disorder)
+185086009  # Chronic obstructive bronchitis (disorder)
