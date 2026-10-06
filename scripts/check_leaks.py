@@ -379,7 +379,8 @@ def _note_text(pid: str, notes_dir: Path, cutoff: date) -> str:
     return ""
 
 
-def _match_negatives(labels: dict, src_patients: list, max_per_pos: int = 3) -> dict:
+def _match_negatives(labels: dict, src_patients: list, ref_date: date,
+                     max_per_pos: int = 3) -> dict:
     """Return {neg_pid: pseudo_cutoff_date} for age-matched negatives.
 
     For each positive patient (age A at their cutoff), find source patients
@@ -428,7 +429,7 @@ def _match_negatives(labels: dict, src_patients: list, max_per_pos: int = 3) -> 
                 pseudo = date(neg_birth.year + pos_age, neg_birth.month,
                               min(neg_birth.day, 28))
             # Clamp to reference date
-            pseudo = min(pseudo, date(2026, 9, 21))
+            pseudo = min(pseudo, ref_date)
             neg_cutoffs[neg_pid] = pseudo
             used.add(neg_pid)
             count += 1
@@ -483,12 +484,12 @@ def _run_probe(pos_texts: list, neg_texts: list, label: str) -> dict:
 
 # ── Check 3: Classifier probe ─────────────────────────────────────────────────
 
-def check_probe(scrub_dir: Path, src_dir: Path, labels: dict) -> dict:
+def check_probe(scrub_dir: Path, src_dir: Path, labels: dict, ref_date: date) -> dict:
     """Bag-of-words classifier: scrubbed positives vs age-matched source negatives."""
     idx = _src_index(src_dir, ["conditions", "medications", "procedures",
                                 "encounters", "careplans", "observations"])
     src_patients = _load(src_dir / "csv" / "patients.csv")
-    neg_cutoffs = _match_negatives(labels, src_patients)
+    neg_cutoffs = _match_negatives(labels, src_patients, ref_date)
     print(f"  {len(labels)} positives, {len(neg_cutoffs)} negatives", file=sys.stderr)
 
     # Positives: text from the scrubbed output (already cut).
@@ -506,7 +507,8 @@ def check_probe(scrub_dir: Path, src_dir: Path, labels: dict) -> dict:
 
 # ── Check 4: Probe validation ─────────────────────────────────────────────────
 
-def check_validation(src_dir: Path, labels: dict, probe_result: dict) -> dict:
+def check_validation(src_dir: Path, labels: dict, probe_result: dict,
+                     ref_date: date) -> dict:
     """Shift each positive's cutoff one encounter forward; probe should score higher."""
     if "error" in probe_result:
         return {"error": f"skipped — probe failed: {probe_result['error']}"}
@@ -516,7 +518,7 @@ def check_validation(src_dir: Path, labels: dict, probe_result: dict) -> dict:
     src_patients = _load(src_dir / "csv" / "patients.csv")
     enc_by_pid = _by_pid(src_dir / "csv" / "encounters.csv")
     notes_dir = src_dir / "notes"
-    neg_cutoffs = _match_negatives(labels, src_patients)
+    neg_cutoffs = _match_negatives(labels, src_patients, ref_date)
 
     # Shifted cutoffs: include the first post-cutoff encounter.
     shifted = {}
@@ -684,16 +686,20 @@ def write_report(path: Path, scrub_dir: Path, labels: dict,
             L.append(f"\n*(and {len(text_hits) - shown} more — see full output)*")
 
     # ── Check 3 ──────────────────────────────────────────────────────────────
+    target_label = " / ".join(sorted({
+        re.sub(r"\s*\([^)]+\)\s*$", "", info["description"]).strip()
+        for info in labels.values()
+    })) or "target condition"
     L.append("\n## Check 3: Classifier probe\n")
     L.append("TF-IDF (1–2 grams) + logistic regression, 5-fold stratified CV. "
-             "Positives: scrubbed CHF patients. Negatives: source-run patients without "
-             "CHF, age-matched (birth year ±10) and truncated at the same age to prevent "
+             f"Positives: scrubbed {target_label} patients. Negatives: source-run patients without "
+             f"{target_label}, age-matched (birth year ±10) and truncated at the same age to prevent "
              "the D9 record-length shortcut.\n")
-    L.append("> **Interpretation note:** CHF is a progressive condition. A high accuracy "
-             "is expected from legitimate clinical features (prior cardiac disease, hypertension, "
-             "kidney disease). What matters is **what the classifier keys on**. Features "
-             "labelled `POSSIBLE_LEAK` (see table) name the target directly or are specific "
-             "to CHF treatment; they warrant manual review. The final call is yours.\n")
+    L.append("> **Interpretation note:** The target condition may have legitimate clinical "
+             "antecedents that distinguish it from controls. What matters is **what the classifier "
+             "keys on**. Features labelled `POSSIBLE_LEAK` (see table) name the target directly "
+             f"or are specific to {target_label} treatment; they warrant manual review. "
+             "The final call is yours.\n")
     if "error" in probe:
         L.append(f"ERROR: {probe['error']}")
     else:
@@ -702,8 +708,8 @@ def write_report(path: Path, scrub_dir: Path, labels: dict,
                  f"lift: {probe['accuracy_mean'] - probe['baseline']:+.1%})")
         L.append(f"\nn = {probe['n_pos']} positive, {probe['n_neg']} negative. "
                  f"CV scores: {', '.join(f'{s:.2f}' for s in probe['cv_scores'])}\n")
-        L.extend(_feature_table(probe["top_pos"], "CHF-positive (positive coefficient)"))
-        L.extend(_feature_table(probe["top_neg"], "CHF-negative (negative coefficient)"))
+        L.extend(_feature_table(probe["top_pos"], f"{target_label}-positive (positive coefficient)"))
+        L.extend(_feature_table(probe["top_neg"], f"{target_label}-negative (negative coefficient)"))
 
     # ── Check 4 ──────────────────────────────────────────────────────────────
     L.append("\n## Check 4: Probe validation\n")
@@ -804,9 +810,20 @@ def main() -> None:
     validation = {"error": "skipped (--skip-probe)"}
 
     if not args.skip_probe:
+        manifest_path = src_dir / "manifest.json"
+        if not manifest_path.is_file():
+            sys.exit(f"ERROR: {manifest_path} not found — source run has no manifest.json; "
+                     f"regenerate with scripts/generate_synthea.sh, or use --skip-probe.")
+        src_manifest = json.loads(manifest_path.read_text())
+        ref_date_str = src_manifest.get("reference_date", "")
+        if not ref_date_str:
+            sys.exit(f"ERROR: manifest.json in {src_dir.name} has no reference_date; "
+                     f"regenerate with scripts/generate_synthea.sh, or use --skip-probe.")
+        ref_date = date(int(ref_date_str[:4]), int(ref_date_str[4:6]), int(ref_date_str[6:8]))
+
         # Check 3
         print("Check 3: Classifier probe ...")
-        probe = check_probe(scrub_dir, src_dir, labels)
+        probe = check_probe(scrub_dir, src_dir, labels, ref_date)
         if "error" not in probe:
             print(f"  Accuracy {probe['accuracy_mean']:.1%} ± {probe['accuracy_std']:.1%} "
                   f"(baseline {probe['baseline']:.1%})")
@@ -815,7 +832,7 @@ def main() -> None:
 
         # Check 4
         print("Check 4: Probe validation ...")
-        validation = check_validation(src_dir, labels, probe)
+        validation = check_validation(src_dir, labels, probe, ref_date)
         if "error" not in validation:
             valid = validation.get("probe_valid")
             print(f"  Shifted {validation['accuracy_mean']:.1%}, "
