@@ -30,6 +30,22 @@ from pathlib import Path
 
 MAX_AGE_WINDOW = 7   # AGE_BEGIN may lag up to this many years below diagnosis age
 
+# Whitelisted vital sign LOINC codes.
+# Only these six standard physiological measurements are included.
+# Excluded from consideration even if recorded as vital-signs in Synthea:
+#   - Body Weight (29463-7), Body Height (8302-2), BMI (39156-5) — not on six-item list
+#   - Pain severity (72514-3) — numeric scale, not a physiological measurement
+#   - FEV1/FVC (19926-5) — pulmonary function ratio; < 0.70 is the diagnostic criterion
+#     for COPD, so including it would directly name the answer
+VITAL_SIGN_WHITELIST = {
+    "8310-5": "Body temperature",
+    "8480-6": "Systolic Blood Pressure",
+    "8462-4": "Diastolic Blood Pressure",
+    "8867-4": "Heart rate",
+    "9279-1": "Respiratory rate",
+    "2708-6": "Oxygen saturation",
+}
+
 
 # ── Low-level utilities ───────────────────────────────────────────────────────
 
@@ -149,6 +165,53 @@ def pick_episode(rows_for_patient: list, diagnosis_age: int) -> dict | None:
                 "selection_note": f"fallback: best below {MAX_AGE_WINDOW}-year window"}
 
     return None
+
+
+# ── Diagnosing-encounter vitals ───────────────────────────────────────────────
+
+def load_diagnosing_vitals(labels: dict, src_dir: Path, codes: list) -> dict:
+    """
+    For each positive in labels, finds its diagnosing encounter (the first row in
+    conditions.csv where PATIENT matches and CODE is in codes), then returns whitelisted
+    vital sign readings from that encounter's observations.
+
+    Returns {pid: [{"name": ..., "value": ..., "unit": ...}]}.
+    Patients whose diagnosing encounter has no whitelisted vitals are included with [].
+    """
+    code_set = set(codes)
+    pos_pids = set(labels)
+
+    # Map pid → diagnosing encounter id (first hit only)
+    diag_enc: dict = {}
+    for row in _iter_csv(src_dir / "csv" / "conditions.csv"):
+        pid = row.get("PATIENT", "")
+        if pid not in pos_pids or pid in diag_enc:
+            continue
+        if row.get("CODE", "") in code_set:
+            enc = row.get("ENCOUNTER", "")
+            if enc:
+                diag_enc[pid] = enc
+
+    enc_set = set(diag_enc.values())
+
+    # Collect whitelisted vitals at those encounters
+    enc_vitals: dict = collections.defaultdict(list)
+    for row in _iter_csv(src_dir / "csv" / "observations.csv"):
+        enc = row.get("ENCOUNTER", "")
+        if enc not in enc_set:
+            continue
+        loinc = row.get("CODE", "")
+        if loinc not in VITAL_SIGN_WHITELIST:
+            continue
+        try:
+            value = float(row.get("VALUE", ""))
+        except (ValueError, TypeError):
+            continue
+        unit = row.get("UNITS", "").strip()
+        name = VITAL_SIGN_WHITELIST[loinc]
+        enc_vitals[enc].append({"name": name, "value": value, "unit": unit})
+
+    return {pid: enc_vitals.get(enc, []) for pid, enc in diag_enc.items()}
 
 
 # ── Main presenting extraction ────────────────────────────────────────────────
@@ -447,8 +510,8 @@ def write_report(out_path: Path, stem: str, target_descs: list, n_pos: int,
              f"({n_with_ep/n_pos*100:.1f}%)")
     L.append("")
 
-    # Episode distance distribution
-    dists = [ep["distance"] for ep in presenting.values()]
+    # Episode distance distribution (skip vitals-only entries which have distance=None)
+    dists = [ep["distance"] for ep in presenting.values() if ep.get("distance") is not None]
     if dists:
         from collections import Counter
         dc = Counter(dists)
@@ -514,15 +577,22 @@ def write_report(out_path: Path, stem: str, target_descs: list, n_pos: int,
     if presenting:
         ex_pid = next(iter(presenting))
         ep = presenting[ex_pid]
+        dist_str = f"{ep['distance']}yr" if ep.get("distance") is not None else "N/A"
         L.append(f"**Patient:** `{ex_pid}`  "
                  f"**Diagnosis age:** {ep['diagnosis_age']}  "
-                 f"**AGE_BEGIN:** {ep['age_begin']}  "
-                 f"**Distance:** {ep['distance']}yr")
+                 f"**AGE_BEGIN:** {ep.get('age_begin', 'N/A')}  "
+                 f"**Distance:** {dist_str}")
         L.append("")
         L.append("```")
         L.append("PRESENTING COMPLAINT")
-        for s in ep["symptoms"]:
+        for s in ep.get("symptoms", []):
             L.append(f"- {s['name']} (severity: {s['severity']})")
+        vitals = ep.get("vitals", [])
+        if vitals:
+            vital_str = ", ".join(
+                f"{v['name'].lower()} {v['value']} {v['unit']}" for v in vitals
+            )
+            L.append(f"Vital signs at this visit: {vital_str}")
         L.append("```")
     L.append("")
 
@@ -572,10 +642,40 @@ def main():
     # All target descriptions (match against PATHOLOGY)
     target_descs = target_descriptions(src_dir, codes)
 
-    # Extract presenting episodes
+    # Extract presenting symptom episodes
     presenting = extract_presenting(labels, patients, src_dir, target_descs)
+
+    # Load diagnosing-encounter vitals for all positives
+    print(" loading vitals ...", end="", flush=True)
+    diagnosing_vitals = load_diagnosing_vitals(labels, src_dir, codes)
+
+    # Merge vitals into presenting; also create entries for vitals-only patients
+    for pid, label_info in labels.items():
+        p = patients.get(pid)
+        if not p:
+            continue
+        cutoff = _d(label_info["cutoff"])
+        if not cutoff:
+            continue
+        vitals = diagnosing_vitals.get(pid, [])
+        if pid in presenting:
+            presenting[pid]["vitals"] = vitals
+        elif vitals:
+            diag_age = _age(p["birth"], cutoff)
+            presenting[pid] = {
+                "diagnosis_age": diag_age,
+                "age_begin": None,
+                "symptoms": [],
+                "vitals": vitals,
+                "distance": None,
+                "selection_note": "vitals only (no symptom episode)",
+            }
+
+    n_with_symptoms = sum(1 for ep in presenting.values() if ep.get("symptoms"))
+    n_with_vitals = sum(1 for ep in presenting.values() if ep.get("vitals"))
     n_with = len(presenting)
-    print(f" → {n_with} with episode ({n_with/n_pos*100:.1f}%)", flush=True)
+    print(f" → {n_with} with evidence ({n_with/n_pos*100:.1f}%): "
+          f"{n_with_symptoms} symptoms, {n_with_vitals} vitals", flush=True)
 
     # Probes
     src_manifest = manifest.get("source_manifest", {})
@@ -609,7 +709,10 @@ def main():
         "descriptions": target_descs,
         "n_positives": n_pos,
         "n_with_episode": n_with,
+        "n_with_symptoms": n_with_symptoms,
+        "n_with_vitals": n_with_vitals,
         "pct_with_episode": round(n_with / n_pos * 100, 1) if n_pos else 0.0,
+        "vital_whitelist": VITAL_SIGN_WHITELIST,
         "leak_review": leak,
         "history_probe": history_probe,
         "symptoms_probe": symptoms_probe,

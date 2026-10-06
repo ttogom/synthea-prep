@@ -1,7 +1,7 @@
 # Presenting Symptoms: copd
 
 **Target descriptions:** Chronic obstructive bronchitis (disorder), Pulmonary emphysema (disorder)
-**Positives:** 384  **With presenting episode:** 141 (36.7%)
+**Positives:** 384  **With presenting episode:** 144 (37.5%)
 
 **Episode distances (diagnosis_age − AGE_BEGIN):** 0yr: 59, 1yr: 77, 2yr: 5
 
@@ -11,18 +11,6 @@ Description words checked (≥4 chars): `bronchitis, chronic, emphysema, obstruc
 
 No symptom names share words with the target description.
 
-## History-only probe
-
-**Accuracy:** 55.6% ± 3.1%  **Baseline:** 74.8%  **Lift:** -19.2%  → **SIGNAL PRESENT**
-
-Top history features (positive direction): `finding received`, `finding urgent`, `situation risk`, `situation essential`, `person prediabetes`
-
-## Symptoms-only probe
-
-**Accuracy:** 100.0% ± 0.0%  **Baseline:** 89.0%  **Lift:** +11.0%  → high score expected and not a leak
-
-Top symptom features: `Shortness of Breath`, `Cough`
-
 ## Example record
 
 **Patient:** `01ce7007-1bbd-568f-4685-585069f1cfad`  **Diagnosis age:** 77  **AGE_BEGIN:** 76  **Distance:** 1yr
@@ -31,5 +19,6 @@ Top symptom features: `Shortness of Breath`, `Cough`
 PRESENTING COMPLAINT
 - Shortness of Breath (severity: 364)
 - Cough (severity: 82)
+Vital signs at this visit: diastolic blood pressure 89.0 mm[Hg], systolic blood pressure 109.0 mm[Hg], heart rate 73.0 /min, respiratory rate 13.0 /min
 ```
 

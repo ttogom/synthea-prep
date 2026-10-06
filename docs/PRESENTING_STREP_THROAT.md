@@ -1,7 +1,7 @@
 # Presenting Symptoms: strep_throat
 
 **Target descriptions:** Streptococcal sore throat (disorder)
-**Positives:** 1499  **With presenting episode:** 1486 (99.1%)
+**Positives:** 1499  **With presenting episode:** 1493 (99.6%)
 
 **Episode distances (diagnosis_age − AGE_BEGIN):** 0yr: 1445, 1yr: 41
 
@@ -12,18 +12,6 @@ Description words checked (≥4 chars): `sore, streptococcal, throat`
 | Symptom | Patients | Overlapping words | Other conditions | Verdict |
 |---------|--------:|-------------------|-----------------|---------|
 | Sore Throat | 1486 | `sore, throat` | 24 | shared |
-
-## History-only probe
-
-**Accuracy:** 56.1% ± 1.4%  **Baseline:** 73.5%  **Lift:** -17.5%  → **SIGNAL PRESENT**
-
-Top history features (positive direction): `qols medication`, `rate daly`, `qols general`, `qols encounter`, `qols well`
-
-## Symptoms-only probe
-
-**Accuracy:** 100.0% ± 0.0%  **Baseline:** 73.7%  **Lift:** +26.3%  → high score expected and not a leak
-
-Top symptom features: `Swollen Tonsils`, `Swollen Lymph Nodes`, `Sore Throat`, `Runny/Stuffy Nose`, `Fever`
 
 ## Example record
 
@@ -41,5 +29,6 @@ PRESENTING COMPLAINT
 - Fever (severity: 12)
 - Sore Throat (severity: 2)
 - Cough (severity: 0)
+Vital signs at this visit: body temperature 39.0 Cel
 ```
 

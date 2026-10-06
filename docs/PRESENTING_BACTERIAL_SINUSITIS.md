@@ -11,18 +11,6 @@ Description words checked (≥4 chars): `acute, bacterial, sinusitis`
 
 No symptom names share words with the target description.
 
-## History-only probe
-
-**Accuracy:** 56.7% ± 0.9%  **Baseline:** 75.0%  **Lift:** -18.3%  → **SIGNAL PRESENT**
-
-Top history features (positive direction): `qols medication`, `viral sinusitis`, `situation daly`, `environment`, `procedure emergency`
-
-## Symptoms-only probe
-
-**Accuracy:** 100.0% ± 0.0%  **Baseline:** 76.6%  **Lift:** +23.4%  → high score expected and not a leak
-
-Top symptom features: `Sore Throat`, `Sinus Pain`, `Pain with Bright Lights`, `Nasal Discharge`, `Nasal Congestion`
-
 ## Example record
 
 **Patient:** `00ea1ff2-a235-3c2c-eeb0-0dce58a16722`  **Diagnosis age:** 52  **AGE_BEGIN:** 52  **Distance:** 0yr

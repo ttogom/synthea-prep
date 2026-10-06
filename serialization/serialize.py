@@ -314,10 +314,16 @@ def serialize_patient(pid, label, data, args):
     devices = sorted({r["DESCRIPTION"] for r in data["devices"][pid] if not r["STOP"]})
 
     presenting_ep = data.get("presenting", {}).get(pid)
-    presenting_lines = (
-        [f"{s['name']} (severity: {s['severity']})" for s in presenting_ep["symptoms"]]
-        if presenting_ep else []
-    )
+    presenting_lines = []
+    if presenting_ep:
+        for s in presenting_ep.get("symptoms", []):
+            presenting_lines.append(f"{s['name']} (severity: {s['severity']})")
+        vitals = presenting_ep.get("vitals", [])
+        if vitals:
+            vital_str = ", ".join(
+                f"{v['name'].lower()} {v['value']} {v['unit']}" for v in vitals
+            )
+            presenting_lines.append(f"Vital signs at this visit: {vital_str}")
 
     parts = [
         section("PATIENT", [demographics(data["patients"][pid], cutoff)] + social),

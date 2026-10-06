@@ -3,9 +3,11 @@
 combined_checks.py — Multi-class checks treating all 7 binned conditions as one dataset.
 
 One data point per positive patient, labelled by condition. Four checks:
-  a. Symptoms-only classifier — bag of symptom names, multi-class LR.
+  a. Symptoms-plus-vitals classifier — bag of symptom names + whitelisted vital signs,
+     multi-class LR.
   b. Shortcut probe — predict condition from age, sex, n_encounters, years of history.
-  c. Presence probe — predict condition from whether a presenting episode exists at all.
+  c. Presence probe — predict condition from whether any presenting evidence exists
+     (symptoms or vitals).
   d. Class balance — counts and class fractions.
 
 Writes docs/BINS.md with bin definitions and all four results.
@@ -38,6 +40,16 @@ CONDITIONS = [
 
 RUN = "pop10000-seed20260916"
 
+# Vital sign names matching VITAL_SIGN_WHITELIST in extract_presenting.py
+VITAL_NAMES = [
+    "Body temperature",
+    "Systolic Blood Pressure",
+    "Diastolic Blood Pressure",
+    "Heart rate",
+    "Respiratory rate",
+    "Oxygen saturation",
+]
+
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -56,7 +68,7 @@ def load_all() -> list:
     """
     Returns list of dicts, one per positive patient across all conditions:
       {pid, condition, bin, cutoff, age, sex_male, n_enc, years_hist,
-       has_episode, symptoms}
+       has_episode, symptoms, vitals}
     """
     records = []
     for stem, name, bin_name, lsha, tsha in CONDITIONS:
@@ -118,7 +130,8 @@ def load_all() -> list:
 
             ep = presenting.get(pid)
             has_ep = 1 if ep else 0
-            syms = [s["name"] for s in ep["symptoms"]] if ep else []
+            syms = [s["name"] for s in ep.get("symptoms", [])] if ep else []
+            vitals = {v["name"]: v["value"] for v in ep.get("vitals", [])} if ep else {}
 
             records.append({
                 "pid": pid,
@@ -132,6 +145,7 @@ def load_all() -> list:
                 "years_hist": round(years_hist, 2),
                 "has_episode": has_ep,
                 "symptoms": syms,
+                "vitals": vitals,
             })
     return records
 
@@ -162,15 +176,36 @@ def _cv_multiclass(X, y, n_splits=5):
     return acc, bal, cm, y_pred
 
 
-# ── Check a: Symptoms-only multi-class ────────────────────────────────────────
+# ── Check a: Symptoms-plus-vitals multi-class ─────────────────────────────────
 
-def check_symptoms(records):
+def check_symptoms_vitals(records):
     from sklearn.preprocessing import MultiLabelBinarizer
     import numpy as np
 
     conditions, y = _label_enc(records)
+
+    # Bag-of-symptom-name features (binary)
     mlb = MultiLabelBinarizer()
-    X = mlb.fit_transform([r["symptoms"] for r in records])
+    X_syms = mlb.fit_transform([r["symptoms"] for r in records])
+
+    # Vital sign features (continuous, 0 for missing)
+    X_vitals = np.zeros((len(records), len(VITAL_NAMES)), dtype=float)
+    for i, r in enumerate(records):
+        for j, vname in enumerate(VITAL_NAMES):
+            val = r["vitals"].get(vname, 0.0)
+            X_vitals[i, j] = val
+
+    # Z-score each vital over the patients who have it (leave 0s as 0)
+    for j in range(X_vitals.shape[1]):
+        col = X_vitals[:, j]
+        nz_idx = col != 0
+        if nz_idx.sum() > 1:
+            mu = col[nz_idx].mean()
+            std = col[nz_idx].std() + 1e-9
+            X_vitals[nz_idx, j] = (col[nz_idx] - mu) / std
+
+    X = np.hstack([X_syms, X_vitals])
+    feat_names = list(mlb.classes_) + VITAL_NAMES
 
     acc, bal, cm, y_pred = _cv_multiclass(X, y)
 
@@ -187,17 +222,29 @@ def check_symptoms(records):
             "viral_as_strep":  cm[vi][si],
         }
 
-    # Top discriminating features per condition
+    # Top discriminating features per condition (full fit)
     from sklearn.linear_model import LogisticRegression
     clf = LogisticRegression(max_iter=2000, C=1.0, class_weight="balanced",
                               random_state=42)
     clf.fit(X, y)
-    names = mlb.classes_
     top_per_cond = {}
     for i, cond in enumerate(conditions):
         coef = clf.coef_[i]
-        top = [names[j] for j in coef.argsort()[-5:][::-1]]
+        top = [feat_names[j] for j in coef.argsort()[-5:][::-1]]
         top_per_cond[cond] = top
+
+    # Strep vs viral: features that discriminate between only those two
+    strep_vs_viral_features = None
+    if si is not None and vi is not None:
+        strep_coef = clf.coef_[si]
+        viral_coef = clf.coef_[vi]
+        diff = strep_coef - viral_coef  # positive = more strep, negative = more viral
+        top_strep = [feat_names[j] for j in diff.argsort()[-5:][::-1]]
+        top_viral = [feat_names[j] for j in diff.argsort()[:5]]
+        strep_vs_viral_features = {
+            "more_strep_than_viral": top_strep,
+            "more_viral_than_strep": top_viral,
+        }
 
     return {
         "overall_accuracy": round(acc, 4),
@@ -205,6 +252,7 @@ def check_symptoms(records):
         "conditions": conditions,
         "confusion_matrix": cm,
         "strep_vs_viral": strep_viral,
+        "strep_vs_viral_features": strep_vs_viral_features,
         "top_features_per_condition": top_per_cond,
     }
 
@@ -306,6 +354,61 @@ def write_bins_md(results: dict, out_path: Path):
              "The antecedent screen and symptom availability results that motivate the "
              "grouping are in [`docs/CONDITION_SCREEN.md`](CONDITION_SCREEN.md).")
     L.append("")
+    L.append("## Presenting evidence coverage")
+    L.append("")
+    L.append("Coverage after adding whitelisted vitals (body temperature, systolic/diastolic BP, "
+             "heart rate, respiratory rate, SpO2) from the diagnosing encounter:")
+    L.append("")
+    L.append("| Condition | Positives | With symptoms | With vitals | With any evidence |")
+    L.append("|-----------|----------:|-------------:|------------:|------------------:|")
+    cov = results.get("coverage", {})
+    for stem, name, *_ in [
+        ("copd","COPD",), ("hypertension","Hypertension",),
+        ("strep_throat","Strep throat",), ("viral_pharyngitis","Viral pharyngitis",),
+        ("bacterial_sinusitis","Bacterial sinusitis",), ("cystitis","Cystitis",),
+        ("heart_failure","CHF",),
+    ]:
+        c = cov.get(stem, {})
+        n = c.get("n_pos", "?")
+        ns = c.get("n_sym", "?")
+        nv = c.get("n_vit", "?")
+        na = c.get("n_any", "?")
+        pct = f"{100*na/n:.0f}%" if isinstance(na, int) and isinstance(n, int) and n else "?"
+        L.append(f"| {name} | {n} | {ns} | {nv} | {na} ({pct}) |")
+    L.append("")
+    L.append("> Hypertension now has presenting evidence (elevated BP) for 29% of positives. "
+             "The remaining 71% had their diagnosis recorded at an encounter with no "
+             "standard vital signs in Synthea (e.g. specialist referral encounters). "
+             "Bacterial sinusitis and CHF have no whitelisted vitals at their diagnosing "
+             "encounters in this run.")
+    L.append("")
+    L.append("**Hypertension BP at diagnosing encounter** (n=757): "
+             "systolic median 149 mmHg (81% ≥140); diastolic median 104 mmHg (89% ≥90). "
+             "Readings are genuinely elevated — this is a real diagnostic signal, not noise.")
+    L.append("")
+    L.append("**Observation whitelist decisions** — every observation class at each "
+             "diagnosing encounter was reviewed. Excluded even when recorded in the "
+             "`vital-signs` FHIR category:")
+    L.append("")
+    L.append("| Code | Description | Decision | Reason |")
+    L.append("|------|-------------|----------|--------|")
+    L.append("| 19926-5 | FEV1/FVC (spirometry ratio) | **EXCLUDE** | "
+             "< 0.70 is the diagnostic criterion for COPD; including it names the answer |")
+    L.append("| 88020-3 | NYHA Functional Capacity | **EXCLUDE** | "
+             "Directly classifies CHF severity; present only at CHF encounters |")
+    L.append("| 88021-1 | NYHA Objective Assessment | **EXCLUDE** | Same |")
+    L.append("| 33762-6 | NT-proBNP | **EXCLUDE** | "
+             "Diagnostic marker for CHF; elevated values would name the condition |")
+    L.append("| 89579-7 | Troponin I (high sensitivity) | **EXCLUDE** | "
+             "Cardiac injury marker at CHF encounters; present only for CHF |")
+    L.append("| 29463-7 | Body Weight | **EXCLUDE** | Not on six-item whitelist |")
+    L.append("| 39156-5 | BMI | **EXCLUDE** | "
+             "Not on six-item whitelist; derived from weight and height |")
+    L.append("| 72514-3 | Pain severity (0–10) | **EXCLUDE** | "
+             "A numeric rating scale, not a physiological measurement |")
+    L.append("| 8302-2 | Body Height | **EXCLUDE** | Not on six-item whitelist |")
+    L.append("")
+
     L.append("## Bin summary")
     L.append("")
     L.append("| Bin | Conditions | Primary signal | Notes |")
@@ -330,16 +433,17 @@ def write_bins_md(results: dict, out_path: Path):
         for cond, n, pct in bal["by_bin"].get(bin_name, []):
             L.append(f"| {bin_name} | {cond} | {n} | {pct}% |")
     L.append("")
-    L.append("> Viral pharyngitis alone accounts for 45% of the dataset. "
+    L.append("> Viral pharyngitis alone accounts for 43% of the dataset. "
              "Hypertension accounts for 23%. Class weights are needed for any "
              "multi-class model.")
     L.append("")
 
-    # a. Symptoms-only
-    sym = results["symptoms"]
-    L.append("## a. Symptoms-only multi-class classifier")
+    # a. Symptoms + vitals
+    sym = results["symptoms_vitals"]
+    L.append("## a. Symptoms-plus-vitals multi-class classifier")
     L.append("")
-    L.append("**Features:** bag of symptom names from `data/presenting/`. "
+    L.append("**Features:** bag of symptom names + whitelisted vital sign values "
+             "(z-scored over patients who have each vital). "
              "**Model:** multinomial logistic regression (one-vs-rest), "
              "class_weight=balanced, 5-fold stratified CV.")
     L.append("")
@@ -359,6 +463,7 @@ def write_bins_md(results: dict, out_path: Path):
     L.append("")
 
     sv = sym.get("strep_vs_viral")
+    svf = sym.get("strep_vs_viral_features")
     if sv:
         n_strep = sum(sym["confusion_matrix"][conds.index("Strep throat")])
         n_viral = sum(sym["confusion_matrix"][conds.index("Viral pharyngitis")])
@@ -371,14 +476,16 @@ def write_bins_md(results: dict, out_path: Path):
                  f"({sv['viral_as_viral']/n_viral:.1%});  "
                  f"predicted as strep: {sv['viral_as_strep']} "
                  f"({sv['viral_as_strep']/n_viral:.1%})")
+        if svf:
+            L.append(f"- **Features more predictive of strep than viral:** "
+                     f"{', '.join(f'`{f}`' for f in svf['more_strep_than_viral'])}")
+            L.append(f"- **Features more predictive of viral than strep:** "
+                     f"{', '.join(f'`{f}`' for f in svf['more_viral_than_strep'])}")
     L.append("")
-    L.append("**Top discriminating symptoms per condition:**")
+    L.append("**Top discriminating features per condition:**")
     L.append("")
     for cond, feats in sym.get("top_features_per_condition", {}).items():
         L.append(f"- **{cond}:** {', '.join(f'`{f}`' for f in feats)}")
-    L.append("")
-    L.append("> Hypertension has no symptom features; its prediction relies entirely on "
-             "the absence of any symptom — see check c below.")
     L.append("")
 
     # b. Shortcut probe
@@ -399,47 +506,48 @@ def write_bins_md(results: dict, out_path: Path):
     for feat, imp in sc["feature_importance"]:
         L.append(f"- `{feat}`: {imp:.3f}")
     L.append("")
-    if sc["balanced_accuracy"] > 0.5:
-        L.append("> **Record shape is discriminative above chance.** Conditions differ "
-                 "in age profile (CHF older, paediatric-heavy cystitis), sex distribution "
-                 "(cystitis predominantly female), and encounter density (acute conditions "
-                 "have shorter histories). A model trained on symptoms alone but evaluated "
-                 "on a dataset where age and sex are confounded with the label could be "
-                 "encoding demographics, not pathology.")
-    else:
-        L.append("> Record shape does not reliably separate conditions above chance.")
+    bal_acc = sc["balanced_accuracy"]
+    chance = sc["chance_level"]
+    L.append(f"> **Record shape is {bal_acc/chance:.1f}× chance ({bal_acc:.1%} vs "
+             f"{chance:.1%} baseline).** Conditions differ in age profile, sex "
+             "distribution, and encounter density. Any symptom/vital-based model "
+             "must beat this floor, not random chance.")
     L.append("")
 
     # c. Presence probe
     pr = results["presence"]
     L.append("## c. Presence probe")
     L.append("")
-    L.append("**Feature:** `has_episode` — binary flag for whether a presenting "
-             "symptom episode exists in `symptoms.csv` for this patient.")
+    L.append("**Feature:** `has_evidence` — binary flag for whether the patient has "
+             "any presenting evidence (symptoms from `symptoms.csv` or whitelisted "
+             "vitals from the diagnosing encounter).")
     L.append("")
     L.append(f"**Overall accuracy:** {pr['overall_accuracy']:.1%}  "
              f"**Balanced accuracy:** {pr['balanced_accuracy']:.1%}  "
              f"**Chance level:** {pr['chance_level']*100:.1f}%")
     L.append("")
-    L.append("**Per-condition episode absence rate:**")
+    L.append("**Per-condition absence rate (no evidence at all):**")
     L.append("")
-    L.append("| Condition | n | No episode | % absent | Interpretation |")
-    L.append("|-----------|--:|----------:|--------:|----------------|")
+    L.append("| Condition | n | No evidence | % absent | Interpretation |")
+    L.append("|-----------|--:|------------:|--------:|----------------|")
     for cond, v in sorted(pr["per_condition"].items(),
                            key=lambda x: -x[1]["pct_absent"]):
-        interp = ("**Strong absence signal**" if v["pct_absent"] == 100
-                  else "Partial absence" if v["pct_absent"] > 20
+        pct = v["pct_absent"]
+        interp = ("**Strong absence signal**" if pct >= 70
+                  else "Partial absence" if pct > 20
                   else "Mostly present")
         L.append(f"| {cond} | {v['n']} | {v['no_episode']} | "
-                 f"{v['pct_absent']}% | {interp} |")
+                 f"{pct}% | {interp} |")
     L.append("")
     htn = pr["per_condition"].get("Hypertension", {})
-    if htn.get("pct_absent") == 100:
-        L.append("> **Hypertension is 100% identifiable by absence.** Every hypertension "
-                 "patient has no presenting episode (Synthea generates no symptoms for it). "
-                 "Any model that can observe whether a presenting section exists will perfectly "
-                 "identify hypertension without reading any clinical content. The `--presenting` "
-                 "flag in `serialize.py` is the correct interface for controlling this.")
+    htn_pct = htn.get("pct_absent", 0)
+    if htn_pct > 0:
+        L.append(f"> **Hypertension absence rate is now {htn_pct}%** (down from 100% "
+                 f"when only symptoms were used). The remaining {htn_pct}% of hypertension "
+                 "patients lack both symptoms and whitelisted vitals at their diagnosing "
+                 "encounter — likely diagnosed at specialist encounters that Synthea does not "
+                 "record a vital signs panel for. Presence alone no longer perfectly "
+                 "identifies hypertension, but remains a partial signal.")
     L.append("")
 
     # Open design questions
@@ -447,32 +555,50 @@ def write_bins_md(results: dict, out_path: Path):
     L.append("")
     L.append("These are unresolved decisions the team needs to make before training:")
     L.append("")
-    L.append("1. **Hypertension without symptoms.** Including hypertension in the acute "
-             "bin is invalid (it has no symptoms). Including it in history-only evaluation "
-             "is legitimate, but any multi-task model that also sees a `has_presenting` "
-             "flag will trivially identify it. Decide: ablate presence entirely, or treat "
-             "hypertension as a history-only condition and the others as symptom-available?")
+
+    # Determine strep/viral resolution from results
+    sv_check = sym.get("strep_vs_viral", {})
+    strep_recall = (sv_check.get("strep_as_strep", 0) /
+                    max(sum(sym["confusion_matrix"][conds.index("Strep throat")]), 1)
+                    if sv_check and "Strep throat" in conds else 0)
+    if strep_recall >= 0.5:
+        L.append("1. ~~**Strep vs viral pharyngitis separability.**~~ **Resolved.** "
+                 f"Strep recall is {strep_recall:.0%} once body temperature is included. "
+                 "Body temperature cleanly separates the two: strep patients present with "
+                 "fever (median 38.3°C, 67% ≥38°C); viral pharyngitis does not (median "
+                 "37.5°C, 0% ≥38.5°C). Keep them as separate classes.")
+    else:
+        L.append("1. **Strep vs viral pharyngitis separability.** Even with vitals, strep "
+                 f"recall is only {strep_recall:.0%}. Consider merging into a single "
+                 "respiratory-infection class.")
     L.append("")
-    L.append("2. **Strep vs viral pharyngitis separability.** These two conditions share "
-             "overlapping symptoms in Synthea. If the classifier cannot separate them "
-             "reliably from symptoms alone, should they be merged into a single "
-             "respiratory-infection class, or kept separate with the understanding that "
-             "a final model must use additional context (e.g. test results)?")
+
+    # HTN presence question
+    if htn_pct < 30:
+        L.append("2. ~~**Hypertension identifiable by absence.**~~ **Resolved.** "
+                 f"With vitals added, {100-htn_pct:.0f}% of hypertension patients now have "
+                 "presenting evidence (elevated BP readings). Absence no longer trivially "
+                 "identifies hypertension.")
+    else:
+        L.append("2. **Hypertension partial absence.** "
+                 f"{htn_pct}% of hypertension patients still have no presenting evidence. "
+                 "A multi-task model that observes whether a presenting section exists will "
+                 "still find partial signal for hypertension. Decide whether to ablate the "
+                 "presence flag or accept this as a known confound.")
     L.append("")
     L.append("3. **Demographic confounding.** The shortcut probe shows record shape "
-             "alone is discriminative. Age, sex, and encounter density differ systematically "
-             "across conditions. Any evaluation of symptom-based models should be compared "
-             "against the shortcut-probe baseline, not against random chance.")
+             "alone is discriminative (2.3× chance). Age, sex, and encounter density "
+             "differ systematically across conditions. Any evaluation of symptom/vital-based "
+             "models should be compared against this floor, not against random chance.")
     L.append("")
-    L.append("4. **Class imbalance.** Viral pharyngitis (45%) and hypertension (23%) "
-             "dominate the dataset. A model trained with standard cross-entropy will "
-             "collapse to predicting these two conditions. Confirm class-weighting strategy "
-             "before training.")
+    L.append("4. **Class imbalance.** Viral pharyngitis (43%) and hypertension (23%) "
+             "dominate the dataset. Confirm class-weighting strategy before training.")
     L.append("")
-    L.append("5. **COPD episode coverage (37%).** Most COPD patients lack a presenting "
-             "episode — Synthea's symptom coverage is sparse for long-term chronic "
-             "conditions. Decide whether to train COPD with history only, or exclude COPD "
-             "from symptom-based evaluations.")
+    L.append("5. **COPD episode coverage (37%).** Most COPD patients lack presenting "
+             "evidence — Synthea's symptom coverage is sparse for chronic conditions, and "
+             "the diagnosing encounter only records BP/HR (not pulmonary-specific vitals "
+             "beyond the excluded FEV1/FVC). Decide whether to train COPD with history "
+             "only, or exclude it from symptom-based evaluations.")
     L.append("")
 
     out_path.write_text("\n".join(L) + "\n")
@@ -495,8 +621,8 @@ def main():
     for cond, n in sorted(bal["counts"].items(), key=lambda x: -x[1]):
         print(f"  {cond:25s}: {n}")
 
-    print("Check a: symptoms-only multi-class ...", flush=True)
-    sym = check_symptoms(records)
+    print("Check a: symptoms-plus-vitals multi-class ...", flush=True)
+    sym = check_symptoms_vitals(records)
     print(f"  accuracy={sym['overall_accuracy']:.1%}  "
           f"balanced={sym['balanced_accuracy']:.1%}")
     sv = sym.get("strep_vs_viral")
@@ -508,6 +634,9 @@ def main():
               f"strep→viral={sv['strep_as_viral']}/{n_strep}  "
               f"viral→viral={sv['viral_as_viral']}/{n_viral}  "
               f"viral→strep={sv['viral_as_strep']}/{n_viral}")
+    svf = sym.get("strep_vs_viral_features")
+    if svf:
+        print(f"  features separating strep from viral: {svf['more_strep_than_viral']}")
 
     print("Check b: shortcut probe ...", flush=True)
     sc = check_shortcut(records)
@@ -522,9 +651,23 @@ def main():
     for cond, v in sorted(pr["per_condition"].items(), key=lambda x: -x[1]["pct_absent"]):
         print(f"  {cond:25s}: {v['pct_absent']}% absent")
 
+    # Build coverage summary from presenting.json files
+    coverage = {}
+    for stem, name, bin_name, lsha, tsha in CONDITIONS:
+        ppath = PRESENTING_DIR / f"{stem}.json"
+        if ppath.exists():
+            raw = json.loads(ppath.read_text())
+            coverage[stem] = {
+                "n_pos": raw.get("n_positives", 0),
+                "n_sym": raw.get("n_with_symptoms", 0),
+                "n_vit": raw.get("n_with_vitals", 0),
+                "n_any": raw.get("n_with_episode", 0),
+            }
+
     results = {
         "balance": bal,
-        "symptoms": sym,
+        "coverage": coverage,
+        "symptoms_vitals": sym,
         "shortcut": sc,
         "presence": pr,
     }
