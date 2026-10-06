@@ -54,6 +54,13 @@ primary dental caries, acute bronchitis, anemia and chronic sinusitis
 |---|---|---|
 | `configs/drop/<condition>.txt` | Leaves out rows whose name gives the diagnosis away | The leak check reports FAIL, or a REVIEW item that names the target |
 | `configs/leak_terms/<condition>.txt` | Extra words the leak check flags for review | You know hints the check wouldn't find by itself (tests, drugs, symptoms) |
+| `data/presenting/<condition>.json` | Presenting symptoms from `extract_presenting.py` | Use with `--presenting` to add the PRESENTING COMPLAINT section |
+
+**Presenting complaint flag.** Pass `--presenting data/presenting/<condition>.json`
+(output of `scripts/extract_presenting.py`) to add a `PRESENTING COMPLAINT` section to
+each record that has a symptom episode. Records without an episode are written without
+the section. The flag is intentionally separated from the core pipeline so that history
+and presentation can be ablated independently.
 
 To check the output:
 
