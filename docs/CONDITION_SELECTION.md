@@ -21,7 +21,11 @@ simulation flags not present in the patient CSV).
 **Step 2 — Candidate selection.** Eleven conditions were hand-picked from the 127
 visible-history and 100 demographic-only groups, chosen to span the history/no-history
 and symptom/no-symptom axes, and to include at least one condition (COPD) that serves
-as a positive control with a known causal antecedent (smoking).
+as a positive control with a known causal antecedent (smoking). The four acute
+conditions (strep throat, viral pharyngitis, sinusitis, cystitis) were classified as
+visible-history by the module scan because of recurrence-prevention logic — a guard
+that blocks re-diagnosis of an active infection — not risk factors; the data screen
+confirmed they carry no history signal beyond the utilization vitals cluster.
 
 **Step 3 — Data screen** (`scripts/quick_screen.py`, output `docs/CONDITION_SCREEN.md`).
 Each candidate was screened against exact birth-year + sex matched negatives using a
@@ -45,8 +49,8 @@ scripted 100% before every OSA diagnosis).
 
 | Bin | Condition | SNOMED code(s) | Positives | Presenting evidence |
 |-----|-----------|----------------|----------:|---------------------|
-| history | COPD (chronic obstructive bronchitis + pulmonary emphysema) | 87433001, 185086009 | 384 | 144 (38%): mostly symptoms; sparse coverage because Synthea assigns symptoms late in disease course |
-| history | Essential hypertension | 59621000 | 2650 | 757 (29%): vitals only — elevated BP at the diagnosing wellness encounter (systolic median 149 mmHg, diastolic median 104 mmHg); Synthea generates no symptoms for this condition |
+| history | COPD (chronic obstructive bronchitis + pulmonary emphysema) | 87433001, 185086009 | 384 | 144 (38%): mostly symptoms; 78.6% of COPD positives were diagnosed before the 10-year `symptoms.csv` export window (reference date 2026-09-21 − 10 yr = 2016-09-21), so those episodes do not appear |
+| history | Essential hypertension | 59621000 | 2650 | 757 (29%): vitals only — elevated BP at the diagnosing encounter (systolic median 149 mmHg, diastolic median 104 mmHg); 99.6% of the 1893 without evidence were diagnosed before the 10-year `observations.csv` export window; both groups were diagnosed predominantly at wellness encounters |
 | acute | Streptococcal sore throat | 43878008 | 1499 | 1493 (100%): symptoms + temperature (median 38.3°C) |
 | acute | Acute viral pharyngitis | 195662009 | 5108 | 5089 (100%): symptoms + temperature (median 37.5°C) |
 | acute | Acute bacterial sinusitis | 75498004 | 656 | 600 (91%): symptoms only; no whitelisted vitals at Synthea's sinusitis encounters |
@@ -67,8 +71,8 @@ The bins define a 2×2 of signal availability:
 
 |  | Has presenting evidence | No presenting evidence |
 |--|------------------------|------------------------|
-| **Has history antecedent** | COPD (partial), Hypertension (partial) | — |
-| **No history antecedent** | Strep, Viral pharyngitis, Sinusitis, Cystitis, CHF | Hypertension (71% of cases) |
+| **Has history antecedent** | COPD 144 (38%), Hypertension 757 (29%) | COPD 240 (62%), Hypertension 1893 (71%) |
+| **No history antecedent** | Strep 1493, Viral 5089, Sinusitis 600, Cystitis 912, CHF 311 (8405 total) | Strep 6, Viral 19, Sinusitis 56, Cystitis 248, CHF 2 (331 total) |
 
 Expected ablation results:
 - Remove history (do not pass pre-diagnosis record): should hurt the history bin
@@ -103,12 +107,12 @@ Output: `data/presenting/<condition>.json`. Pass to serializer with
 All figures are from `scripts/combined_checks.py`, 5-fold stratified CV, 11,770
 positives across 7 conditions, class_weight=balanced.
 
-| Baseline | Balanced accuracy | Notes |
-|----------|------------------:|-------|
-| Chance | 14.3% | 1/7 classes |
-| Majority class (viral pharyngitis) | — | 43.4% overall accuracy ceiling |
-| Shortcut probe (age, sex, n_encounters, years of history) | 33.6% | Record shape alone; 2.4× chance |
-| Symptoms + vitals classifier | 79.5% | Bag-of-symptom-names + whitelisted vital values, logistic regression |
+| Baseline | Balanced accuracy | Overall accuracy | Notes |
+|----------|------------------:|-----------------:|-------|
+| Chance | 14.3% | 14.3% | 1/7 classes |
+| Majority class (viral pharyngitis) | 14.3% | 43.4% | Always predicts viral pharyngitis |
+| Shortcut probe (age, sex, n_encounters, years of history) | 33.6% | 30.0% | Record shape alone; 2.4× chance (balanced) |
+| Symptoms + vitals classifier | 79.5% | 83.9% | Bag-of-symptom-names + whitelisted vital values, logistic regression |
 
 A model must exceed 79.5% balanced accuracy to demonstrate reasoning beyond what the
 presenting complaint alone provides. Beating 33.6% is necessary but not sufficient.
@@ -153,8 +157,9 @@ presenting complaint alone provides. Beating 33.6% is necessary but not sufficie
    history-only evaluation.
 
 4. **Hypertension BP coverage.** Only 29% of hypertension diagnoses have a blood
-   pressure reading at the diagnosing encounter in Synthea (the rest were diagnosed at
-   specialist encounters that do not record a full vital signs panel). This limits the
+   pressure reading at the diagnosing encounter: 99.6% of the 1893 without evidence were
+   diagnosed before 2016-09-21 (the 10-year `observations.csv` export window), so those
+   encounters have no observations in the exported data. This limits the
    presenting-evidence ablation for hypertension to a partial test.
 
 ## Real data caveat
@@ -212,4 +217,14 @@ done
 
 # 7. Combined-dataset checks and updated BINS.md
 python3 scripts/combined_checks.py
+
+# 8. Serialize records with presenting evidence (example for strep throat)
+#    Repeat for each condition; substitute the correct SHA and condition name
+mkdir -p data/serialized
+python3 serialization/serialize.py \
+    data/pop10000-seed20260916__train-1059ea \
+    data/labels-1059ea.json \
+    --out data/serialized/pop10000-seed20260916-strep_throat.jsonl \
+    --presenting data/presenting/strep_throat.json
+# Output: data/serialized/pop10000-seed20260916-<condition>.jsonl
 ```
