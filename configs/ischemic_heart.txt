@@ -1,0 +1,2 @@
+# Stable ischemic heart disease
+414545008  # Ischemic heart disease (disorder)
