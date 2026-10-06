@@ -47,16 +47,16 @@ Strongest antecedent column shows the strongest feature excluding known artifact
 | Group | Condition | Cases | Matched neg | Strongest non-artifact antecedent | Symptom availability |
 |-------|-----------|------:|------------:|-----------------------------------|---------------------|
 | history | COPD | 384 | 1140 | **smoking_ever** z=+7.8\* (22% vs 7%) — **positive control passes** | 142/384 (37%) |
-| history | Polyp of colon | 789 | 2289 | Stress z=+4.9\* — marginal, below top-artifact cluster | 77/789 (10%) |
+| dropped | Polyp of colon | 789 | 2289 | Stress z=+4.9\* — marginal, below top-artifact cluster | 77/789 (10%) |
 | history | Essential hypertension | 2650 | 4112 | **Sleep disorder** z=+14.9\* (9% vs 2%), Diabetes z=+11.5\* | 0/2650 (0%) |
 | acute | Streptococcal sore throat | 1499 | 4166 | none — all significant features are utilization vitals | 1487/1499 (99%) |
 | acute | Acute viral pharyngitis | 5108 | 6126 | none — all significant features are utilization vitals | 5094/5108 (100%) |
 | acute | Acute bacterial sinusitis | 656 | 1963 | none — all significant features are utilization vitals | 643/656 (98%) |
 | acute | Acute infective cystitis | 1160 | 2421 | BMI percentile z=+14.0\* — demographic skew (female-heavy) | 1158/1160 (100%) |
-| demo | CHF | 313 | 931 | CBC panel z=+16.1\* — utilization cluster (all identical z) | 311/313 (99%) |
-| demo | Ischemic heart disease | 1853 | 2185 | none — utilization inverted (older positives, fewer prior visits) | 838/1853 (45%) |
-| demo | Obstructive sleep apnea | 341 | 1023 | none — only signal is Synthea precursor artifact | 0/341 (0%) |
-| demo | Alzheimer's disease | 270 | 687 | Fall risk z=+6.5\* — plausible but non-history | 66/270 (24%) |
+| control | CHF | 313 | 931 | CBC panel z=+16.1\* — utilization cluster (all identical z) | 311/313 (99%) |
+| dropped | Ischemic heart disease | 1853 | 2185 | none — utilization inverted (older positives, fewer prior visits) | 838/1853 (45%) |
+| dropped | Obstructive sleep apnea | 341 | 1023 | none — only signal is Synthea precursor artifact | 0/341 (0%) |
+| dropped | Alzheimer's disease | 270 | 687 | Fall risk z=+6.5\* — plausible but non-history | 66/270 (24%) |
 
 \* Bonferroni-corrected at α = 0.05 / N_features.
 
