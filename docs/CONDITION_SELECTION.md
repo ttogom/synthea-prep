@@ -8,6 +8,17 @@ analysis to identify history-dependent candidates, a data screen to verify the
 antecedent structure survives in actual patient records, and a presenting-evidence
 extraction to confirm what is observable at the time of diagnosis.
 
+## Export window
+
+We keep Synthea's default 10-year export window (`exporter.years_of_history = 10`) to
+match the record depth of real EHR data such as MIMIC. Observations and symptoms older
+than 10 years before the reference date (2026-09-21) are not exported; encounters before
+2016-09-21 therefore have no observations or symptom episodes in the output CSVs. This
+affects the two history-bin conditions disproportionately: 78.6% of COPD positives and
+99.6% of hypertension positives without presenting evidence were diagnosed before the
+window. Diagnoses before the window lack presenting evidence, so results are reported
+on all examples and on the subset with presenting evidence.
+
 ## The funnel
 
 **Step 1 — Module scan** (`scripts/scan_modules.py`, output `docs/MODULE_SCAN.md`).
@@ -144,23 +155,16 @@ presenting complaint alone provides. Beating 33.6% is necessary but not sufficie
 
 ## Open questions for the team
 
-1. **Hypertension absence signal.** 71% of hypertension positives have no presenting
-   evidence. Proposal: report results on two subsets — all positives, and positives with
-   presenting evidence only — so that hypertension performance can be read both ways.
+1. **Hypertension and COPD reporting subsets.** Because the 10-year export window
+   leaves 71% of hypertension positives and 62% of COPD positives without presenting
+   evidence, results for those conditions should be reported on two subsets: all
+   positives, and positives with presenting evidence only. The decision to keep the
+   10-year window is fixed (see Export window); the two-subset reporting plan follows
+   from it.
 
 2. **Class weighting.** Viral pharyngitis (43%) and hypertension (23%) dominate the
    dataset. The `class_weight=balanced` strategy in the probes accounts for this; confirm
    the same strategy for the final model.
-
-3. **COPD evidence coverage.** Only 38% of COPD patients have presenting evidence.
-   Decide whether to include COPD in symptom-based evaluations or restrict it to
-   history-only evaluation.
-
-4. **Hypertension BP coverage.** Only 29% of hypertension diagnoses have a blood
-   pressure reading at the diagnosing encounter: 99.6% of the 1893 without evidence were
-   diagnosed before 2016-09-21 (the 10-year `observations.csv` export window), so those
-   encounters have no observations in the exported data. This limits the
-   presenting-evidence ablation for hypertension to a partial test.
 
 ## Real data caveat
 
