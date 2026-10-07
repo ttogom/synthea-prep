@@ -26,27 +26,9 @@ Output goes to `data/serialized/<run>-<condition>.jsonl`, with a
 `configs/asthma.txt` containing `195967001   # Asthma (disorder)`. Then run the
 same command. The code is not specific to any condition.
 
-**Which conditions:** the team has not fixed a list of target conditions yet.
-Codes come from the `CODE` column of Synthea's `csv/conditions.csv`, so any
-condition there can be run.
-
-The conditions tested here were chosen as follows:
-
-| Condition | Why |
-|---|---|
-| Heart failure | kenyaninamerica's case study (CHF_FINDINGS.md) |
-| Type 2 diabetes | SCRUBBING.md's main example |
-| Hypertension | A common condition, to test a new one |
-| Asthma | SCRUBBING.md lists a known leak for it (childhood asthma), to test that the leak check catches it |
-| 8 common disorders | See below |
-
-The 8 common disorders test that the pipeline works for conditions it wasn't
-built around, with no drop or review lists. They are the 8 `(disorder)`
-conditions with the most patients in pop1000, excluding the four above:
-gingivitis, viral sinusitis, gingival disease, acute viral pharyngitis,
-primary dental caries, acute bronchitis, anemia and chronic sinusitis
-(233–884 patients each). Their codes files were temporary and are not in
-`configs/`.
+**Which conditions:** The seven target conditions are fixed. See
+[`docs/CONDITION_SELECTION.md`](CONDITION_SELECTION.md) for the selection
+rationale. The codes files are in `configs/bins/`.
 
 **Optional per-condition files.** Most conditions don't need them.
 
@@ -54,6 +36,16 @@ primary dental caries, acute bronchitis, anemia and chronic sinusitis
 |---|---|---|
 | `configs/drop/<condition>.txt` | Leaves out rows whose name gives the diagnosis away | The leak check reports FAIL, or a REVIEW item that names the target |
 | `configs/leak_terms/<condition>.txt` | Extra words the leak check flags for review | You know hints the check wouldn't find by itself (tests, drugs, symptoms) |
+| `data/presenting/<condition>.json` | Presenting symptoms from `extract_presenting.py` | Use with `--presenting` to add the PRESENTING COMPLAINT section |
+
+**Presenting complaint flag.** Pass `--presenting data/presenting/<condition>.json`
+(output of `scripts/extract_presenting.py`) to add a `PRESENTING COMPLAINT` section.
+The section contains symptom names and severities from `symptoms.csv`, followed by a
+`Vital signs at this visit:` line listing whitelisted measurements (body temperature,
+BP, heart rate, respiratory rate, SpO2) from the diagnosing encounter. Records with
+neither symptoms nor whitelisted vitals are written without the section. The flag is
+intentionally separate from the core pipeline so that history and presentation can be
+ablated independently.
 
 To check the output:
 

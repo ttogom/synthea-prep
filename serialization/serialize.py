@@ -313,8 +313,21 @@ def serialize_patient(pid, label, data, args):
                  for r in data["careplans"][pid] if not r["STOP"]]
     devices = sorted({r["DESCRIPTION"] for r in data["devices"][pid] if not r["STOP"]})
 
+    presenting_ep = data.get("presenting", {}).get(pid)
+    presenting_lines = []
+    if presenting_ep:
+        for s in presenting_ep.get("symptoms", []):
+            presenting_lines.append(f"{s['name']} (severity: {s['severity']})")
+        vitals = presenting_ep.get("vitals", [])
+        if vitals:
+            vital_str = ", ".join(
+                f"{v['name'].lower()} {v['value']} {v['unit']}" for v in vitals
+            )
+            presenting_lines.append(f"Vital signs at this visit: {vital_str}")
+
     parts = [
         section("PATIENT", [demographics(data["patients"][pid], cutoff)] + social),
+        section("PRESENTING COMPLAINT", presenting_lines),
         section(f"CHIEF COMPLAINTS AT VISITS ({window})",
                 complaints(data["complaints"][pid], cutoff, since)),
         section("ACTIVE PROBLEMS", active),
@@ -357,6 +370,9 @@ def main():
     ap.add_argument("--drop", type=Path,
                     help="file of terms; rows whose description or reason contains one are left out "
                          "(condition-specific, e.g. configs/drop/heart_failure.txt)")
+    ap.add_argument("--presenting", type=Path, default=None,
+                    help="presenting.json from extract_presenting.py; adds a PRESENTING COMPLAINT "
+                         "section to each record that has an episode")
     args = ap.parse_args()
     if args.no_compress:
         args.window_years = args.max_values = args.max_encounters = 0
@@ -378,6 +394,10 @@ def main():
     data["complaints"] = {pid: [(d, c) for d, c in entries if not any(t in c.lower() for t in drop)]
                           for pid, entries in read_chief_complaints(args.train_dir / "notes", patients).items()}
     data["complaints"] = defaultdict(list, data["complaints"])
+    data["presenting"] = {}
+    if args.presenting and args.presenting.exists():
+        raw = json.loads(args.presenting.read_text())
+        data["presenting"] = raw.get("presenting", {})
 
     missing = patients - set(data["patients"])
     if missing:

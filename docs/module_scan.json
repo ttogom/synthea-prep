@@ -1,0 +1,6014 @@
+{
+  "conditions": [
+    {
+      "code": "274531002",
+      "description": "Abnormal findings diagnostic imaging heart+coronary circulat (finding)",
+      "module": "heart/cabg/cabg_referral.json",
+      "state": "Abnormal Findings",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1857
+    },
+    {
+      "code": "234466008",
+      "description": "Acquired coagulation disorder (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Coagulopathy",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 14
+    },
+    {
+      "code": "62479008",
+      "description": "Acquired immune deficiency syndrome (disorder)",
+      "module": "hiv_diagnosis.json",
+      "state": "Diagnosis Early Years",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "241929008",
+      "description": "Acute allergic reaction (disorder)",
+      "module": "allergies/severe_allergic_reaction.json",
+      "state": "Acute_Allergic_Reaction",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 124
+    },
+    {
+      "code": "75498004",
+      "description": "Acute bacterial sinusitis (disorder)",
+      "module": "sinusitis.json",
+      "state": "Bacterial_Infection_Starts",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 656
+    },
+    {
+      "code": "10509002",
+      "description": "Acute bronchitis (disorder)",
+      "module": "bronchitis.json",
+      "state": "Bronchitis_Infection",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [
+        "OTC_Bronchitis_Med"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 4582
+    },
+    {
+      "code": "65275009",
+      "description": "Acute cholecystitis (disorder)",
+      "module": "gallstones.json",
+      "state": "Acute_Cholecystitis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 29
+    },
+    {
+      "code": "132281000119108",
+      "description": "Acute deep venous thrombosis (disorder)",
+      "module": "covid19/diagnose_blood_clot.json",
+      "state": "Diagnose Acute Deep Venous Thrombosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_ddimer",
+        "covid19_diagnosed_clot"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 80
+    },
+    {
+      "code": "307426000",
+      "description": "Acute infective cystitis (disorder)",
+      "module": "urinary_tract_infections.json",
+      "state": "Cystitis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1160
+    },
+    {
+      "code": "91861009",
+      "description": "Acute myeloid leukemia (disorder)",
+      "module": "acute_myeloid_leukemia.json",
+      "state": "Acute_Myeloid_Leukemia_AML",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "401314000",
+      "description": "Acute non-ST segment elevation myocardial infarction (disorder)",
+      "module": "heart/nsteacs_pathway.json",
+      "state": "NSTEMI",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Observation"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 264
+    },
+    {
+      "code": "706870000",
+      "description": "Acute pulmonary embolism (disorder)",
+      "module": "covid19/diagnose_blood_clot.json",
+      "state": "Diagnose Acute Pulmonary Embolism",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_ddimer",
+        "covid19_diagnosed_clot"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 59
+    },
+    {
+      "code": "129721000119106",
+      "description": "Acute renal failure on dialysis (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Acute renal failure on dialysis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "67782005",
+      "description": "Acute respiratory distress syndrome (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "ARDS",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 67
+    },
+    {
+      "code": "65710008",
+      "description": "Acute respiratory failure (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Acute respiratory insufficiency",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 94
+    },
+    {
+      "code": "401303003",
+      "description": "Acute ST segment elevation myocardial infarction (disorder)",
+      "module": "heart/stemi_pathway.json",
+      "state": "STEMI",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 201
+    },
+    {
+      "code": "195662009",
+      "description": "Acute viral pharyngitis (disorder)",
+      "module": "sore_throat.json",
+      "state": "Acquire_Viral_Infection",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication",
+        "Observation"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5108
+    },
+    {
+      "code": "203646004",
+      "description": "Adolescent idiopathic scoliosis (disorder)",
+      "module": "AIS_From_School_Screening_to_SOSORT_Recommendations.json",
+      "state": "Adolescent_Idiopathic_Scoliosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 300
+    },
+    {
+      "code": "7200002",
+      "description": "Alcoholism (disorder)",
+      "module": "veteran_substance_abuse_treatment.json",
+      "state": "Alcohol Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "alcoholism",
+        "opioid_addiction"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 65
+    },
+    {
+      "code": "1003755004",
+      "description": "Allergy to Hevea brasiliensis latex protein (finding)",
+      "module": "spina_bifida.json",
+      "state": "Latex_Allergy",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "61804006",
+      "description": "Alveolitis of jaw (disorder)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Dry_Tooth_Socket",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 369
+    },
+    {
+      "code": "26929004",
+      "description": "Alzheimer's disease (disorder)",
+      "module": "dementia.json",
+      "state": "AlzheimersOnset",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 270
+    },
+    {
+      "code": "271737000",
+      "description": "Anemia (disorder)",
+      "module": "hiv/hiv_baseline.json",
+      "state": "Anemia",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4154
+    },
+    {
+      "code": "278365007",
+      "description": "Anticoagulant-induced bleeding (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Bleeding",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "60234000",
+      "description": "Aortic valve regurgitation (disorder)",
+      "module": "vhd_aortic.json",
+      "state": "Aortic Valve Regurgitation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 50
+    },
+    {
+      "code": "60573004",
+      "description": "Aortic valve stenosis (disorder)",
+      "module": "vhd_aortic.json",
+      "state": "Aortic Valve Stenosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 78
+    },
+    {
+      "code": "74400008",
+      "description": "Appendicitis (disorder)",
+      "module": "appendicitis.json",
+      "state": "Appendicitis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 91
+    },
+    {
+      "code": "195967001",
+      "description": "Asthma (disorder)",
+      "module": "asthma.json",
+      "state": "Adult_Asthma_Begins",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "precursor_names_target:known"
+      ],
+      "case_count": 387
+    },
+    {
+      "code": "225444004",
+      "description": "At increased risk for suicide (finding)",
+      "module": "veteran_ptsd.json",
+      "state": "At Risk for suicide",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:mTBI"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "24079001",
+      "description": "Atopic dermatitis (disorder)",
+      "module": "dermatitis.json",
+      "state": "Childhood_Atopic_Dermatitis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 222
+    },
+    {
+      "code": "49436004",
+      "description": "Atrial fibrillation (disorder)",
+      "module": "atrial_fibrillation.json",
+      "state": "Diagnosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 98
+    },
+    {
+      "code": "287185009",
+      "description": "Attempted suicide by cutting or stabbing",
+      "module": "veteran_self_harm.json",
+      "state": "Attempt_By_Cutting",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "287182007",
+      "description": "Attempted suicide by suffocation",
+      "module": "veteran_self_harm.json",
+      "state": "Attempt_By_Suffocation",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "698303004",
+      "description": "Awaiting transplantation of bone marrow (situation)",
+      "module": "bone_marrow_transplant.json",
+      "state": "Awaiting transplantation of bone marrow",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "bone_marrow"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 27
+    },
+    {
+      "code": "698306007",
+      "description": "Awaiting transplantation of kidney (situation)",
+      "module": "kidney_transplant.json",
+      "state": "Awaiting Transplant",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 391
+    },
+    {
+      "code": "5758002",
+      "description": "Bacteremia (finding)",
+      "module": "acute_myeloid_leukemia.json",
+      "state": "Bacteremia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "87628006",
+      "description": "Bacterial infectious disease (disorder)",
+      "module": "covid19/diagnose_bacterial_infection.json",
+      "state": "Bacterial Infection",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:covid19_bacterial_infection"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 7
+    },
+    {
+      "code": "6072007",
+      "description": "Bleeding from anus (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Symptom_2",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 26
+    },
+    {
+      "code": "35999006",
+      "description": "Blighted ovum (disorder)",
+      "module": "pregnancy.json",
+      "state": "Blighted_Ovum",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 183
+    },
+    {
+      "code": "60951000119105",
+      "description": "Blindness due to type 2 diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome/diabetic_retinopathy_diagnoses.json",
+      "state": "Diagnose_Blindness",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "blindness"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "162864005",
+      "description": "Body mass index 30+ - obesity (finding)",
+      "module": "wellness_encounters.json",
+      "state": "Obesity",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Attribute:criminal_record",
+        "Attribute:employment_condition",
+        "Attribute:ptsd",
+        "Attribute:quit smoking age",
+        "Attribute:refugee",
+        "Attribute:smoker",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "birth_country",
+        "education",
+        "first_language",
+        "food_insecurity",
+        "homeless",
+        "household_size",
+        "income",
+        "insurance_status",
+        "marital_status",
+        "no_vehicle_access",
+        "opioid_addiction_careplan",
+        "phq2_score",
+        "poverty_ratio",
+        "pregnant",
+        "severe_housing_cost_burden",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5531
+    },
+    {
+      "code": "408512008",
+      "description": "Body mass index 40+ - severely obese (finding)",
+      "module": "wellness_encounters.json",
+      "state": "Severe Obesity",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Attribute:criminal_record",
+        "Attribute:employment_condition",
+        "Attribute:ptsd",
+        "Attribute:quit smoking age",
+        "Attribute:refugee",
+        "Attribute:smoker",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "birth_country",
+        "education",
+        "first_language",
+        "food_insecurity",
+        "homeless",
+        "household_size",
+        "income",
+        "insurance_status",
+        "marital_status",
+        "no_vehicle_access",
+        "opioid_addiction_careplan",
+        "phq2_score",
+        "poverty_ratio",
+        "pregnant",
+        "severe_housing_cost_burden",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 78
+    },
+    {
+      "code": "262574004",
+      "description": "Bullet wound (disorder)",
+      "module": "injuries.json",
+      "state": "Gunshot_Wound",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 76
+    },
+    {
+      "code": "48333001",
+      "description": "Burn injury (morphologic abnormality)",
+      "module": "injuries.json",
+      "state": "Burn_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 444
+    },
+    {
+      "code": "92691004",
+      "description": "Carcinoma in situ of prostate (disorder)",
+      "module": "veteran_prostate_cancer.json",
+      "state": "In Situ Prostate Cancer",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Observation"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 153
+    },
+    {
+      "code": "128188000",
+      "description": "Cerebral palsy (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Condition_Onset_Cerebral Palsy",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 38
+    },
+    {
+      "code": "230690007",
+      "description": "Cerebrovascular accident (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Stroke",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 62
+    },
+    {
+      "code": "373587001",
+      "description": "Chiari malformation type II (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Chiari_II_Malformation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "192127007",
+      "description": "Child attention deficit disorder (disorder)",
+      "module": "attention_deficit_disorder.json",
+      "state": "ADHD",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 204
+    },
+    {
+      "code": "233678006",
+      "description": "Childhood asthma (disorder)",
+      "module": "asthma.json",
+      "state": "Childhood_Asthma_Begins",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 239
+    },
+    {
+      "code": "43724002",
+      "description": "Chill (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Chills Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 113
+    },
+    {
+      "code": "88805009",
+      "description": "Chronic congestive heart failure (disorder)",
+      "module": "congestive_heart_failure.json",
+      "state": "CHF Condition Start",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 313
+    },
+    {
+      "code": "128302006",
+      "description": "Chronic hepatitis C (disorder)",
+      "module": "hiv/hiv_baseline.json",
+      "state": "Hepatitis C Diagnosis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "124171000119105",
+      "description": "Chronic intractable migraine without aura (disorder)",
+      "module": "opioid_addiction.json",
+      "state": "Enter_Directed_Use_Condition3",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_prescription"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 528
+    },
+    {
+      "code": "431855005",
+      "description": "Chronic kidney disease stage 1 (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "CKD1 Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1010
+    },
+    {
+      "code": "431856006",
+      "description": "Chronic kidney disease stage 2 (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "CKD2 Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 868
+    },
+    {
+      "code": "433144002",
+      "description": "Chronic kidney disease stage 3 (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "CKD3 Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 601
+    },
+    {
+      "code": "431857002",
+      "description": "Chronic kidney disease stage 4 (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "CKD4 Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 357
+    },
+    {
+      "code": "278860009",
+      "description": "Chronic low back pain (finding)",
+      "module": "prescribing_opioids_for_chronic_pain_and_treatment_of_oud.json",
+      "state": "Condition_Chronic_Low_Back_Pain",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 2116
+    },
+    {
+      "code": "1121000119107",
+      "description": "Chronic neck pain (finding)",
+      "module": "prescribing_opioids_for_chronic_pain_and_treatment_of_oud.json",
+      "state": "Condition_Chronic_Neck_Pain",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 1348
+    },
+    {
+      "code": "185086009",
+      "description": "Chronic obstructive bronchitis (disorder)",
+      "module": "copd.json",
+      "state": "Chronic_Bronchitis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 158
+    },
+    {
+      "code": "82423001",
+      "description": "Chronic pain (finding)",
+      "module": "opioid_addiction.json",
+      "state": "Enter_Directed_Use_Condition2",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_prescription"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 2892
+    },
+    {
+      "code": "698754002",
+      "description": "Chronic paralysis due to lesion of spinal cord (disorder)",
+      "module": "injuries.json",
+      "state": "Neurological_Damage",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 12
+    },
+    {
+      "code": "40055000",
+      "description": "Chronic sinusitis (disorder)",
+      "module": "sinusitis.json",
+      "state": "Diagnose_Chronic_Sinusitis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2384
+    },
+    {
+      "code": "61977001",
+      "description": "Chronic type B viral hepatitis (disorder)",
+      "module": "hiv/hiv_baseline.json",
+      "state": "Hepatitis B Diagnosis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "359817006",
+      "description": "Closed fracture of hip (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Hip",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 105
+    },
+    {
+      "code": "156073000",
+      "description": "Complete miscarriage (disorder)",
+      "module": "pregnancy.json",
+      "state": "Early_Uknown_Complication",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 375
+    },
+    {
+      "code": "609496007",
+      "description": "Complication occurring during pregnancy (disorder)",
+      "module": "pregnancy.json",
+      "state": "Unknown_Complication",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 16
+    },
+    {
+      "code": "110030002",
+      "description": "Concussion injury of brain (disorder)",
+      "module": "injuries.json",
+      "state": "Concussion_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 827
+    },
+    {
+      "code": "62564004",
+      "description": "Concussion with loss of consciousness (disorder)",
+      "module": "injuries.json",
+      "state": "Moderate_Concussion",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 162
+    },
+    {
+      "code": "62106007",
+      "description": "Concussion with no loss of consciousness (disorder)",
+      "module": "injuries.json",
+      "state": "Mild_Concussion",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 617
+    },
+    {
+      "code": "302297009",
+      "description": "Congenital deformity of foot (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Foot_Deformity",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "37849005",
+      "description": "Congenital uterine anomaly (disorder)",
+      "module": "pregnancy.json",
+      "state": "Uterine_Anomaly",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 32
+    },
+    {
+      "code": "14760008",
+      "description": "Constipation (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Constipation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 6
+    },
+    {
+      "code": "40275004",
+      "description": "Contact dermatitis (disorder)",
+      "module": "dermatitis.json",
+      "state": "Adult_Contact_Dermatitis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 60
+    },
+    {
+      "code": "49727002",
+      "description": "Cough (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Cough Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 644
+    },
+    {
+      "code": "190905008",
+      "description": "Cystic fibrosis (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Cystic_Fibrosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "278558000",
+      "description": "Dental filling lost (finding)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Dental filling lost",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1233
+    },
+    {
+      "code": "6525002",
+      "description": "Dependent drug abuse (disorder)",
+      "module": "opioid_addiction.json",
+      "state": "Drug Addiction",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_prescription"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 569
+    },
+    {
+      "code": "427089005",
+      "description": "Diabetes mellitus due to cystic fibrosis (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Develop_Diabetes",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "44054006",
+      "description": "Diabetes mellitus type 2 (disorder)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Diagnose_Diabetes",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "precursor_names_target:known"
+      ],
+      "case_count": 848
+    },
+    {
+      "code": "267060006",
+      "description": "Diarrhea symptom (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Diarrhea Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 31
+    },
+    {
+      "code": "876882001",
+      "description": "Died in hospice (finding)",
+      "module": "hospice_treatment.json",
+      "state": "Died_in_Hospice",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "days_until_death",
+        "hospice",
+        "hospice_days"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 79
+    },
+    {
+      "code": "840539006",
+      "description": "Disease caused by severe acute respiratory syndrome coronavirus 2 (disorder)",
+      "module": "covid19/infection.json",
+      "state": "Diagnosed COVID",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:Cystic_Fibrosis",
+        "Attribute:asthma_condition",
+        "Attribute:breast_cancer_condition",
+        "Attribute:chf",
+        "Attribute:copd_variant",
+        "Attribute:smoker",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "colorectal_cancer_stage",
+        "coronary_heart_disease",
+        "diabetes",
+        "homelessness_category",
+        "hypertension",
+        "lung_cancer",
+        "lupus_careplan",
+        "ra_careplan"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 948
+    },
+    {
+      "code": "157265008",
+      "description": "Dislocation of hip joint (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Hip_Dislocation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 6
+    },
+    {
+      "code": "127013003",
+      "description": "Disorder of kidney due to diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "Diagnose_Nephropathy",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "nephropathy"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1136
+    },
+    {
+      "code": "62718007",
+      "description": "Dribbling from mouth (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Anterior_Drooling",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 6
+    },
+    {
+      "code": "47318007",
+      "description": "Drug-induced neutropenia (disorder)",
+      "module": "acute_myeloid_leukemia.json",
+      "state": "Non-Febrile_Neutropenia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "267036007",
+      "description": "Dyspnea (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Shortness of Breath Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 207
+    },
+    {
+      "code": "15802004",
+      "description": "Dystonia (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Dystonia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "198992004",
+      "description": "Eclampsia in pregnancy (disorder)",
+      "module": "pregnancy.json",
+      "state": "Develop_Eclampsia",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 240
+    },
+    {
+      "code": "473461003",
+      "description": "Educated to high school level (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Education_Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2830
+    },
+    {
+      "code": "46177005",
+      "description": "End-stage renal disease (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "Diagnose_End_Stage_Renal_Disease",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "microalbuminuria",
+        "nephropathy",
+        "proteinuria"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 208
+    },
+    {
+      "code": "403190006",
+      "description": "Epidermal burn of skin (disorder)",
+      "module": "injuries.json",
+      "state": "First_Degree_Burn",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 253
+    },
+    {
+      "code": "84757009",
+      "description": "Epilepsy (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Epilepsy",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 224
+    },
+    {
+      "code": "59621000",
+      "description": "Essential hypertension (disorder)",
+      "module": "hypertension.json",
+      "state": "Diagnose_Hypertension",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:chf",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "coronary_heart_disease",
+        "hypertension",
+        "pregnant",
+        "years_until_hypertension_onset"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2650
+    },
+    {
+      "code": "53827007",
+      "description": "Excessive salivation (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Sialorrhea",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 14
+    },
+    {
+      "code": "370247008",
+      "description": "Facial laceration (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Of_Face",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 320
+    },
+    {
+      "code": "230265002",
+      "description": "Familial Alzheimer's disease of early onset (disorder)",
+      "module": "dementia.json",
+      "state": "EarlyOnsetAlzheimersOnset",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 77
+    },
+    {
+      "code": "84229001",
+      "description": "Fatigue (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Fatigue Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 416
+    },
+    {
+      "code": "409089005",
+      "description": "Febrile neutropenia (disorder)",
+      "module": "acute_myeloid_leukemia.json",
+      "state": "Febrile_Neutropenia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "707577004",
+      "description": "Female infertility due to cystic fibrosis (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Female_Infertility",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "267253006",
+      "description": "Fetus with chromosomal abnormality (disorder)",
+      "module": "pregnancy.json",
+      "state": "Late_Fetal_Chromosomal_Anomaly",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 64
+    },
+    {
+      "code": "386661006",
+      "description": "Fever (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Fever Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 871
+    },
+    {
+      "code": "203082005",
+      "description": "Fibromyalgia (disorder)",
+      "module": "prescribing_opioids_for_chronic_pain_and_treatment_of_oud.json",
+      "state": "Condition_Fibromyalgia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [],
+      "case_count": 297
+    },
+    {
+      "code": "16114001",
+      "description": "Fracture of ankle (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Ankle",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 300
+    },
+    {
+      "code": "125605004",
+      "description": "Fracture of bone (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Bone_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1504
+    },
+    {
+      "code": "58150001",
+      "description": "Fracture of clavicle (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Clavicle",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 332
+    },
+    {
+      "code": "65966004",
+      "description": "Fracture of forearm (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Arm",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 397
+    },
+    {
+      "code": "263172003",
+      "description": "Fracture of mandible (disorder)",
+      "module": "injuries/broken_jaw.json",
+      "state": "Broken Jaw",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 44
+    },
+    {
+      "code": "33737001",
+      "description": "Fracture of rib (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Rib",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 175
+    },
+    {
+      "code": "1734006",
+      "description": "Fracture of vertebral column with spinal cord injury (disorder)",
+      "module": "injuries.json",
+      "state": "Spinal_Cord_Damage",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 12
+    },
+    {
+      "code": "15724005",
+      "description": "Fracture of vertebral column without spinal cord injury (disorder)",
+      "module": "injuries.json",
+      "state": "No_Spinal_Cord_Damage",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 11
+    },
+    {
+      "code": "263102004",
+      "description": "Fracture subluxation of wrist (disorder)",
+      "module": "injuries.json",
+      "state": "Broken_Wrist",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 315
+    },
+    {
+      "code": "278588009",
+      "description": "Fractured dental filling (finding)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Fractured dental filling",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1219
+    },
+    {
+      "code": "403192003",
+      "description": "Full thickness burn (disorder)",
+      "module": "injuries.json",
+      "state": "Third_Degree_Burn",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 18
+    },
+    {
+      "code": "160903007",
+      "description": "Full-time employment (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Employed Full Time",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 9076
+    },
+    {
+      "code": "235919008",
+      "description": "Gallbladder calculus (disorder)",
+      "module": "gallstones.json",
+      "state": "Gallstones",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 29
+    },
+    {
+      "code": "235595009",
+      "description": "Gastroesophageal reflux disease (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_GERD",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 26
+    },
+    {
+      "code": "18718003",
+      "description": "Gingival disease (disorder)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Gingival disease",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5299
+    },
+    {
+      "code": "66383009",
+      "description": "Gingivitis (disorder)",
+      "module": "wellness_encounters.json",
+      "state": "Gingivitis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Attribute:criminal_record",
+        "Attribute:employment_condition",
+        "Attribute:ptsd",
+        "Attribute:quit smoking age",
+        "Attribute:refugee",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [
+        "birth_country",
+        "education",
+        "first_language",
+        "food_insecurity",
+        "homeless",
+        "household_size",
+        "income",
+        "insurance_status",
+        "marital_status",
+        "no_vehicle_access",
+        "opioid_addiction_careplan",
+        "phq2_score",
+        "poverty_ratio",
+        "pregnant",
+        "severe_housing_cost_burden",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 9322
+    },
+    {
+      "code": "90560007",
+      "description": "Gout",
+      "module": "gout.json",
+      "state": "Gout",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 75
+    },
+    {
+      "code": "283545005",
+      "description": "Gunshot wound (disorder)",
+      "module": "injuries.json",
+      "state": "Gunshot_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 76
+    },
+    {
+      "code": "266948004",
+      "description": "Has a criminal record (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Smooth Criminal",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2272
+    },
+    {
+      "code": "25064002",
+      "description": "Headache (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Headache Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 150
+    },
+    {
+      "code": "84114007",
+      "description": "Heart failure (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Heart Failure",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 13
+    },
+    {
+      "code": "66857006",
+      "description": "Hemoptysis (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Hemoptysis Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "47200007",
+      "description": "High risk pregnancy (finding)",
+      "module": "pregnancy.json",
+      "state": "Non_Low_Risk_Pregnancy",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "152621000119105",
+      "description": "History of allotransplantation of bone marrow (situation)",
+      "module": "bone_marrow_transplant.json",
+      "state": "History of allotransplantation of bone marrow",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "bone_marrow"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 3
+    },
+    {
+      "code": "429280009",
+      "description": "History of amputation of foot (situation)",
+      "module": "metabolic_syndrome/amputations.json",
+      "state": "History_of_Foot_Amputation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 3
+    },
+    {
+      "code": "119481000119105",
+      "description": "History of aortic valve repair (situation)",
+      "module": "heart/avrr/savrr_operation.json",
+      "state": "AV Repair History",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "cardiac_surgery"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 1
+    },
+    {
+      "code": "1231000119100",
+      "description": "History of aortic valve replacement (situation)",
+      "module": "heart/avrr/savrr_operation.json",
+      "state": "AV Replacement History",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "cardiac_surgery"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 80
+    },
+    {
+      "code": "428251008",
+      "description": "History of appendectomy (situation)",
+      "module": "appendicitis.json",
+      "state": "History_of_Appendectomy",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 471
+    },
+    {
+      "code": "161679004",
+      "description": "History of artificial joint (situation)",
+      "module": "total_joint_replacement.json",
+      "state": "History of Joint Replacement",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "assessment_done",
+        "joint_replacement"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 9
+    },
+    {
+      "code": "108631000119101",
+      "description": "History of autologous bone marrow transplant (situation)",
+      "module": "bone_marrow_transplant.json",
+      "state": "History of autologous bone marrow transplant",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "bone_marrow"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 24
+    },
+    {
+      "code": "399261000",
+      "description": "History of coronary artery bypass grafting (situation)",
+      "module": "heart/cabg/operation.json",
+      "state": "History_of_CABG",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:hyperglycemia"
+      ],
+      "hidden_gates": [
+        "diabetes",
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 770
+    },
+    {
+      "code": "698423002",
+      "description": "History of disarticulation at wrist (situation)",
+      "module": "metabolic_syndrome/amputations.json",
+      "state": "History_of_Hand_Amputation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 0
+    },
+    {
+      "code": "161622006",
+      "description": "History of lower limb amputation (situation)",
+      "module": "metabolic_syndrome/amputations.json",
+      "state": "History_of_Lower_Limb_Amputation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 7
+    },
+    {
+      "code": "399211009",
+      "description": "History of myocardial infarction (situation)",
+      "module": "heart/cabg_sequence.json",
+      "state": "Reason",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:cardiac_surgery_reason"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 494
+    },
+    {
+      "code": "153351000119102",
+      "description": "History of peripheral stem cell transplant (situation)",
+      "module": "bone_marrow_transplant.json",
+      "state": "History of peripheral stem cell transplant",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "bone_marrow"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 15
+    },
+    {
+      "code": "161665007",
+      "description": "History of renal transplant (situation)",
+      "module": "kidney_transplant.json",
+      "state": "History of Transplant",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 355
+    },
+    {
+      "code": "1290882004",
+      "description": "History of seizure (situation)",
+      "module": "epilepsy.json",
+      "state": "History_of_Seizure",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 403
+    },
+    {
+      "code": "267020005",
+      "description": "History of tubal ligation (situation)",
+      "module": "contraceptives/female_sterilization.json",
+      "state": "History_of_Tubal_Ligation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 1260
+    },
+    {
+      "code": "120991000119102",
+      "description": "History of undergoing in utero procedure while a fetus (situation)",
+      "module": "spina_bifida.json",
+      "state": "Had_Fetal_Surgery",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 0
+    },
+    {
+      "code": "161621004",
+      "description": "History of upper limb amputation (situation)",
+      "module": "metabolic_syndrome/amputations.json",
+      "state": "History_of_Upper_Limb_Amputation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 0
+    },
+    {
+      "code": "32911000",
+      "description": "Homeless (finding)",
+      "module": "homelessness.json",
+      "state": "Homeless_Condition",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "homelessness_category",
+        "instances_of_homelessness",
+        "sexual_orientation"
+      ],
+      "demo_gates": [
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 200
+    },
+    {
+      "code": "105531004",
+      "description": "Housing unsatisfactory (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Housing Issue",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1448
+    },
+    {
+      "code": "86406008",
+      "description": "Human immunodeficiency virus infection (disorder)",
+      "module": "hiv_diagnosis.json",
+      "state": "Diagnosis Later Years",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 23
+    },
+    {
+      "code": "230745008",
+      "description": "Hydrocephalus (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Hydrocephalus",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "80394007",
+      "description": "Hyperglycemia (disorder)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Hyperglycemia",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Observation",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 391
+    },
+    {
+      "code": "55822004",
+      "description": "Hyperlipidemia (disorder)",
+      "module": "veteran_hyperlipidemia.json",
+      "state": "Hyperlipidemia Condition Start",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1136
+    },
+    {
+      "code": "302870006",
+      "description": "Hypertriglyceridemia (disorder)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Hypertriglyceridemia",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Observation",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 825
+    },
+    {
+      "code": "389087006",
+      "description": "Hypoxemia (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Hypoxemia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 177
+    },
+    {
+      "code": "83664006",
+      "description": "Idiopathic atrophic hypothyroidism (disorder)",
+      "module": "hypothyroidism.json",
+      "state": "Hypothyroid Condition Onset",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 96
+    },
+    {
+      "code": "196416002",
+      "description": "Impacted molars (disorder)",
+      "module": "opioid_addiction.json",
+      "state": "Enter_Directed_Use_Condition1",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_prescription"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 569
+    },
+    {
+      "code": "11218009",
+      "description": "Infection caused by Pseudomonas aeruginosa (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Develop_Infection_1",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "406602003",
+      "description": "Infection caused by Staphylococcus aureus (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Develop_Infection_2",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "427898007",
+      "description": "Infection of tooth (disorder)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Infection of tooth",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "missing_teeth",
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1721
+    },
+    {
+      "code": "312157006",
+      "description": "Infectious mediastinitis (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Infectious_mediastinitis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 21
+    },
+    {
+      "code": "444470001",
+      "description": "Injury of anterior cruciate ligament (disorder)",
+      "module": "injuries.json",
+      "state": "Torn_ACL",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 52
+    },
+    {
+      "code": "86175003",
+      "description": "Injury of heart (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Acute Cardiac Injury",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "40095003",
+      "description": "Injury of kidney (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Acute Kidney Injury",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 12
+    },
+    {
+      "code": "125601008",
+      "description": "Injury of knee (disorder)",
+      "module": "injuries.json",
+      "state": "Knee_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 245
+    },
+    {
+      "code": "444448004",
+      "description": "Injury of medial collateral ligament of knee (disorder)",
+      "module": "injuries.json",
+      "state": "Torn_MCL",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 65
+    },
+    {
+      "code": "90460009",
+      "description": "Injury of neck (disorder)",
+      "module": "injuries.json",
+      "state": "Whiplash_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 541
+    },
+    {
+      "code": "307731004",
+      "description": "Injury of tendon of the rotator cuff of shoulder (disorder)",
+      "module": "injuries.json",
+      "state": "Torn_Rotator_Cuff",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "opioid_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [],
+      "case_count": 158
+    },
+    {
+      "code": "110359009",
+      "description": "Intellectual disability (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Intellectual_Disability",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 17
+    },
+    {
+      "code": "414545008",
+      "description": "Ischemic heart disease (disorder)",
+      "module": "stable_ischemic_heart_disease.json",
+      "state": "IHD_Start",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1853
+    },
+    {
+      "code": "57676002",
+      "description": "Joint pain",
+      "module": "covid19/symptoms.json",
+      "state": "Joint Pain Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 131
+    },
+    {
+      "code": "213150003",
+      "description": "Kidney transplant failure and rejection (disorder)",
+      "module": "kidney_transplant.json",
+      "state": "Transplant Rejection",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 21
+    },
+    {
+      "code": "414564002",
+      "description": "Kyphosis deformity of spine (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Kyphosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "312608009",
+      "description": "Laceration - injury (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1507
+    },
+    {
+      "code": "284551006",
+      "description": "Laceration of foot (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Of_Foot",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 305
+    },
+    {
+      "code": "283371005",
+      "description": "Laceration of forearm (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Of_Arm",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 321
+    },
+    {
+      "code": "284549007",
+      "description": "Laceration of hand (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Of_Hand",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 317
+    },
+    {
+      "code": "283385000",
+      "description": "Laceration of thigh (disorder)",
+      "module": "injuries.json",
+      "state": "Laceration_Of_Leg",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 328
+    },
+    {
+      "code": "713458007",
+      "description": "Lack of access to transportation (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "No Transport Access",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1080
+    },
+    {
+      "code": "278598003",
+      "description": "Leaking dental filling (finding)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Leaking dental filling",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1184
+    },
+    {
+      "code": "93143009",
+      "description": "Leukemia, disease (disorder)",
+      "module": "trigger_bone_marrow_transplant.json",
+      "state": "Leukemia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 24
+    },
+    {
+      "code": "423315002",
+      "description": "Limited social contact (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Limited Contact",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 6256
+    },
+    {
+      "code": "201834006",
+      "description": "Localized, primary osteoarthritis of the hand (disorder)",
+      "module": "osteoarthritis.json",
+      "state": "OA_Of_The_Hand",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 226
+    },
+    {
+      "code": "278602001",
+      "description": "Loose dental filling (finding)",
+      "module": "dental_and_oral_examination.json",
+      "state": "Loose dental filling",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1231
+    },
+    {
+      "code": "36955009",
+      "description": "Loss of taste (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Loss of Taste Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 526
+    },
+    {
+      "code": "37320007",
+      "description": "Loss of teeth (disorder)",
+      "module": "dentures.json",
+      "state": "Loss of teeth",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "missing_teeth"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1536
+    },
+    {
+      "code": "200936003",
+      "description": "Lupus erythematosus (disorder)",
+      "module": "lupus.json",
+      "state": "Lupus",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "97331000119101",
+      "description": "Macular edema and retinopathy due to type 2 diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome/diabetic_retinopathy_diagnoses.json",
+      "state": "Diagnose_Macular_Edema",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "macular_edema"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 17
+    },
+    {
+      "code": "36923009",
+      "description": "Major depression, single episode (disorder)",
+      "module": "veteran_mdd.json",
+      "state": "MDD Episode",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 3
+    },
+    {
+      "code": "370143000",
+      "description": "Major depressive disorder (disorder)",
+      "module": "veteran_mdd.json",
+      "state": "MDD Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 58
+    },
+    {
+      "code": "707418001",
+      "description": "Male infertility due to cystic fibrosis (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Male_Infertility",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "254837009",
+      "description": "Malignant neoplasm of breast (disorder)",
+      "module": "breast_cancer.json",
+      "state": "Breast Cancer",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 182
+    },
+    {
+      "code": "363406005",
+      "description": "Malignant neoplasm of colon (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Stage_III",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [
+        "screening_work_up:known"
+      ],
+      "case_count": 77
+    },
+    {
+      "code": "206523001",
+      "description": "Meconium ileus (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Meconium Ileus",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "314529007",
+      "description": "Medication review due (situation)",
+      "module": "med_rec.json",
+      "state": "Medication_Review_Due",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 11504
+    },
+    {
+      "code": "171131006",
+      "description": "Meningocele (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Meningocele",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "414667000",
+      "description": "Meningomyelocele (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Myelomeningocele",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "237602007",
+      "description": "Metabolic syndrome X (disorder)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Metabolic_Syndrome",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Attribute:hyperglycemia",
+        "Attribute:hypertriglyceridemia",
+        "Attribute:obesity",
+        "Observation",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "hypertension",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1694
+    },
+    {
+      "code": "94260004",
+      "description": "Metastatic malignant neoplasm to colon (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Stage_IV",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 12
+    },
+    {
+      "code": "94503003",
+      "description": "Metastatic malignant neoplasm to prostate (disorder)",
+      "module": "veteran_prostate_cancer.json",
+      "state": "Stage 4 Prostate Cancer",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Observation"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 25
+    },
+    {
+      "code": "90781000119102",
+      "description": "Microalbuminuria due to type 2 diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "Diagnose_Microalbuminuria",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "microalbuminuria",
+        "nephropathy"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 948
+    },
+    {
+      "code": "19169002",
+      "description": "Miscarriage in first trimester (disorder)",
+      "module": "pregnancy.json",
+      "state": "Miscarriage_In_First_Trimester",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 576
+    },
+    {
+      "code": "85116003",
+      "description": "Miscarriage in second trimester (disorder)",
+      "module": "pregnancy.json",
+      "state": "Miscarriage_In_Second_Trimester",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 110
+    },
+    {
+      "code": "361055000",
+      "description": "Misuses drugs (finding)",
+      "module": "encounter/substance_use_screening.json",
+      "state": "Drug Use",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 956
+    },
+    {
+      "code": "48724000",
+      "description": "Mitral valve regurgitation (disorder)",
+      "module": "vhd_mitral.json",
+      "state": "Mitral Valve Regurgitation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 52
+    },
+    {
+      "code": "79619009",
+      "description": "Mitral valve stenosis (disorder)",
+      "module": "vhd_mitral.json",
+      "state": "Mitral Valve Stenosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 7
+    },
+    {
+      "code": "109989006",
+      "description": "Multiple myeloma (disorder)",
+      "module": "trigger_bone_marrow_transplant.json",
+      "state": "Multiple Myeloma",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 20
+    },
+    {
+      "code": "68962001",
+      "description": "Muscle pain (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Muscle Pain Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 131
+    },
+    {
+      "code": "22298006",
+      "description": "Myocardial infarction (disorder)",
+      "module": "myocardial_infarction.json",
+      "state": "MI_Onset",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "ACS_CABG_referral",
+        "ace_arb",
+        "acs_antiplatelet",
+        "beta_blocker",
+        "ckd",
+        "statin",
+        "stemi_cardiology_approach"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 269
+    },
+    {
+      "code": "68235000",
+      "description": "Nasal congestion (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Nasal Congestion Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 53
+    },
+    {
+      "code": "422587007",
+      "description": "Nausea (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Nausea Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known"
+      ],
+      "case_count": 44
+    },
+    {
+      "code": "126906006",
+      "description": "Neoplasm of prostate (disorder)",
+      "module": "veteran_prostate_cancer.json",
+      "state": "Prostate_Cancer",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Observation"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 168
+    },
+    {
+      "code": "368581000119106",
+      "description": "Neuropathy due to type 2 diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Diagnose_Neuropathy",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 256
+    },
+    {
+      "code": "424132000",
+      "description": "Non-small cell carcinoma of lung, TNM stage 1 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "NSCLC I",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 71
+    },
+    {
+      "code": "425048006",
+      "description": "Non-small cell carcinoma of lung, TNM stage 2 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "NSCLC II",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "422968005",
+      "description": "Non-small cell carcinoma of lung, TNM stage 3 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "NSCLC III",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "423121009",
+      "description": "Non-small cell carcinoma of lung, TNM stage 4 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "NSCLC IV",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "254637007",
+      "description": "Non-small cell lung cancer (disorder)",
+      "module": "lung_cancer.json",
+      "state": "NSCLC",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 71
+    },
+    {
+      "code": "1551000119108",
+      "description": "Nonproliferative diabetic retinopathy due to type II diabetes mellitus",
+      "module": "metabolic_syndrome/diabetic_retinopathy_diagnoses.json",
+      "state": "Diagnose_Nonproliferative_Retinopathy",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "diabetic_retinopathy_stage"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 210
+    },
+    {
+      "code": "72892002",
+      "description": "Normal pregnancy (finding)",
+      "module": "pregnancy.json",
+      "state": "Become_Pregnant",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:anemia",
+        "Attribute:pregnancy_complication",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "RH_NEG",
+        "anemia_pregnancy",
+        "birth_type",
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2090
+    },
+    {
+      "code": "741062008",
+      "description": "Not in labor force (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Employed Not",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5455
+    },
+    {
+      "code": "78275009",
+      "description": "Obstructive sleep apnea syndrome (disorder)",
+      "module": "sleep_apnea.json",
+      "state": "Obstructive Sleep Apnea",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 341
+    },
+    {
+      "code": "224295006",
+      "description": "Only received primary school education (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Education Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1098
+    },
+    {
+      "code": "5602001",
+      "description": "Opioid abuse",
+      "module": "veteran_substance_abuse_treatment.json",
+      "state": "Opioid Abuse Diagnosis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "opioid_addiction"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 126
+    },
+    {
+      "code": "239872002",
+      "description": "Osteoarthritis of hip (disorder)",
+      "module": "osteoarthritis.json",
+      "state": "OA_Of_The_Hip",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 215
+    },
+    {
+      "code": "239873007",
+      "description": "Osteoarthritis of knee (disorder)",
+      "module": "osteoarthritis.json",
+      "state": "OA_Of_The_Knee",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 551
+    },
+    {
+      "code": "64859006",
+      "description": "Osteoporosis (disorder)",
+      "module": "injuries.json",
+      "state": "Diagnose_Osteoporosis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 489
+    },
+    {
+      "code": "443165006",
+      "description": "Osteoporotic fracture of bone (disorder)",
+      "module": "injuries.json",
+      "state": "Diagnose_Fracture_Due_to_Osteoporosis",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 138
+    },
+    {
+      "code": "65363002",
+      "description": "Otitis media (disorder)",
+      "module": "ear_infections.json",
+      "state": "Gets_Ear_Infection",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1289
+    },
+    {
+      "code": "1149222004",
+      "description": "Overdose (disorder)",
+      "module": "opioid_addiction.json",
+      "state": "Addiction_Overdose",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction_careplan",
+        "opioid_prescription"
+      ],
+      "demo_gates": [
+        "Age",
+        "Date",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 530
+    },
+    {
+      "code": "109838007",
+      "description": "Overlapping malignant neoplasm of colon (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Stage_II",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 82
+    },
+    {
+      "code": "22253000",
+      "description": "Pain (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Pain",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 10
+    },
+    {
+      "code": "160904001",
+      "description": "Part-time employment (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Employed Part Time",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 7388
+    },
+    {
+      "code": "403191005",
+      "description": "Partial thickness burn (disorder)",
+      "module": "injuries.json",
+      "state": "Second_Degree_Burn",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 170
+    },
+    {
+      "code": "246677007",
+      "description": "Passive conjunctival congestion (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Conjunctival Congestion Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 9
+    },
+    {
+      "code": "161744009",
+      "description": "Past pregnancy history of miscarriage (situation)",
+      "module": "pregnancy.json",
+      "state": "History_of_Miscarriage",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 2220
+    },
+    {
+      "code": "446096008",
+      "description": "Perennial allergic rhinitis (disorder)",
+      "module": "allergic_rhinitis.json",
+      "state": "Has_Perennial_Allergic_Rhinitis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 185
+    },
+    {
+      "code": "232353008",
+      "description": "Perennial allergic rhinitis with seasonal variation (disorder)",
+      "module": "allergic_rhinitis.json",
+      "state": "Has_Perennial_And_Seasonal_Allergic_Rhinitis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 190
+    },
+    {
+      "code": "233604007",
+      "description": "Pneumonia (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Pneumonia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 272
+    },
+    {
+      "code": "68496003",
+      "description": "Polyp of colon (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Detect_Adenoma",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 789
+    },
+    {
+      "code": "398152000",
+      "description": "Poor muscle tone (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Central_Hypotonia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 21
+    },
+    {
+      "code": "129574000",
+      "description": "Postoperative myocardial infarction (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Postoperative_myocardial_infarction",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "275408006",
+      "description": "Postoperative renal failure (disorder)",
+      "module": "heart/avrr/outcomes.json",
+      "state": "Postoperative_renal_failure",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "698819004",
+      "description": "Postoperative sepsis (disorder)",
+      "module": "heart/cabg/outcomes.json",
+      "state": "Postoperative sepsis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "operative_status"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "47505003",
+      "description": "Posttraumatic stress disorder (disorder)",
+      "module": "veteran_ptsd.json",
+      "state": "PTSD Episode",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mTBI"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 15
+    },
+    {
+      "code": "398254007",
+      "description": "Pre-eclampsia (disorder)",
+      "module": "pregnancy.json",
+      "state": "Develop_Pre_Eclampsia",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 214
+    },
+    {
+      "code": "714628002",
+      "description": "Prediabetes (finding)",
+      "module": "metabolic_syndrome_care.json",
+      "state": "Diagnose_Prediabetes",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active CarePlan",
+        "Active Condition",
+        "Active Medication",
+        "Attribute:anemia",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "ckd",
+        "diabetes",
+        "diabetes_severity",
+        "microalbuminuria",
+        "nephropathy",
+        "neuropathy",
+        "prediabetes",
+        "pregnant",
+        "proteinuria"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 4400
+    },
+    {
+      "code": "4557003",
+      "description": "Preinfarction syndrome (disorder)",
+      "module": "heart/nsteacs_pathway.json",
+      "state": "Unstable_Angina",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 30
+    },
+    {
+      "code": "1163220007",
+      "description": "Pressure injury stage II (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Condition_Pressure_Ulcer_3",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "109570002",
+      "description": "Primary dental caries (disorder)",
+      "module": "dental_and_oral_examination.json",
+      "state": "New Cavity",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "orthodontic_appliance"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4775
+    },
+    {
+      "code": "95417003",
+      "description": "Primary fibromyalgia syndrome (disorder)",
+      "module": "fibromyalgia.json",
+      "state": "Fibromyalgia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Date",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 36
+    },
+    {
+      "code": "93761005",
+      "description": "Primary malignant neoplasm of colon (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Stage_I",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 21
+    },
+    {
+      "code": "67811000119102",
+      "description": "Primary small cell malignant neoplasm of lung, TNM stage 1 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "SCLC I",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 14
+    },
+    {
+      "code": "67821000119109",
+      "description": "Primary small cell malignant neoplasm of lung, TNM stage 2 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "SCLC II",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "67831000119107",
+      "description": "Primary small cell malignant neoplasm of lung, TNM stage 3 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "SCLC III",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "67841000119103",
+      "description": "Primary small cell malignant neoplasm of lung, TNM stage 4 (disorder)",
+      "module": "lung_cancer.json",
+      "state": "SCLC IV",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "1501000119109",
+      "description": "Proliferative diabetic retinopathy due to type II diabetes mellitus",
+      "module": "metabolic_syndrome/diabetic_retinopathy_diagnoses.json",
+      "state": "Diagnose_Proliferative_Retinopathy",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "diabetic_retinopathy_stage"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 16
+    },
+    {
+      "code": "157141000119108",
+      "description": "Proteinuria due to type 2 diabetes mellitus (disorder)",
+      "module": "metabolic_syndrome/kidney_conditions.json",
+      "state": "Diagnose_Proteinuria",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "microalbuminuria",
+        "nephropathy",
+        "proteinuria"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 670
+    },
+    {
+      "code": "236077008",
+      "description": "Protracted diarrhea (finding)",
+      "module": "colorectal_cancer.json",
+      "state": "Colorectal_Cancer_Symptom_1",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 26
+    },
+    {
+      "code": "87433001",
+      "description": "Pulmonary emphysema (disorder)",
+      "module": "copd.json",
+      "state": "Emphysema",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Socioeconomic Status"
+      ],
+      "exclusion_flags": [],
+      "case_count": 226
+    },
+    {
+      "code": "91434003",
+      "description": "Pulmonic valve regurgitation (disorder)",
+      "module": "vhd_pulmonic.json",
+      "state": "Pulmonic Valve Regurgitation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "56786000",
+      "description": "Pulmonic valve stenosis (disorder)",
+      "module": "vhd_pulmonic.json",
+      "state": "Pulmonic Valve Stenosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 27
+    },
+    {
+      "code": "45816000",
+      "description": "Pyelonephritis (disorder)",
+      "module": "urinary_tract_infections.json",
+      "state": "Pyelonephritis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 25
+    },
+    {
+      "code": "224299000",
+      "description": "Received higher education (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Education_Onset_2",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5318
+    },
+    {
+      "code": "713197008",
+      "description": "Recurrent rectal polyp (disorder)",
+      "module": "colorectal_cancer.json",
+      "state": "Recurrent_Colorectal_Adenoma",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 249
+    },
+    {
+      "code": "197927001",
+      "description": "Recurrent urinary tract infection (disorder)",
+      "module": "urinary_tract_infections.json",
+      "state": "Recurrent UTI",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 479
+    },
+    {
+      "code": "446654005",
+      "description": "Refugee (person)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Refugee",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 500
+    },
+    {
+      "code": "204949001",
+      "description": "Renal dysplasia (disorder)",
+      "module": "chronic_kidney_disease.json",
+      "state": "Renal Dysplasia",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 19
+    },
+    {
+      "code": "424393004",
+      "description": "Reports of violence in the environment (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Violence",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 3803
+    },
+    {
+      "code": "1255252008",
+      "description": "Resorption of alveolar process due to dental trauma (disorder)",
+      "module": "dentures.json",
+      "state": "Needs Ridge Reconstruction",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "missing_teeth"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 158
+    },
+    {
+      "code": "271825005",
+      "description": "Respiratory distress (finding)",
+      "module": "covid19/outcomes.json",
+      "state": "Mild Respiratory Distress",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 177
+    },
+    {
+      "code": "267064002",
+      "description": "Retention of urine (disorder)",
+      "module": "cerebral_palsy.json",
+      "state": "Urinary_Retention",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "69896004",
+      "description": "Rheumatoid arthritis (disorder)",
+      "module": "rheumatoid_arthritis.json",
+      "state": "Rheumatoid_Arthritis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 27
+    },
+    {
+      "code": "160968000",
+      "description": "Risk activity involvement (finding)",
+      "module": "encounter/substance_use_screening.json",
+      "state": "Risky Activity",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2811
+    },
+    {
+      "code": "47693006",
+      "description": "Rupture of appendix (disorder)",
+      "module": "appendicitis.json",
+      "state": "Rupture",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 27
+    },
+    {
+      "code": "30832001",
+      "description": "Rupture of patellar tendon (disorder)",
+      "module": "injuries.json",
+      "state": "Torn_Patellar_Tendon",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 74
+    },
+    {
+      "code": "298382003",
+      "description": "Scoliosis deformity of spine (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Scoliosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "367498001",
+      "description": "Seasonal allergic rhinitis (disorder)",
+      "module": "allergic_rhinitis.json",
+      "state": "Has_Seasonal_Allergic_Rhinitis",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "atopic"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 100
+    },
+    {
+      "code": "128613002",
+      "description": "Seizure disorder (disorder)",
+      "module": "epilepsy.json",
+      "state": "Seizure_Disorder",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 403
+    },
+    {
+      "code": "91302008",
+      "description": "Sepsis (disorder)",
+      "module": "sepsis.json",
+      "state": "Sepsis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 405
+    },
+    {
+      "code": "448813005",
+      "description": "Sepsis caused by Pseudomonas (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Sepsis_Of_Paeruginosa",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "448417001",
+      "description": "Sepsis caused by Staphylococcus aureus (disorder)",
+      "module": "cystic_fibrosis.json",
+      "state": "Sepsis_of_Staphylococcus_aureus",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "770349000",
+      "description": "Sepsis caused by virus (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Sepsis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 73
+    },
+    {
+      "code": "76571007",
+      "description": "Septic shock (disorder)",
+      "module": "covid19/outcomes.json",
+      "state": "Septic Shock",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 91
+    },
+    {
+      "code": "1187604002",
+      "description": "Serving in military service (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Veteran",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "income",
+        "state",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 523
+    },
+    {
+      "code": "80583007",
+      "description": "Severe anxiety (panic) (finding)",
+      "module": "encounter/anxiety_screening.json",
+      "state": "Severe Anxiety Diagnosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1319
+    },
+    {
+      "code": "27942005",
+      "description": "Shock (disorder)",
+      "module": "congestive_heart_failure.json",
+      "state": "Shock Disorder",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 21
+    },
+    {
+      "code": "36971009",
+      "description": "Sinusitis (disorder)",
+      "module": "sinusitis.json",
+      "state": "Inflammation_Starts",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "precursor_names_target:known"
+      ],
+      "case_count": 671
+    },
+    {
+      "code": "73430006",
+      "description": "Sleep apnea (disorder)",
+      "module": "sleep_apnea.json",
+      "state": "Sleep Apnea",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "screening_work_up:known"
+      ],
+      "case_count": 161
+    },
+    {
+      "code": "39898005",
+      "description": "Sleep disorder (disorder)",
+      "module": "sleep_apnea.json",
+      "state": "Sleep Disorder",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 503
+    },
+    {
+      "code": "254632001",
+      "description": "Small cell carcinoma of lung (disorder)",
+      "module": "lung_cancer.json",
+      "state": "SCLC",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 14
+    },
+    {
+      "code": "449868002",
+      "description": "Smokes tobacco daily (finding)",
+      "module": "veteran_substance_abuse_treatment.json",
+      "state": "Smoking_Condition",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [
+        "opioid_addiction",
+        "smoking",
+        "smoking_medication"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 88
+    },
+    {
+      "code": "422650009",
+      "description": "Social isolation (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Isolation",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 6189
+    },
+    {
+      "code": "160701002",
+      "description": "Social migrant (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Social Migrant",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "income",
+        "state"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 8
+    },
+    {
+      "code": "267102003",
+      "description": "Sore throat (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Sore Throat Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:known",
+        "precursor_names_target:known"
+      ],
+      "case_count": 153
+    },
+    {
+      "code": "221360009",
+      "description": "Spasticity (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Cerebral_Palsy_Spasticity",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 31
+    },
+    {
+      "code": "76916001",
+      "description": "Spina bifida occulta (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Spina_Bifida_Occulta",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "384709000",
+      "description": "Sprain (morphologic abnormality)",
+      "module": "injuries.json",
+      "state": "Sprain_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1555
+    },
+    {
+      "code": "44465007",
+      "description": "Sprain of ankle (disorder)",
+      "module": "injuries.json",
+      "state": "Sprained_Ankle",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1103
+    },
+    {
+      "code": "70704007",
+      "description": "Sprain of wrist (disorder)",
+      "module": "injuries.json",
+      "state": "Sprained_Wrist",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 504
+    },
+    {
+      "code": "248595008",
+      "description": "Sputum finding (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Sputum Production Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 347
+    },
+    {
+      "code": "183996000",
+      "description": "Sterilization requested (situation)",
+      "module": "contraceptives/female_sterilization.json",
+      "state": "Sterilization Requested",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 314
+    },
+    {
+      "code": "43878008",
+      "description": "Streptococcal sore throat (disorder)",
+      "module": "sore_throat.json",
+      "state": "Acquire_Bacterial_Infection",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication",
+        "Observation"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1499
+    },
+    {
+      "code": "73595000",
+      "description": "Stress (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Stress",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 9076
+    },
+    {
+      "code": "86849004",
+      "description": "Suicidal poisoning (disorder)",
+      "module": "veteran_self_harm.json",
+      "state": "Attempt_By_Poisoning",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "6471006",
+      "description": "Suicidal thoughts (finding)",
+      "module": "veteran_self_harm.json",
+      "state": "Suicidal_Thoughts",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "44301001",
+      "description": "Suicide (event)",
+      "module": "veteran_self_harm.json",
+      "state": "Suicide_By_Other_Means",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "287191006",
+      "description": "Suicide by suffocation",
+      "module": "veteran_self_harm.json",
+      "state": "Suicide_By_Suffocation",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "287193009",
+      "description": "Suicide using firearm (event)",
+      "module": "veteran_self_harm.json",
+      "state": "Suicide_By_Firearm",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:mdd",
+        "Attribute:ptsd"
+      ],
+      "hidden_gates": [
+        "opioid_addiction",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 0
+    },
+    {
+      "code": "840544004",
+      "description": "Suspected disease caused by Severe acute respiratory coronavirus 2 (situation)",
+      "module": "covid19/infection.json",
+      "state": "Suspected COVID",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:Cystic_Fibrosis",
+        "Attribute:asthma_condition",
+        "Attribute:breast_cancer_condition",
+        "Attribute:chf",
+        "Attribute:copd_variant",
+        "Attribute:smoker",
+        "Vital Sign"
+      ],
+      "hidden_gates": [
+        "colorectal_cancer_stage",
+        "coronary_heart_disease",
+        "diabetes",
+        "homelessness_category",
+        "hypertension",
+        "lung_cancer",
+        "lupus_careplan",
+        "ra_careplan"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 977
+    },
+    {
+      "code": "162573006",
+      "description": "Suspected lung cancer (situation)",
+      "module": "lung_cancer.json",
+      "state": "Suspected Lung Cancer",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Attribute:quit smoking age",
+        "Attribute:smoker"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 85
+    },
+    {
+      "code": "315268008",
+      "description": "Suspected prostate cancer (situation)",
+      "module": "veteran_prostate_cancer.json",
+      "state": "Suspected_Prostate_Cancer",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:prostate_cancer",
+        "Observation"
+      ],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [
+        "situation_code:heuristic"
+      ],
+      "case_count": 140
+    },
+    {
+      "code": "239720000",
+      "description": "Tear of meniscus of knee (disorder)",
+      "module": "injuries.json",
+      "state": "Torn_Meniscus",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 57
+    },
+    {
+      "code": "67787004",
+      "description": "Tongue tie (disorder)",
+      "module": "dentures.json",
+      "state": "Needs Frenectomy",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "missing_teeth"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 28
+    },
+    {
+      "code": "11625007",
+      "description": "Torus mandibularis (disorder)",
+      "module": "dentures.json",
+      "state": "Needs Torus Mandibularis Removed",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "missing_teeth"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 9
+    },
+    {
+      "code": "46752004",
+      "description": "Torus palatinus (disorder)",
+      "module": "dentures.json",
+      "state": "Needs Torus Palatinus Removed",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "missing_teeth"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 172
+    },
+    {
+      "code": "428915008",
+      "description": "Toxoplasma gondii antibody detected (finding)",
+      "module": "hiv/hiv_baseline.json",
+      "state": "TG+ Condition",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "visible",
+      "visible_gates": [
+        "Active Condition"
+      ],
+      "hidden_gates": [
+        "ckd"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 2
+    },
+    {
+      "code": "427419006",
+      "description": "Transformed migraine (disorder)",
+      "module": "prescribing_opioids_for_chronic_pain_and_treatment_of_oud.json",
+      "state": "Condition_Migraine",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Date"
+      ],
+      "exclusion_flags": [],
+      "case_count": 93
+    },
+    {
+      "code": "266934004",
+      "description": "Transport problem (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Transport Problem",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1096
+    },
+    {
+      "code": "127295002",
+      "description": "Traumatic brain injury (disorder)",
+      "module": "mTBI.json",
+      "state": "Loss of Consciousness",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "veteran"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 5
+    },
+    {
+      "code": "81629009",
+      "description": "Traumatic dislocation of temporomandibular joint (disorder)",
+      "module": "injuries/broken_jaw.json",
+      "state": "Dislocated Jaw",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 49
+    },
+    {
+      "code": "262521009",
+      "description": "Traumatic injury of spinal cord and/or vertebral column (disorder)",
+      "module": "injuries.json",
+      "state": "Spinal_Injury",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 23
+    },
+    {
+      "code": "127294003",
+      "description": "Traumatic or nontraumatic brain injury (disorder)",
+      "module": "injuries.json",
+      "state": "Permanent_Brain_Damage",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 67
+    },
+    {
+      "code": "111287006",
+      "description": "Tricuspid valve regurgitation (disorder)",
+      "module": "vhd_tricuspid.json",
+      "state": "Tricuspid Valve Regurgitation",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 6
+    },
+    {
+      "code": "49915006",
+      "description": "Tricuspid valve stenosis (disorder)",
+      "module": "vhd_tricuspid.json",
+      "state": "Tricuspid Valve Stenosis",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 1
+    },
+    {
+      "code": "79586000",
+      "description": "Tubal pregnancy (disorder)",
+      "module": "pregnancy.json",
+      "state": "Ectopic_Pregnancy",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "pregnant"
+      ],
+      "demo_gates": [
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 75
+    },
+    {
+      "code": "288959006",
+      "description": "Unable to swallow saliva (finding)",
+      "module": "cerebral_palsy.json",
+      "state": "Posterior_Drooling",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 10
+    },
+    {
+      "code": "73438004",
+      "description": "Unemployed (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Unemployed",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "household_size",
+        "income",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 3496
+    },
+    {
+      "code": "10939881000119105",
+      "description": "Unhealthy alcohol drinking behavior (finding)",
+      "module": "encounter/substance_use_screening.json",
+      "state": "Drinking",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [
+        "Age",
+        "Gender"
+      ],
+      "exclusion_flags": [],
+      "case_count": 1742
+    },
+    {
+      "code": "68566005",
+      "description": "Urinary tract infectious disease (disorder)",
+      "module": "spina_bifida.json",
+      "state": "Condition_UTI",
+      "overall_class": "demo",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 4
+    },
+    {
+      "code": "706893006",
+      "description": "Victim of intimate partner abuse (finding)",
+      "module": "encounter/sdoh_hrsn.json",
+      "state": "Partner Violence",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:employment_condition"
+      ],
+      "hidden_gates": [
+        "education",
+        "first_language",
+        "food_insecurity",
+        "household_size",
+        "income",
+        "insurance_status",
+        "poverty_ratio",
+        "state",
+        "unemployed",
+        "veteran"
+      ],
+      "demo_gates": [
+        "Age",
+        "Race"
+      ],
+      "exclusion_flags": [],
+      "case_count": 5047
+    },
+    {
+      "code": "444814009",
+      "description": "Viral sinusitis (disorder)",
+      "module": "sinusitis.json",
+      "state": "Viral_Infection_Starts",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "demo",
+      "visible_gates": [
+        "Active Condition",
+        "Active Medication"
+      ],
+      "hidden_gates": [],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 7367
+    },
+    {
+      "code": "249497008",
+      "description": "Vomiting symptom (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Vomiting Onset",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [
+        "symptom_type:heuristic"
+      ],
+      "case_count": 44
+    },
+    {
+      "code": "56018004",
+      "description": "Wheezing (finding)",
+      "module": "covid19/symptoms.json",
+      "state": "Wheezing",
+      "overall_class": "hidden",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [],
+      "hidden_gates": [
+        "covid19_severity"
+      ],
+      "demo_gates": [],
+      "exclusion_flags": [],
+      "case_count": 207
+    },
+    {
+      "code": "39848009",
+      "description": "Whiplash injury to neck (disorder)",
+      "module": "injuries.json",
+      "state": "Whiplash",
+      "overall_class": "visible",
+      "overall_class_hard_gates": "hidden",
+      "visible_gates": [
+        "Active Condition",
+        "Attribute:dental_referral"
+      ],
+      "hidden_gates": [
+        "antibiotic_prescription",
+        "osteoporosis",
+        "otc_pain_reliever"
+      ],
+      "demo_gates": [
+        "Age"
+      ],
+      "exclusion_flags": [],
+      "case_count": 541
+    }
+  ]
+}

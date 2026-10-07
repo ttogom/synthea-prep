@@ -1,6 +1,6 @@
 # Leak Check Report: pop10000-seed20260916__scrub-heart_failure-9e8474
 
-Generated: 2026-09-29 07:26 UTC
+Generated: 2026-10-06 08:26 UTC
 
 Target codes: ['88805009']  
 Descriptions: ['Chronic congestive heart failure (disorder)']
@@ -11,7 +11,7 @@ Descriptions: ['Chronic congestive heart failure (disorder)']
 |-------|--------|
 | 1. Date assertion | PASS — 0 violations |
 | 2. Text/code scan | PASS (0 code/full-desc hits, 14190 partial match(es)) |
-| 3. Classifier probe | acc 70.7% ± 2.2%, baseline 75.0%, lift -4.3% |
+| 3. Classifier probe | acc 70.7% ± 2.2%, baseline 75.0%, lift -4.3%, bal-acc 76.8%, AUC 0.862 |
 | 4. Probe validation | shifted acc 100.0%, improvement +29.3% — ✓ probe valid |
 
 ## Check 1: Date assertion
@@ -95,16 +95,18 @@ Partial matches are expected before the cutoff (see SCRUBBING.md §Known limitat
 
 ## Check 3: Classifier probe
 
-TF-IDF (1–2 grams) + logistic regression, 5-fold stratified CV. Positives: scrubbed CHF patients. Negatives: source-run patients without CHF, age-matched (birth year ±10) and truncated at the same age to prevent the D9 record-length shortcut.
+TF-IDF (1–2 grams) + logistic regression, 5-fold stratified CV. Positives: scrubbed Chronic congestive heart failure patients. Negatives: source-run patients without Chronic congestive heart failure, age-matched (birth year ±10) and truncated at the same age to prevent the D9 record-length shortcut.
 
-> **Interpretation note:** CHF is a progressive condition. A high accuracy is expected from legitimate clinical features (prior cardiac disease, hypertension, kidney disease). What matters is **what the classifier keys on**. Features labelled `POSSIBLE_LEAK` (see table) name the target directly or are specific to CHF treatment; they warrant manual review. The final call is yours.
+> **Interpretation note:** The target condition may have legitimate clinical antecedents that distinguish it from controls. What matters is **what the classifier keys on**. Features labelled `POSSIBLE_LEAK` (see table) name the target directly or are specific to Chronic congestive heart failure treatment; they warrant manual review. The final call is yours.
 
 **Accuracy: 70.7% ± 2.2%** (majority-class baseline: 75.0%, lift: -4.3%)
+**Balanced accuracy: 76.8% ± 2.5%** (chance = 50%)
+**AUC: 0.862 ± 0.018** (chance = 0.500; note: above 0.5 means better than random even when accuracy is below the majority-class baseline)
 
 n = 313 positive, 939 negative. CV scores: 0.69, 0.70, 0.72, 0.74, 0.68
 
 
-### Top 30 features — CHF-positive (positive coefficient)
+### Top 30 features — Chronic congestive heart failure-positive (positive coefficient)
 
 | Feature | Weight | Category |
 |---------|--------|----------|
@@ -139,7 +141,7 @@ n = 313 positive, 939 negative. CV scores: 0.69, 0.70, 0.72, 0.74, 0.68
 | `in blood` | +0.364 | other |
 | `therapy consultation` | +0.362 | other |
 
-### Top 30 features — CHF-negative (negative coefficient)
+### Top 30 features — Chronic congestive heart failure-negative (negative coefficient)
 
 | Feature | Weight | Category |
 |---------|--------|----------|
@@ -218,33 +220,6 @@ Shifts each positive's cutoff one encounter forward so the diagnosing visit (and
 | `year old` | +0.986 | other |
 | `known` | +0.984 | other |
 | `known allergies` | +0.984 | other |
-
-## Check 5: Cross-module attribute leak
-
-The `chf` attribute is the mechanism through which Synthea communicates a CHF
-diagnosis across modules. Five external modules read it:
-
-| Module | State | Condition | Effect if true |
-|--------|-------|-----------|----------------|
-| `hypertension` | `Check for Exclusions` | `chf is not nil` | Suppresses new hypertension treatment onset |
-| `sleep_apnea` | `Sleep Apnea Care Plan` | `chf is not nil` | Forces CPAP (vs. 80%/20% CPAP/oral split) |
-| `covid19/determine_risk` | `Determine Risk` | `chf is not nil` | Increases COVID-19 severe risk classification |
-| `heart/cabg/preoperative` | `Check CHF` | `chf is not nil` | Adds NTproBNP to CABG preoperative workup |
-| `home_hospice_snf` | `Hospice Check` | `chf is not nil` | Routes to CHF hospice pathway |
-
-**The attribute is set at one state only: `CHF Condition Start`**
-(`assign_to_attribute: "chf"`, type=ConditionOnset). No other state in
-`congestive_heart_failure.json` sets the bare `chf` attribute. Between `CHF
-onset` and `CHF Condition Start` there are zero Delay states; all intermediate
-states are SetAttribute (counter resets) and Symptom (symptom severity integers,
-not time). Zero simulated time passes between `CHF onset` and the attribute
-being set.
-
-Because `chf` does not exist before `CHF Condition Start`, every module that
-reads it can only branch on it after the diagnosis. All post-diagnosis encounters
-and records are removed by scrub.py at or after the cutoff date.
-
-**No cross-module attribute leak exists for CHF.**
 
 ## What this suite cannot detect
 
