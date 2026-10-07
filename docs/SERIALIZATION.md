@@ -332,6 +332,40 @@ Notes:
   line lists every reading at the diagnosing visit, so a long inpatient stay
   gives a long line (up to ~800 tokens).
 
+### Text probe (pop10000, 2026-10-07)
+
+`serialization/probe_text.py` trains a bag-of-words classifier (TF-IDF +
+logistic regression, balanced, 5-fold CV grouped by patient) on the serialized
+text to predict which of the 7 conditions a record belongs to. A second
+"shape-only" probe sees only text length and which sections are present.
+3,052 of 8,075 patients are positives for 2+ conditions, so folds are grouped
+by patient.
+
+```bash
+python3 serialization/probe_text.py data/serialized/seven
+```
+
+| Variant | Text probe | Shape-only probe |
+|---|---|---|
+| History only | 49.4% | 33.8% |
+| History + presenting | 82.1% | 36.4% |
+| Presenting only | 75.5% | 71.4% |
+
+Balanced accuracy; chance is 14.3%, Randy's symptoms + vitals classifier 79.5%.
+
+- **History + presenting:** a bag-of-words model on the final text already
+  reaches 82.1%, so this is the bar an LLM must beat on that variant. Top
+  features are presenting symptoms.
+- **History only:** above the shape probe, with real antecedents among the
+  top features (COPD: cough, ex-smoker; strep: prior viral pharyngitis). But
+  for several conditions the top features are relative-time words ("days ago",
+  "years ago"), which reflect Synthea's visit timing, not clinical signal.
+- **Presenting only:** shape alone reaches 71.4%. Each condition has a fixed
+  symptom set, and some have no vitals (CHF, sinusitis) or no symptoms
+  (hypertension), so the number of lines nearly identifies the condition.
+- **Hardest pair:** strep throat (57% recall with presenting) vs viral
+  pharyngitis, which share most symptoms.
+
 ### Earlier test runs (2026-09-29)
 
 Before the seven conditions were fixed, the pipeline was tested on other
