@@ -66,6 +66,10 @@ def serialize(train_dir, labels, out, settings):
     cmd += ["--min-encounters", str(settings["min_encounters"])]
     if settings.get("drop"):
         cmd += ["--drop", settings["drop"]]
+    if settings.get("presenting"):
+        cmd += ["--presenting", settings["presenting"]]
+    if settings.get("no_history"):
+        cmd.append("--no-history")
     subprocess.run(cmd, check=True, capture_output=True)
 
 
@@ -117,49 +121,54 @@ def main():
             problems.append(f"{pid}: negative time")
     report("2. no absolute dates, no negative times", problems)
 
-    # 3. Every condition and medication appears
+    # 3 and 4 compare the text with the history; a --no-history file has none.
     csv_dir = train_dir / "csv"
-    problems, checked = [], 0
-    for name in ("conditions", "medications"):
-        rows = read_by_patient(csv_dir / f"{name}.csv", set(by_id))
-        for pid, rs in rows.items():
+    if settings.get("no_history"):
+        print("SKIP  3. every condition and medication appears (--no-history)")
+        print("SKIP  4. latest vital/lab value shown first (--no-history)")
+    else:
+        # 3. Every condition and medication appears
+        problems, checked = [], 0
+        for name in ("conditions", "medications"):
+            rows = read_by_patient(csv_dir / f"{name}.csv", set(by_id))
+            for pid, rs in rows.items():
+                for row in rs:
+                    if dropped(row, drop):
+                        continue
+                    checked += 1
+                    if row["DESCRIPTION"] not in by_id[pid]["text"]:
+                        problems.append(f"{pid}: {name} '{row['DESCRIPTION'][:60]}' missing")
+        report("3. every condition and medication appears", problems, f" ({checked} rows checked)")
+
+        # 4. Latest vital/lab value comes first
+        problems, checked = [], 0
+        obs = read_by_patient(csv_dir / "observations.csv", set(by_id))
+        for pid, rs in obs.items():
+            latest = defaultdict(list)   # description -> rows at the latest timestamp
             for row in rs:
                 if dropped(row, drop):
                     continue
+                cur = latest[row["DESCRIPTION"]]
+                if not cur or row["DATE"] > cur[0]["DATE"]:
+                    latest[row["DESCRIPTION"]] = [row]
+                elif row["DATE"] == cur[0]["DATE"]:
+                    cur.append(row)   # same exact time: any of these may come first
+            text = by_id[pid]["text"]
+            in_vitals = text.split("VITALS AND LABS", 1)[1].split("\n\n", 1)[0] if "VITALS AND LABS" in text else ""
+            for line in in_vitals.splitlines()[1:]:
+                desc, _, rest = line[2:].partition(": ")
+                if desc not in latest:
+                    continue
                 checked += 1
-                if row["DESCRIPTION"] not in by_id[pid]["text"]:
-                    problems.append(f"{pid}: {name} '{row['DESCRIPTION'][:60]}' missing")
-    report("3. every condition and medication appears", problems, f" ({checked} rows checked)")
-
-    # 4. Latest vital/lab value comes first
-    problems, checked = [], 0
-    obs = read_by_patient(csv_dir / "observations.csv", set(by_id))
-    for pid, rs in obs.items():
-        latest = defaultdict(list)   # description -> rows at the latest timestamp
-        for row in rs:
-            if dropped(row, drop):
-                continue
-            cur = latest[row["DESCRIPTION"]]
-            if not cur or row["DATE"] > cur[0]["DATE"]:
-                latest[row["DESCRIPTION"]] = [row]
-            elif row["DATE"] == cur[0]["DATE"]:
-                cur.append(row)   # same exact time: any of these may come first
-        text = by_id[pid]["text"]
-        in_vitals = text.split("VITALS AND LABS", 1)[1].split("\n\n", 1)[0] if "VITALS AND LABS" in text else ""
-        for line in in_vitals.splitlines()[1:]:
-            desc, _, rest = line[2:].partition(": ")
-            if desc not in latest:
-                continue
-            checked += 1
-            wants = []
-            for row in latest[desc]:
-                try:
-                    wants.append(f"{float(row['VALUE']):.1f}".rstrip("0").rstrip("."))
-                except ValueError:
-                    wants.append(row["VALUE"])
-            if not any(rest.startswith(w) for w in wants):
-                problems.append(f"{pid}: {desc[:40]} shows '{rest[:20]}', latest is '{wants[0]}'")
-    report("4. latest vital/lab value shown first", problems, f" ({checked} tests checked)")
+                wants = []
+                for row in latest[desc]:
+                    try:
+                        wants.append(f"{float(row['VALUE']):.1f}".rstrip("0").rstrip("."))
+                    except ValueError:
+                        wants.append(row["VALUE"])
+                if not any(rest.startswith(w) for w in wants):
+                    problems.append(f"{pid}: {desc[:40]} shows '{rest[:20]}', latest is '{wants[0]}'")
+        report("4. latest vital/lab value shown first", problems, f" ({checked} tests checked)")
 
     # 5. Drop list honoured
     problems = [f"{pid}: '{t}'" for pid, r in by_id.items() for t in drop if t in r["text"].lower()]

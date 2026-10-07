@@ -47,6 +47,25 @@ neither symptoms nor whitelisted vitals are written without the section. The fla
 intentionally separate from the core pipeline so that history and presentation can be
 ablated independently.
 
+**No-history flag (optional).** Pass `--no-history` together with `--presenting` to
+write only the demographics line and the `PRESENTING COMPLAINT` section, for the
+"remove history" ablation in [CONDITION_SELECTION.md](CONDITION_SELECTION.md). It is
+off by default.
+
+| Variant | Options | Contains |
+|---|---|---|
+| History only | (none) | Pre-diagnosis record |
+| History + presenting | `--presenting <file>` | Pre-diagnosis record + presenting complaint |
+| Presenting only | `--presenting <file> --no-history` | Demographics + presenting complaint |
+
+`.stats.json` records `presenting` and `no_history`, and `test_serialization.py`
+re-runs with the same options. Tests 3 and 4 compare the text with the history, so
+they are skipped for `--no-history` files.
+
+When running `scripts/extract_presenting.py` on a test run, pass `--report` with a
+path outside `docs/`. Its default report path overwrites the committed
+`docs/PRESENTING_<condition>.md`.
+
 To check the output:
 
 ```bash

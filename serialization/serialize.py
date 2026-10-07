@@ -325,6 +325,15 @@ def serialize_patient(pid, label, data, args):
             )
             presenting_lines.append(f"Vital signs at this visit: {vital_str}")
 
+    if args.no_history:
+        # "Remove history" ablation (CONDITION_SELECTION.md): demographics and
+        # the presenting complaint only, nothing from earlier visits.
+        parts = [
+            section("PATIENT", [demographics(data["patients"][pid], cutoff)]),
+            section("PRESENTING COMPLAINT", presenting_lines),
+        ]
+        return "\n\n".join(p for p in parts if p)
+
     parts = [
         section("PATIENT", [demographics(data["patients"][pid], cutoff)] + social),
         section("PRESENTING COMPLAINT", presenting_lines),
@@ -373,7 +382,14 @@ def main():
     ap.add_argument("--presenting", type=Path, default=None,
                     help="presenting.json from extract_presenting.py; adds a PRESENTING COMPLAINT "
                          "section to each record that has an episode")
+    ap.add_argument("--no-history", action="store_true",
+                    help="'remove history' ablation: write only demographics and the presenting "
+                         "complaint (use with --presenting)")
     args = ap.parse_args()
+    if args.presenting and not args.presenting.exists():
+        sys.exit(f"ERROR: --presenting file not found: {args.presenting}")
+    if args.no_history and not args.presenting:
+        print("WARNING: --no-history without --presenting writes demographics only", file=sys.stderr)
     if args.no_compress:
         args.window_years = args.max_values = args.max_encounters = 0
 
@@ -395,7 +411,7 @@ def main():
                           for pid, entries in read_chief_complaints(args.train_dir / "notes", patients).items()}
     data["complaints"] = defaultdict(list, data["complaints"])
     data["presenting"] = {}
-    if args.presenting and args.presenting.exists():
+    if args.presenting:
         raw = json.loads(args.presenting.read_text())
         data["presenting"] = raw.get("presenting", {})
 
@@ -432,8 +448,10 @@ def main():
         "patients_skipped_min_encounters": skipped,
         "settings": {k: getattr(args, k) for k in (
             "window_years", "window_from", "max_values", "max_encounters",
-            "min_encounters", "no_compress")} | {"drop": str(args.drop) if args.drop else None,
-                                                 "drop_terms": drop},
+            "min_encounters", "no_compress", "no_history")} | {
+            "drop": str(args.drop) if args.drop else None,
+            "drop_terms": drop,
+            "presenting": str(args.presenting) if args.presenting else None},
         "est_tokens": {
             "min": min(lengths),
             "median": round(statistics.median(lengths)),
