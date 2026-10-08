@@ -1,0 +1,37 @@
+('### Interventions for Blurred Vision and Confusion\n- **Neurological Assessment**: A comprehensive neurological evaluation is essential to identify any underlying conditions contributing to blurred vision and confusion, such as multiple sclerosis or diabetic complications.\n- **Vision Correction**: Referral to an ophthalmologist for potential corrective measures, including glasses or treatment for diabetic eye disease, may be beneficial.\n- **Cognitive Support**: Cognitive rehabilitation strategies can help address confusion, particularly if linked to cognitive impairment or neurological issues.\n\n### Management of Tingling in Hands and Feet\n- **Diabetic Neuropathy Management**: \n  - **Medications**: Consider medications such as gabapentin or pregabalin, which are effective for neuropathic pain and tingling.\n  - **Blood Sugar Control**: Tight glycemic control is crucial; adjustments to diabetes management may be necessary, especially if metformin is not adequately controlling blood glucose levels.\n- **Vitamin Supplementation**: Assess for vitamin B12 deficiency, which can contribute to neuropathy, and consider supplementation if levels are low.\n\n### Evaluation of Current Medications\n- **Medication Review**: Conduct a thorough review of all current medications, including metformin, to identify any that may contribute to cognitive impairment or visual disturbances.\n- **Adjustment of Medications**: If any medications are found to have side effects impacting judgment or vision, consider alternatives or dosage adjustments in consultation with a healthcare provider.\n\n### Resources for Coping with Stress and Social Isolation\n- **Psychological Support**: Referral to a mental health professional for counseling or therapy can help address the emotional impact of intimate partner abuse and promote coping strategies.\n- **Support Groups**: Connecting the patient with local or online support groups for survivors of abuse can provide a sense of community and reduce feelings of isolation.\n- **Social Services**: Engage social services to explore resources for social support, including community programs that offer companionship or activities to enhance social engagement.', {'reports':    id  ...                                            content
+0  18  ...  # Cerebral Palsy Community and Associated Care...
+
+[1 rows x 3 columns], 'relationships':       id               source              target  ... weight links in_context
+0  38098   MULTIPLE SCLEROSIS  COGNITIVE PROBLEMS  ...   10.0     1       True
+1  36761  POST-COVID SYNDROME  COGNITIVE PROBLEMS  ...    1.0     1       True
+
+[2 rows x 7 columns], 'claims': Empty DataFrame
+Columns: [in_context]
+Index: [], 'entities':        id                   entity  ... number of relationships in_context
+0   17941       COGNITIVE PROBLEMS  ...                       2       True
+1    6899  NEUROLOGICAL ASSESSMENT  ...                      18       True
+2    7265   COGNITIVE DIFFICULTIES  ...                       6       True
+3   13322    NEUROCOGNITIVE ISSUES  ...                       1       True
+4    7952    NEUROLOGICAL SYMPTOMS  ...                      14       True
+5   13462  NEUROLOGICAL CONDITIONS  ...                      27       True
+6   18431          VISUAL PROBLEMS  ...                       1       True
+7   10196     COGNITIVE ASSESSMENT  ...                       1       True
+8   13749         COGNITIVE ISSUES  ...                       1       True
+9    8012       NEUROLOGICAL SIGNS  ...                       7       True
+10   3904       VISUAL IMPAIRMENTS  ...                       3       True
+11  18014                   VISION  ...                       1       True
+12   4294     COGNITIVE IMPAIRMENT  ...                      45       True
+13    281                 DEMENTIA  ...                     208       True
+14  16395     NEUROLOGICAL DISEASE  ...                       2       True
+15    684        VISUAL IMPAIRMENT  ...                      22       True
+16   3710             OLDER ADULTS  ...                      14       True
+17  15576     DIABETIC EYE DISEASE  ...                       2       True
+18   7069         MEDICATION NEEDS  ...                       1       True
+19  22730  OPTIC NERVE DYSFUNCTION  ...                       1       True
+
+[20 rows x 5 columns], 'sources':      id                                               text
+0  3630  -19 , such as post -COVID assessment ser vices...
+1  3759  culosk eletal pain and off er treatment appr o...
+2  3396   oms of anxiety or obsessiv e compulsiv e beha...
+3  3387  blems in adult s. \nFull details of t he evide...
+4  1122  orrhage seen out side of acut e \nhospital set...})
