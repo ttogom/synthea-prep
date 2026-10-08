@@ -17,3 +17,4 @@ memory/
 *.pdf
 
 __pycache__/
+AGENTS.md
