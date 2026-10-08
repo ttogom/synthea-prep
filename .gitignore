@@ -15,4 +15,9 @@ memory/
 
 # ignore PDFs
 *.pdf
+
+# Codex project instructions
 AGENTS.md
+
+# bytecode pycaches 
+*.pyc
