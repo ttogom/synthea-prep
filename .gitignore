@@ -17,4 +17,9 @@ memory/
 *.pdf
 
 __pycache__/
+
+# Codex project instructions
 AGENTS.md
+
+# bytecode pycaches 
+*.pyc
