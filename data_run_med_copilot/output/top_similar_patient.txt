@@ -1,0 +1,43 @@
+
+Result 1
+Subjective:
+Patient is a ___ year old male with history of CAD, HTN, HLD, and stage V CKD on ASA 81, presenting with word-finding difficulty and lethargy over the past ___ weeks. Patient and family report multiple falls in the past year, with the last fall two days prior to presentation. Denies loss of consciousness, numbness, weakness, nausea, vomiting, blurred or double vision, and dizziness.
+Objective:
+Physical Exam on Admission: T: 98.0, BP: 132/79, HR: 71, RR: 22, O2 Sat: 100%. Patient is well-developed, well-nourished, and comfortable. Neurologically, patient is awake and alert, cooperative, and oriented to person, place, and date. Speech is fluent but with frequent word-finding difficulties. Cranial nerves II-XII are grossly intact. Motor exam shows full strength with normal bulk and tone. Sensation intact. CT Head shows large left holohemispheric chronic SDH with subacute components, 2.4 cm thick, and 1 cm midline shift. Post-op CT shows evacuation of left subdural collection with mild midline shift decrease but focal area of increased mass effect due to pneumocephalus.
+Assessment:
+Chronic subdural hematoma with neurological deficits, post-operative status following evacuation of hematoma. Patient has increased risk for falls due to confusion and lethargy.
+Plan:
+Discharge to rehabilitation for further evaluation and management. Medications upon discharge include Acetaminophen, Bisacodyl, Docusate Sodium, Doxazosin, Heparin, Hydralazine, Ondansetron, Oxycodone, Senna, Simvastatin, and Levetiracetam. Instruct patient to monitor incision for infection signs, limit exercise, increase fluid and fiber intake, adhere to medication regimen including Dilantin for seizure prophylaxis, and ensure follow-up with neurosurgery and laboratory for lab work. Educate to call surgeon for any concerning symptoms like seizures, confusion, or signs of infection.
+Rerank score: -1.7099
+
+Dominant medical concepts (contribution >= 0.85):
+ - Dilantin (0.9216)
+ - Cranial nerves (0.9098)
+ - Ondansetron (0.9095)
+ - Doxazosin (0.9064)
+ - lethargy (0.9047)
+ - lethargy (0.9047)
+ - seizures (0.9044)
+ - Heparin (0.9009)
+ - Docusate Sodium (0.8981)
+ - large left holohemispheric chronic SDH (0.8836)
+ - neurological deficits (0.8832)
+ - Acetaminophen (0.8791)
+ - family report multiple falls (0.8784)
+ - neurosurgery (0.8773)
+ - pneumocephalus (0.8772)
+ - Hydralazine (0.8771)
+ - double vision (0.8771)
+ - multiple falls (0.8765)
+ - Oxycodone (0.8761)
+ - Chronic subdural hematoma (0.8726)
+ - vomiting (0.8694)
+ - past year (0.8688)
+ - medication regimen (0.8683)
+ - two days (0.8650)
+ - left holohemispheric (0.8634)
+ - fluid and fiber intake (0.8633)
+ - mild midline shift (0.8629)
+ - word-finding difficulty (0.8623)
+ - Simvastatin (0.8621)
+ - mass effect (0.8619)
