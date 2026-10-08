@@ -12,3 +12,6 @@ docs/review/
 
 # Claude Code session memory (stored in ~/.claude, not the repo)
 memory/
+
+# ignore PDFs
+*.pdf
