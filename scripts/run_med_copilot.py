@@ -170,7 +170,7 @@ with open(OUTPUT / "questions_for_guidelines_db.txt", "w") as f:
 # Stage 4: GraphRAG guideline retrieval
 # ---------------------------------------------------------------------
 
-key_info = run_local_search(
+key_info, graphrag_context = run_local_search(
     config_filepath=GUIDELINES / "settings.yaml",
     data_dir=GUIDELINES / "output",
     root_dir=GUIDELINES,
@@ -184,7 +184,13 @@ key_info = run_local_search(
 print("\n========== STAGE 4: GUIDELINE EVIDENCE ==========\n")
 print(key_info)
 with open(OUTPUT / "answers_from_guidelines_db.txt", "w") as f:
-    f.write(str(key_info))
+    f.write(key_info)
+    with open(OUTPUT / "graphrag_context.json", "w") as f:
+        json.dump(
+            graphrag_context, f,
+            default=lambda table: json.loads(table.to_json(orient="split")),
+            indent=2,
+        )
 # ---------------------------------------------------------------------
 # Stage 5: Restore MED-COPILOT's commented-out final generation call
 # ---------------------------------------------------------------------
