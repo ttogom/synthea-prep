@@ -1,0 +1,91 @@
+
+You are a clinical expert.
+You will be given a patient's conditions in SOAP format (Subjective, Objective, Assessment).
+Your task is to generate the patient's treatment **Plan**, using the Subjective, Objective, and Assessment as context.
+
+Follow the style of the example below:
+
+Result 1
+Subjective:
+Patient is a ___ year old male with history of CAD, HTN, HLD, and stage V CKD on ASA 81, presenting with word-finding difficulty and lethargy over the past ___ weeks. Patient and family report multiple falls in the past year, with the last fall two days prior to presentation. Denies loss of consciousness, numbness, weakness, nausea, vomiting, blurred or double vision, and dizziness.
+Objective:
+Physical Exam on Admission: T: 98.0, BP: 132/79, HR: 71, RR: 22, O2 Sat: 100%. Patient is well-developed, well-nourished, and comfortable. Neurologically, patient is awake and alert, cooperative, and oriented to person, place, and date. Speech is fluent but with frequent word-finding difficulties. Cranial nerves II-XII are grossly intact. Motor exam shows full strength with normal bulk and tone. Sensation intact. CT Head shows large left holohemispheric chronic SDH with subacute components, 2.4 cm thick, and 1 cm midline shift. Post-op CT shows evacuation of left subdural collection with mild midline shift decrease but focal area of increased mass effect due to pneumocephalus.
+Assessment:
+Chronic subdural hematoma with neurological deficits, post-operative status following evacuation of hematoma. Patient has increased risk for falls due to confusion and lethargy.
+Plan:
+Discharge to rehabilitation for further evaluation and management. Medications upon discharge include Acetaminophen, Bisacodyl, Docusate Sodium, Doxazosin, Heparin, Hydralazine, Ondansetron, Oxycodone, Senna, Simvastatin, and Levetiracetam. Instruct patient to monitor incision for infection signs, limit exercise, increase fluid and fiber intake, adhere to medication regimen including Dilantin for seizure prophylaxis, and ensure follow-up with neurosurgery and laboratory for lab work. Educate to call surgeon for any concerning symptoms like seizures, confusion, or signs of infection.
+Rerank score: -2.2888
+
+Dominant medical concepts (contribution >= 0.85):
+ - Doxazosin (0.9326)
+ - Dilantin (0.9303)
+ - Ondansetron (0.9279)
+ - Heparin (0.9147)
+ - Docusate Sodium (0.9121)
+ - Acetaminophen (0.9079)
+ - Hydralazine (0.9034)
+ - lethargy (0.9013)
+ - lethargy (0.9013)
+ - Cranial nerves (0.9009)
+ - Oxycodone (0.8946)
+ - Levetiracetam (0.8914)
+ - seizures (0.8887)
+ - Simvastatin (0.8852)
+ - neurosurgery (0.8836)
+ - pneumocephalus (0.8833)
+ - neurological deficits (0.8829)
+ - large left holohemispheric chronic SDH (0.8809)
+ - medication regimen (0.8757)
+ - Chronic subdural hematoma (0.8725)
+ - Bisacodyl (0.8720)
+ - family report multiple falls (0.8672)
+ - left holohemispheric (0.8658)
+ - two days (0.8628)
+ - fluid and fiber intake (0.8620)
+ - mild midline shift (0.8618)
+ - Motor exam (0.8597)
+ - past year (0.8581)
+ - word-finding difficulty (0.8572)
+ - subacute components (0.8555)
+
+
+Now, here is the patient's conditions:
+Subjective: Patient reports blurred vision, tingling in hands and feet, decreased judgment, decreased visual perception, decreased communication, and confusion. History of multiple disorders including gingival disease, viral sinusitis, and infections. Closed social contacts, indicating potential social isolation and stress.
+Objective: 76-year-old non-Hispanic Asian male. No known allergies. Current medications include lisinopril, acetaminophen, metformin, hydrochlorothiazide, amlodipine, meperidine, sodium fluoride, tropicamide, proparacaine, and bevacizumab. Social history indicates patient is single, quit smoking at age 20, and has some college education. Patient comes from a middle socioeconomic background and is on Medicare.
+Assessment: The patient exhibits symptoms consistent with neurological decline or possible cognitive impairment, possibly exacerbated by stress and social isolation. The blurred vision and tingling may suggest potential neurological involvement. Further evaluation of cognitive function and neurological status is warranted.
+
+Additional Information may help you make a decision if relevant:
+### Recommended Interventions for Blurred Vision and Neurological Involvement
+- **Referral to Specialists**: 
+  - An ophthalmologist should be consulted for a comprehensive eye examination to assess the cause of blurred vision.
+  - A neurologist referral is essential to evaluate potential neurological conditions that may be contributing to visual disturbances.
+- **Neurological Assessment**: 
+  - A thorough neurological assessment should be performed to identify any underlying neurological disorders that could be causing the symptoms.
+
+### Cognitive Assessments for Confusion and Decreased Judgment
+- **Cognitive Testing**: 
+  - Conduct a formal cognitive assessment, which may include:
+    - Mini-Mental State Examination (MMSE) or Montreal Cognitive Assessment (MoCA) to evaluate overall cognitive function.
+    - Specific tests for memory, attention, and executive function to pinpoint areas of impairment.
+- **Neuropsychological Evaluation**: 
+  - Consider referral for a comprehensive neuropsychological evaluation if initial assessments indicate significant cognitive impairment.
+
+### Medications or Treatments for Tingling in Hands and Feet
+- **Potential Treatments**:
+  - **Vitamin B12 Supplementation**: If deficiency is suspected, as it can lead to peripheral neuropathy and cognitive issues.
+  - **Neuropathic Pain Medications**: Consider medications such as gabapentin or pregabalin, which are effective for neuropathic pain and tingling sensations.
+- **Management of Underlying Conditions**: 
+  - Address any underlying conditions (e.g., diabetes, vitamin deficiencies) that may be contributing to neurological decline and peripheral neuropathy.
+
+### Integration of Stress Management Techniques
+- **Stress Management Techniques**:
+  - Incorporate mindfulness practices, such as meditation or yoga, to help reduce stress and improve cognitive function.
+  - Encourage participation in social activities or support groups to combat feelings of isolation and enhance social interaction.
+- **Psychological Support**: 
+  - Consider referral to a psychologist or counselor for cognitive-behavioral therapy (CBT) to address anxiety and confusion related to cognitive decline. 
+
+By addressing these areas, the patient's overall care plan can be more comprehensive, targeting both neurological and cognitive symptoms effectively.
+
+Generate the treatment Plan in a similar style like the 'Generated Plan', **using Markdown formatting**.
+Use numbered lists and bullet points for clarity.
+Do NOT output JSON. Only output Markdown text.

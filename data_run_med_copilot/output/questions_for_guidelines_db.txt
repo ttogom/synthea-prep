@@ -1,8 +1,8 @@
 {
   "Key Questions": [
-    "What interventions or treatments can help alleviate the patient's blurred vision and confusion, given the potential underlying neurological concerns?",
-    "What specific management strategies or medications can address the tingling in the patient's hands and feet, particularly considering his diabetes and the use of metformin?",
-    "How should the patient's current medications be evaluated or adjusted to ensure they are not contributing to his decreased judgment and visual perception?",
-    "What resources or support systems can be put in place to help the patient cope with stress and social isolation stemming from his history of intimate partner abuse?"
+    "What are the recommended interventions to address the patient's blurred vision and potential neurological involvement, particularly focusing on any necessary referrals to specialists?",
+    "Given the patient's symptoms of confusion and decreased judgment, what specific cognitive assessments or tests should be conducted to evaluate his cognitive impairment?",
+    "What medications or treatments can be considered to alleviate the tingling in the patient's hands and feet, especially in the context of potential neurological decline?",
+    "How can stress management techniques be integrated into the patient's care plan to help mitigate symptoms of confusion and social isolation?"
   ]
 }
