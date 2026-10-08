@@ -8,10 +8,16 @@ import pandas as pd
 # Paths
 # ---------------------------------------------------------------------
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] #project root dir
 MED = ROOT / "med_copilot"
-UPSTREAM = MED / "upstream"
+UPSTREAM = MED / "upstream" 
 GUIDELINES = MED / "data" / "guidelines"
+OUTPUT = ROOT / "data_run_med_copilot" / "output"
+
+# sole input datapoint used: 
+NOTE = ROOT / "data_run_med_copilot" / "input" / "Peter292_Gleichner915_0db4522b-544a-43b1-ad63-3caeb72be2ab.txt"
+
+
 
 sys.path.insert(0, str(UPSTREAM))
 
@@ -39,17 +45,9 @@ from templates.SOA_P_TEMPLATE import (
 # ---------------------------------------------------------------------
 # Input
 # ---------------------------------------------------------------------
-
-NOTE = Path(
-    "/Users/rasikaramanan/Downloads/"
-    "pop10000-seed20260916__train-9e8474/"
-    "notes/"
-    "Peter292_Gleichner915_0db4522b-544a-43b1-ad63-3caeb72be2ab.txt"
-)
-
 text = NOTE.read_text(encoding="utf-8")
 
-# First encounter only.
+# First encounter only for pilot
 parts = text.split("\n\n2000-07-02", 1)
 patient_case = parts[0]
 
@@ -62,6 +60,9 @@ client = OpenAI(api_key=api_key)
 
 print("\n========== INPUT PATIENT CASE ==========\n")
 print(patient_case)
+
+with open(OUTPUT / "case_truncated_freetext.txt", "w") as f:
+    f.write(patient_case)
 
 # ---------------------------------------------------------------------
 # Stage 1: MED-COPILOT patient -> Subjective / Objective / Assessment
@@ -96,6 +97,8 @@ conditions = (
 
 print("\n========== STAGE 1: S/O/A ==========\n")
 print(conditions)
+with open(OUTPUT / "case_SOA.txt", "w") as f:
+    f.write(conditions)
 
 # ---------------------------------------------------------------------
 # Stage 2: Similar-patient retrieval + reranking
@@ -132,7 +135,8 @@ retrieved_info = results[0]
 
 print("\n========== STAGE 2: TOP SIMILAR PATIENT ==========\n")
 print(retrieved_info)
-
+with open(OUTPUT / "top_similar_patient.txt", "w") as f:
+    f.write(retrieved_info)
 # ---------------------------------------------------------------------
 # Stage 3: Key clinical questions
 # ---------------------------------------------------------------------
@@ -160,7 +164,8 @@ key_questions = key_response.choices[0].message.content
 
 print("\n========== STAGE 3: KEY QUESTIONS ==========\n")
 print(key_questions)
-
+with open(OUTPUT / "questions_for_guidelines_db.txt", "w") as f:
+    f.write(key_questions)
 # ---------------------------------------------------------------------
 # Stage 4: GraphRAG guideline retrieval
 # ---------------------------------------------------------------------
@@ -178,7 +183,8 @@ key_info = run_local_search(
 
 print("\n========== STAGE 4: GUIDELINE EVIDENCE ==========\n")
 print(key_info)
-
+with open(OUTPUT / "answers_from_guidelines_db.txt", "w") as f:
+    f.write(str(key_info))
 # ---------------------------------------------------------------------
 # Stage 5: Restore MED-COPILOT's commented-out final generation call
 # ---------------------------------------------------------------------
@@ -207,3 +213,5 @@ generated_plan = final_response.choices[0].message.content
 
 print("\n========== MED-COPILOT FINAL OUTPUT ==========\n")
 print(generated_plan)
+with open(OUTPUT / "final_output.txt", "w") as f:
+    f.write(str(generated_plan))
