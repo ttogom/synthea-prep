@@ -107,19 +107,22 @@ def main():
     os.chdir(UPSTREAM)
 
     try:
-        retriever = HybridRetriever(df, alpha=0.5)
-        candidates = retriever.search(conditions, topk=20)
+        results = []
+        if not df.empty:
+            retriever = HybridRetriever(df, alpha=0.5)
+            candidates = retriever.search(conditions, topk=20)
 
-        reranker = CrossEncoderReranker()
-        results = reranker.rerank(
-            conditions,
-            candidates,
-            topk=5,
-        )
+            if candidates:
+                reranker = CrossEncoderReranker()
+                results = reranker.rerank(
+                    conditions,
+                    candidates,
+                    topk=5,
+                )
     finally:
         os.chdir(old_cwd)
 
-    retrieved_info = results[0]
+    retrieved_info = results[0] if results else "No reference patient available."
 
     print("\n========== STAGE 2: TOP SIMILAR PATIENT ==========\n")
     print(retrieved_info)

@@ -41,6 +41,7 @@ Your task is to generate the patient's **Assessment (A), including the most like
 
 Follow the style of the example below:
 {example}
+If no reference patient is available, generate both Assessment and Plan from the patient's Subjective and Objective and any relevant additional information.
 
 Now, here is the patient's conditions:
 {conditions}

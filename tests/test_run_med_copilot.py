@@ -234,14 +234,16 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(Path.cwd(), original_cwd)
         self.assertFalse(self.fixture.output.exists())
 
-    def assert_outputs(self):
+    def assert_outputs(self, reference_text=None):
         fixture = self.fixture
+        if reference_text is None:
+            reference_text = fixture.results[0]
         expected_prompt = fixture.prompts["EVALUATE_TEMPLATE_KEYINFO"].format(
-            conditions=fixture.conditions, example=fixture.results[0], Key_info=fixture.guideline_text,
+            conditions=fixture.conditions, example=reference_text, Key_info=fixture.guideline_text,
         )
         expected_text = {
             "case_SOA.txt": fixture.conditions,
-            "top_similar_patient.txt": fixture.results[0],
+            "top_similar_patient.txt": reference_text,
             "questions_for_guidelines_db.txt": fixture.questions,
             "answers_from_guidelines_db.txt": fixture.guideline_text,
             "final_prompt.txt": expected_prompt,
@@ -325,6 +327,73 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), self.fixture.caller)
         self.assertEqual(len(self.fixture.calls), 3)
         self.assert_outputs()
+
+    def test_empty_reference_stages_continue_through_guidelines_and_final_generation(self):
+        fixture_root = self.fixture.root
+        for stage in ["corpus", "retrieval", "reranking"]:
+            with self.subTest(stage=stage):
+                self.fixture = PipelineFixture(fixture_root / stage)
+                fixture = self.fixture
+                if stage == "corpus":
+                    (fixture.upstream / "soap_with_metadata.json").write_text("[]")
+                elif stage == "retrieval":
+                    fixture.candidates = []
+                else:
+                    fixture.results = []
+                # An absent reference must replace a previously saved selection.
+                fixture.output.mkdir()
+                (fixture.output / "top_similar_patient.txt").write_text("STALE_REFERENCE_CASE")
+                runner = self.load_runner()
+                with fixture.runtime():
+                    runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+
+                if stage == "corpus":
+                    self.assertEqual(fixture.retrieval_calls, [])
+                else:
+                    self.assertEqual(fixture.retrieval_calls[1],
+                                     ("search", fixture.conditions, 20, fixture.upstream))
+                if stage == "reranking":
+                    self.assertEqual(fixture.rerank_calls[1],
+                                     ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                else:
+                    self.assertEqual(fixture.rerank_calls, [])
+                self.assertEqual(len(fixture.calls), 3)
+                self.assertEqual(fixture.calls[1]["messages"][-1]["content"],
+                                 fixture.prompts["KEY_QUESTIONS_TEMPLATE"].format(conditions=fixture.conditions))
+                self.assertEqual(len(fixture.graph_calls), 1)
+                self.assertEqual(fixture.graph_calls[0][0]["query"], fixture.questions)
+                self.assertEqual(fixture.graph_calls[0][1], fixture.caller)
+                final_prompt = fixture.calls[2]["messages"][-1]["content"]
+                for evidence in [fixture.conditions, fixture.guideline_text,
+                                 "No reference patient available."]:
+                    self.assertIn(evidence, final_prompt)
+                self.assertIn("If no reference patient is available", final_prompt)
+                self.assertIn("generate both Assessment and Plan from the patient's Subjective and Objective",
+                              final_prompt)
+                self.assertIn("any relevant additional information", final_prompt)
+                self.assertNotIn("SELECTED_SIMILAR_CASE", final_prompt)
+                self.assertNotIn("STALE_REFERENCE_CASE", final_prompt)
+                self.assert_outputs(reference_text="No reference patient available.")
+
+    def test_final_generation_failure_without_a_reference_propagates(self):
+        fixture = self.fixture
+        fixture.candidates = []
+        fixture.failure = "final"
+        runner = self.load_runner()
+        with fixture.runtime():
+            with self.assertRaises(RuntimeError) as caught:
+                runner["main"]()
+            self.assertIs(caught.exception, fixture.error)
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(fixture.rerank_calls, [])
+        self.assertEqual(len(fixture.graph_calls), 1)
+        self.assertEqual(len(fixture.calls), 3)
+        self.assertEqual((fixture.output / "top_similar_patient.txt").read_text(),
+                         "No reference patient available.")
+        self.assertIn("No reference patient available.",
+                      (fixture.output / "final_prompt.txt").read_text())
+        self.assertFalse((fixture.output / "final_output.txt").exists())
 
     def test_prepared_input_preserves_sections_dates_unicode_and_whitespace(self):
         fixture_root = self.fixture.root
