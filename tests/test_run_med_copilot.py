@@ -197,6 +197,8 @@ class RunMedCopilotTests(unittest.TestCase):
                 patch.object(Path, "mkdir", side_effect=AssertionError("Output created on import")):
             runner = self.load_runner()
         self.assertTrue(callable(runner["main"]))
+        self.assertEqual(runner["PATIENT_CORPUS"],
+                         self.fixture.upstream / "soap_with_metadata.json")
         self.assertEqual(sys.path, original_path)
         self.assertEqual(Path.cwd(), original_cwd)
         self.assertFalse(self.fixture.output.exists())
@@ -278,6 +280,66 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), self.fixture.caller)
         self.assertEqual(len(self.fixture.calls), 3)
         self.assert_outputs()
+
+    def test_configured_corpus_outside_upstream_runs_the_full_pipeline(self):
+        fixture = self.fixture
+        corpus_path = fixture.root / "alternative corpus" / "patients café.json"
+        corpus_path.parent.mkdir()
+        fixture.corpus = [
+            {"subjective": "Alternate S café", "objective": "Alternate O",
+             "assessment": "Alternate A", "plan": "Alternate P"},
+            {"subjective": "Second S", "objective": "Second O",
+             "assessment": "Second A", "plan": "Second P"},
+        ]
+        corpus_path.write_text(json.dumps(fixture.corpus, ensure_ascii=False),
+                               encoding="utf-8")
+        (fixture.upstream / "soap_with_metadata.json").unlink()
+        fixture.candidates = [{"id": "alternate-patient", "display_text": "Alternate S café"}]
+        fixture.results = ["ALTERNATE_SIMILAR_CASE café\nAlternate P"]
+        runner = self.load_runner()
+        with patch.dict(runner["main"].__globals__, {"PATIENT_CORPUS": corpus_path}), \
+                fixture.runtime():
+            runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        init, search = fixture.retrieval_calls
+        self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
+        self.assertEqual(init[2:], (0.5, fixture.upstream))
+        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.upstream))
+        self.assertEqual(fixture.rerank_calls[1],
+                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+        self.assertEqual(len(fixture.calls), 3)
+        self.assertEqual(fixture.graph_calls[0][1], fixture.caller)
+        self.assert_outputs()
+
+    def assert_corpus_load_failure(self, corpus_path, exception_type):
+        fixture = self.fixture
+        runner = self.load_runner()
+        with patch.dict(runner["main"].__globals__, {"PATIENT_CORPUS": corpus_path}), \
+                fixture.runtime():
+            with self.assertRaises(exception_type) as caught:
+                runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(len(fixture.calls), 1)
+        self.assertEqual(fixture.retrieval_calls, [])
+        self.assertEqual(fixture.rerank_calls, [])
+        self.assertEqual(fixture.graph_calls, [])
+        self.assertEqual({path.name for path in fixture.output.iterdir()},
+                         {"case_truncated_freetext.txt", "case_SOA.txt"})
+        self.assertEqual((fixture.output / "case_truncated_freetext.txt").read_text(),
+                         fixture.patient_input)
+        self.assertEqual((fixture.output / "case_SOA.txt").read_text(), fixture.conditions)
+        return caught.exception
+
+    def test_missing_configured_corpus_stops_pipeline_without_fallback(self):
+        corpus_path = self.fixture.root / "missing-patients.json"
+        error = self.assert_corpus_load_failure(corpus_path, FileNotFoundError)
+        self.assertEqual(error.filename, str(corpus_path))
+
+    def test_invalid_configured_corpus_stops_pipeline_without_fallback(self):
+        corpus_path = self.fixture.root / "invalid-patients.json"
+        corpus_path.write_text("not valid JSON", encoding="utf-8")
+        error = self.assert_corpus_load_failure(corpus_path, json.JSONDecodeError)
+        self.assertEqual(error.doc, "not valid JSON")
 
     def test_stage_errors_propagate_stop_generation_and_restore_cwd(self):
         runner = self.load_runner()

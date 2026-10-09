@@ -14,6 +14,10 @@ UPSTREAM = MED / "upstream"
 GUIDELINES = MED / "data" / "guidelines"
 OUTPUT = ROOT / "data_run_med_copilot" / "output"
 
+# Similar-patient corpus: change this path to select another JSON corpus.
+# save new corpus in med_copilot/data/patient_corpus
+PATIENT_CORPUS = UPSTREAM / "soap_with_metadata.json"
+
 # sole input datapoint used: 
 NOTE = ROOT / "data_run_med_copilot" / "input" / "Peter292_Gleichner915_0db4522b-544a-43b1-ad63-3caeb72be2ab.txt"
 
@@ -106,7 +110,7 @@ def main():
     # Stage 2: Similar-patient retrieval + reranking
     # ---------------------------------------------------------------------
 
-    with open(UPSTREAM / "soap_with_metadata.json", "r", encoding="utf-8") as f:
+    with open(PATIENT_CORPUS, "r", encoding="utf-8") as f:
         df = pd.DataFrame(json.load(f))
 
     # EmbeddingRetriever uses relative paths for these artifacts.
