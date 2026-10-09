@@ -242,7 +242,7 @@ class RunMedCopilotTests(unittest.TestCase):
             conditions=fixture.conditions, example=reference_text, Key_info=fixture.guideline_text,
         )
         expected_text = {
-            "case_SOA.txt": fixture.conditions,
+            "case_SO.txt": fixture.conditions,
             "top_similar_patient.txt": reference_text,
             "questions_for_guidelines_db.txt": fixture.questions,
             "answers_from_guidelines_db.txt": fixture.guideline_text,
@@ -647,10 +647,10 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.rerank_calls, [])
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual({path.name for path in fixture.output.iterdir()},
-                         {"case_SOA.txt"})
+                         {"case_SO.txt"})
         self.assertEqual(fixture.calls[0]["messages"][-1]["content"],
                          fixture.prompts["PATIENT_CASE_TEMPLATE"].format(patient_case=fixture.patient_input))
-        self.assertEqual((fixture.output / "case_SOA.txt").read_text(), fixture.conditions)
+        self.assertEqual((fixture.output / "case_SO.txt").read_text(), fixture.conditions)
         return caught.exception
 
     def test_missing_configured_corpus_stops_pipeline_without_fallback(self):

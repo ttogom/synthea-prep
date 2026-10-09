@@ -85,15 +85,15 @@ def main():
     )
 
     patient = json.loads(response.choices[0].message.content)
-    conditions = (
+    s_o = (
         f'Subjective: {patient["subjective"]}\n'
         f'Objective: {patient["objective"]}'
     )
 
     print("\n========== STAGE 1: S/O ==========\n")
-    print(conditions)
-    with open(OUTPUT / "case_SOA.txt", "w") as f:
-        f.write(conditions)
+    print(s_o)
+    with open(OUTPUT / "case_SO.txt", "w") as f:
+        f.write(s_o)
 
     # ---------------------------------------------------------------------
     # Stage 2: Similar-patient retrieval + reranking
@@ -110,12 +110,12 @@ def main():
         results = []
         if not df.empty:
             retriever = HybridRetriever(df, alpha=0.5)
-            candidates = retriever.search(conditions, topk=20)
+            candidates = retriever.search(s_o, topk=20)
 
             if candidates:
                 reranker = CrossEncoderReranker()
                 results = reranker.rerank(
-                    conditions,
+                    s_o,
                     candidates,
                     topk=5,
                 )
@@ -133,7 +133,7 @@ def main():
     # ---------------------------------------------------------------------
 
     key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(
-        conditions=conditions
+        conditions=s_o
     )
 
     key_response = client.chat.completions.create(
@@ -187,7 +187,7 @@ def main():
     # ---------------------------------------------------------------------
 
     final_prompt = EVALUATE_TEMPLATE_KEYINFO.format(
-        conditions=conditions,
+        conditions=s_o,
         example=retrieved_info,
         Key_info=key_info,
     )
