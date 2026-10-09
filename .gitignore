@@ -4,6 +4,9 @@
 # Synthea source clone
 .synthea/
 
+# Local Python environment
+/.venv/
+
 # Generated data
 data/
 
