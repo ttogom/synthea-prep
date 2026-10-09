@@ -1,9 +1,9 @@
 
-## 1. Fix the GraphRAG Return-Value Boundary
+## 1. GraphRAG Return-Value Boundary (Completed)
 
-### Problem discovered by the successful smoke test
+### Original smoke-test issue
 
-`run_local_search(...)` returned:
+`run_local_search(...)` returns:
 
 ``` python
 (response_text, context_data)
@@ -16,52 +16,45 @@ The smoke-test output shows the second object contains DataFrames for:
 -   sources
 -   other retrieved context
 
-The current runner assigns the entire tuple to `key_info` and then
-inserts it into the final prompt.
+The original smoke-test runner assigned the entire tuple to `key_info`
+and inserted it into the final prompt. This has been corrected in
+`scripts/run_med_copilot.py`.
 
-That means the final LLM may receive a Python string representation of
+Previously, the final LLM could receive a Python string representation of
 both the generated guideline answer **and** the raw GraphRAG context
 object/DataFrames.
 
-This needs to be made explicit before experimental runs. It can affect
-prompt length, reproducibility, and what evidence the final model
-actually sees.
+The current runner sends only the generated guideline answer to final
+generation and saves the raw context separately for provenance/debugging.
 
-### Files to modify
+### Implementation and reference files
 
 **Primary:** - `scripts/run_med_copilot.py`
 
 **Reference:** - `med_copilot/upstream/evaluater.py` -
 `med_copilot/upstream/graphrag/cli/query.py`
 
-### Required implementation
+### Current implementation
 
-For the experimental pipeline, explicitly unpack:
-
-``` python
-guideline_text, graphrag_context = run_local_search(...)
-```
-
-Pass only the intended evidence object into the final prompt.
-
-Most likely:
+The runner explicitly unpacks:
 
 ``` python
-Key_info = guideline_text
+key_info, graphrag_context = run_local_search(...)
 ```
 
-Keep `graphrag_context` separately for provenance/debugging.
+It saves `key_info` to `answers_from_guidelines_db.txt` and passes it as
+`Key_info` when formatting the final prompt. It saves `graphrag_context`
+separately to `graphrag_context.json`.
 
-Because the released evaluator appears to pass the return value through
-without unpacking it, preserve the current behavior in the frozen
-reproduction if strict implementation fidelity is desired. Document the
-difference.
+The frozen upstream source remains unchanged. The explicit response/context
+boundary is implemented in the project-owned runner.
 
 ### Acceptance test
 
-Print or save the exact final prompt once. Confirm it contains the
-intended guideline text and does not accidentally contain
-pandas/DataFrame representations.
+The runner saves `final_prompt.txt`. Existing runner tests verify that final
+generation receives guideline text and that the complete GraphRAG context is
+saved separately, rather than inserting the response/context tuple into the
+prompt.
 
 ------------------------------------------------------------------------
 
@@ -69,15 +62,18 @@ pandas/DataFrame representations.
 
 ### Problem
 
-The current smoke-test runner hard-codes:
+The current pilot runner hard-codes:
 
--   one absolute Synthea path
+-   one repository-relative patient input path in `NOTE`
 -   one specific patient
--   one encounter split
--   local preprocessing logic
 
-That was appropriate for proving the pipeline works, but it cannot be
-used for experiments or by teammates.
+It reads the entire input file without selecting an encounter or cutting
+at `# Assessment and Plan`. Encounter selection and Synthea cleaning belong
+in input preparation, outside the runner.
+
+The hardcoded input is sufficient for the pilot. Configurable input/output
+paths are deferred to the main experiment script; the interface proposal
+below describes that future work.
 
 This item concerns only the **pipeline interface**, not Synthea
 cleaning.

@@ -1,7 +1,7 @@
 
 # TODO to get our experiment configured correctly
 
-## 1. Remove Assessment From the Input and Make Diagnosis an Explicit Output
+## 1. Remove Assessment From the Input and Make Diagnosis an Explicit Output (COMPLETED)
 
 ### Problem
 
