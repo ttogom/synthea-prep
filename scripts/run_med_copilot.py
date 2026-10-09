@@ -24,6 +24,7 @@ NOTE = ROOT / "data_run_med_copilot" / "input" / "Peter292_Gleichner915_0db4522b
 
 def main():
 
+    sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(UPSTREAM))
 
     # ---------------------------------------------------------------------
@@ -40,7 +41,7 @@ def main():
     from openai import OpenAI
     from create_embeddings import HybridRetriever, CrossEncoderReranker
     from graphrag.cli.query import run_local_search
-    from templates.SOA_P_TEMPLATE import (
+    from med_copilot.prompts.diagnosis_plan import (
         KEY_QUESTIONS_TEMPLATE,
         EVALUATE_TEMPLATE_KEYINFO,
         PATIENT_CASE_TEMPLATE,
@@ -51,14 +52,7 @@ def main():
     # Input
     # ---------------------------------------------------------------------
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    text = NOTE.read_text(encoding="utf-8")
-
-    # First encounter only for pilot
-    parts = text.split("\n\n2000-07-02", 1)
-    patient_case = parts[0]
-
-    # Hide Synthea's target diagnosis/plan for this smoke test.
-    patient_case = patient_case.split("# Assessment and Plan", 1)[0].strip()
+    patient_case = NOTE.read_text(encoding="utf-8")
 
     api_key = os.environ["OPENAI_API_KEY"]
     model = "gpt-4o-mini"
@@ -66,9 +60,6 @@ def main():
 
     print("\n========== INPUT PATIENT CASE ==========\n")
     print(patient_case)
-
-    with open(OUTPUT / "case_truncated_freetext.txt", "w") as f:
-        f.write(patient_case)
 
     # ---------------------------------------------------------------------
     # Stage 1: MED-COPILOT patient -> Subjective / Objective / Assessment
