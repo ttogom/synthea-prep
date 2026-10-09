@@ -1,9 +1,9 @@
-"""Project-owned copies of the active MED-COPILOT prompts, copied verbatim."""
+"""Project-owned MED-COPILOT prompts with factual S/O normalization."""
 
 KEY_QUESTIONS_TEMPLATE='''
 You are a clinical expert.
 
-You will be given a patient's conditions in SOAP format (Subjective, Objective, Assessment).
+You will be given a patient's conditions in SOAP format (Subjective, Objective).
 
 Your task is to generate at most 4 the most important questions that will help a retrieval-augmented generation (RAG) system find clear and actionable answers. These questions should lie on the most important symptons and conditions of the patient.
 
@@ -50,12 +50,11 @@ Do NOT output JSON. Only output Markdown text.
 
 
 PATIENT_CASE_TEMPLATE='''
-Please convert the following patient record into a SOAP structure(only subjective, objective and assessment). 
+Please convert the following patient record into a SOAP structure (only subjective and objective). 
 Do not include any personal identifiers. 
 Each section should be medically informative and concise, 
 but keep as many relevant clinical details from the original text as possible. 
-Do not omit laboratory values, imaging findings, or important history, 
-unless they are clearly irrelevant. 
+Do not omit laboratory values, imaging findings, or important history.
 If some details cannot be placed under one section, you may keep them 
 in the most reasonable SOAP section.
 Use standard medical terms.
@@ -66,12 +65,12 @@ The patient's case:
 
 
 PATIENT_CASE_SYSTEM_TEMPLATE='''
-You are a clinical expert. Please convert the following patient record into a SOAP structure (only subjective, objective and assessment).
+You are a clinical expert. Please convert the following patient record into a SOAP structure (only subjective and objective).
+Do not infer diagnoses or add diagnostic interpretations in either section; include only facts explicitly stated in the patient record.
 Reply **only** with valid JSON (double quotes, no trailing commas), 
 exactly in the format:
 {  
     "subjective": (text),
-    "objective": (text),
-    "assessment": (text)
+    "objective": (text)
 }
 '''
