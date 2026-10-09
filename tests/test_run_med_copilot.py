@@ -13,7 +13,6 @@ import io
 import json
 import os
 from pathlib import Path
-import re
 import runpy
 import sys
 import tempfile
@@ -90,7 +89,7 @@ class PipelineFixture:
         self.normalization_response = DEFAULT_NORMALIZATION_RESPONSE
         self.questions = '{"Key Questions": ["Question one?", "Question two?"]}'
         self.guideline_text = "GUIDELINE_RESPONSE_ONLY\nGuideline evidence with café."
-        self.plan = "## Plan\n1. MOCK_FINAL_PLAN"
+        self.final_output = "## Assessment\nMOCK_DIAGNOSIS\n\n## Plan\n1. MOCK_FINAL_PLAN"
         self.candidates = [{"id": "candidate-one"}, {"id": "candidate-two"}]
         self.results = [
             "SELECTED_SIMILAR_CASE\nAssessment: REFERENCE_DIAGNOSIS\nPlan: REFERENCE_PLAN",
@@ -130,7 +129,7 @@ class PipelineFixture:
             fixture.calls.append(kwargs)
             stage = ["normalization", "questions", "final"][len(fixture.calls) - 1]
             fixture.fail_at(stage)
-            content = [json.dumps(fixture.patient), fixture.questions, fixture.plan][len(fixture.calls) - 1]
+            content = [json.dumps(fixture.patient), fixture.questions, fixture.final_output][len(fixture.calls) - 1]
             if stage == "normalization" and fixture.normalization_response is not DEFAULT_NORMALIZATION_RESPONSE:
                 content = fixture.normalization_response
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
@@ -246,7 +245,7 @@ class RunMedCopilotTests(unittest.TestCase):
             "questions_for_guidelines_db.txt": fixture.questions,
             "answers_from_guidelines_db.txt": fixture.guideline_text,
             "final_prompt.txt": expected_prompt,
-            "final_output.txt": fixture.plan,
+            "final_output.txt": fixture.final_output,
         }
         self.assertEqual({path.name for path in fixture.output.iterdir()},
                          set(expected_text) | {"graphrag_context.json"})
@@ -438,17 +437,46 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.note.read_text(encoding="utf-8"), fixture.patient_input)
                 self.assertNotIn("STAGE 1: S/O", fixture.stdout.getvalue())
 
-    def test_final_prompt_remains_verbatim_copy_of_upstream(self):
-        upstream_prompts = prompt_literals(ROOT / "med_copilot/upstream/templates/SOA_P_TEMPLATE.py")
+    def test_final_prompt_uses_so_and_preserves_reference_and_guideline_evidence(self):
         self.assertEqual(set(PROMPTS), PROMPT_NAMES)
-        self.assertEqual(PROMPTS["EVALUATE_TEMPLATE_KEYINFO"], upstream_prompts["EVALUATE_TEMPLATE_KEYINFO"])
+        template = PROMPTS["EVALUATE_TEMPLATE_KEYINFO"]
+        self.assertIn("(Subjective and Objective only)", template)
+        rendered = template.format(
+            conditions=self.fixture.conditions, example=self.fixture.results[0],
+            Key_info=self.fixture.guideline_text,
+        )
+        for evidence in [self.fixture.conditions, self.fixture.results[0], self.fixture.guideline_text]:
+            self.assertIn(evidence, rendered)
+        self.assertIn("Assessment: REFERENCE_DIAGNOSIS", rendered)
+        self.assertIn("Markdown formatting", rendered)
+        for requirement in [
+            "Assessment (A), including the most likely diagnosis, and Plan (P)",
+            "using the Subjective and Objective as context",
+            "Plan consistent with the Assessment",
+            "investigations, treatment, and follow-up", "## Assessment", "## Plan",
+            "Do NOT output JSON",
+        ]:
+            self.assertIn(requirement, rendered)
+        self.assertLess(rendered.index("Follow the style of the example below:"),
+                        rendered.index(self.fixture.results[0]))
+        self.assertLess(rendered.index("Now, here is the patient's conditions:"),
+                        rendered.index(self.fixture.conditions))
+        self.assertLess(rendered.index("Additional Information"),
+                        rendered.index(self.fixture.guideline_text))
 
-    def test_question_prompt_describes_so_input_without_assessment(self):
+    def test_question_prompt_uses_so_for_diagnostic_and_management_evidence(self):
         rendered = PROMPTS["KEY_QUESTIONS_TEMPLATE"].format(conditions=self.fixture.conditions)
-        self.assertRegex(rendered.lower(), r"\(subjective,\s*objective\)")
+        self.assertIn("(Subjective and Objective only)", rendered)
         self.assertNotIn("assessment", rendered.lower())
         self.assertIn(self.fixture.conditions, rendered)
-        self.assertIn('"Key Questions"', rendered)
+        for requirement in ["at most 4", "Diagnostic criteria", "distinguish plausible diagnoses",
+                            "Investigations", "treatment conditional", "hypotheses"]:
+            self.assertIn(requirement, rendered)
+        example, _ = json.JSONDecoder().raw_decode(rendered[rendered.index("{"):])
+        self.assertEqual(set(example), {"Key Questions"})
+        self.assertEqual(len(example["Key Questions"]), 4)
+        self.assertTrue(all(isinstance(question, str) and question.strip()
+                            for question in example["Key Questions"]))
 
     def test_normalization_prompts_request_so_without_diagnostic_interpretation(self):
         for name in ["PATIENT_CASE_TEMPLATE", "PATIENT_CASE_SYSTEM_TEMPLATE"]:
@@ -460,10 +488,14 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertIn("valid json", instructions)
         self.assertIn("do not infer diagnoses", instructions)
         self.assertIn("diagnostic interpretations", instructions)
+        self.assertIn("treatment recommendations", instructions)
         self.assertIn("only facts explicitly stated in the patient record", instructions)
-        # The prompt uses schematic (text) placeholders, not literal JSON values.
+        for detail in ["measurements", "units", "chronology", "relevant negatives", "uncertainty"]:
+            self.assertIn(detail, PROMPTS["PATIENT_CASE_TEMPLATE"])
         format_example = system_prompt[system_prompt.index("{"):system_prompt.rindex("}") + 1]
-        self.assertEqual(re.findall(r'"([^"]+)"\s*:', format_example), ["subjective", "objective"])
+        schema_example = json.loads(format_example)
+        self.assertEqual(set(schema_example), {"subjective", "objective"})
+        self.assertTrue(all(isinstance(value, str) for value in schema_example.values()))
 
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture
