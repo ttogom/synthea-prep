@@ -62,7 +62,7 @@ def main():
     print(patient_case)
 
     # ---------------------------------------------------------------------
-    # Stage 1: MED-COPILOT patient -> Subjective / Objective / Assessment
+    # Stage 1: MED-COPILOT patient free-text -> Subjective / Objective
     # ---------------------------------------------------------------------
 
     patient_case_instance = PATIENT_CASE_TEMPLATE.format(
@@ -85,14 +85,12 @@ def main():
     )
 
     patient = json.loads(response.choices[0].message.content)
-
     conditions = (
         f'Subjective: {patient["subjective"]}\n'
-        f'Objective: {patient["objective"]}\n'
-        f'Assessment: {patient["assessment"]}'
+        f'Objective: {patient["objective"]}'
     )
 
-    print("\n========== STAGE 1: S/O/A ==========\n")
+    print("\n========== STAGE 1: S/O ==========\n")
     print(conditions)
     with open(OUTPUT / "case_SOA.txt", "w") as f:
         f.write(conditions)

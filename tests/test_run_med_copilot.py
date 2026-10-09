@@ -3,6 +3,7 @@
 Run directly: python3 tests/test_run_med_copilot.py
 Or discover: python3 -m unittest discover -s tests -p 'test_*.py'
 Models and API clients are mocked; upstream modules are never imported.
+Normalized S/O is trusted; schema and factual validation are outside this runner.
 """
 
 import ast
@@ -12,6 +13,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import sys
 import tempfile
@@ -42,6 +44,7 @@ def prompt_literals(path):
 
 
 PROMPTS = prompt_literals(PROJECT_PROMPTS)
+DEFAULT_NORMALIZATION_RESPONSE = object()
 
 
 class PipelineFixture:
@@ -65,7 +68,8 @@ class PipelineFixture:
         # Prepared input is consumed in full, including text after the old
         # smoke-test heading/date boundaries and its surrounding whitespace.
         self.patient_input = (
-            " \n2000-07-20\n# Chief Complaint\nClinical evidence only."
+            " \n2000-07-20\n# Chief Complaint\nCough for 3 days; denies fever. café."
+            "\n# Objective\nTemperature 37.2 °C; SpO₂ 98%; weight 70 kg on 2000-07-20."
             "\n# Assessment and Plan\nSUPPLIED_SECTION_EVIDENCE café"
             "\n\n2000-07-02\nLATER_ENCOUNTER_EVIDENCE"
             "\n\n2001-01-03\nEND_OF_RECORD_EVIDENCE\n \n"
@@ -75,14 +79,23 @@ class PipelineFixture:
         self.corpus = [{"subjective": "Corpus S", "objective": "Corpus O",
                         "assessment": "Corpus A", "plan": "Corpus P"}]
         (self.upstream / "soap_with_metadata.json").write_text(json.dumps(self.corpus))
-        self.patient = {"subjective": "Normalized S", "objective": "Normalized O",
-                        "assessment": "Inferred A"}
-        self.conditions = "Subjective: Normalized S\nObjective: Normalized O\nAssessment: Inferred A"
+        self.patient = {
+            "subjective": "2000-07-20: Cough for 3 days; denies fever. café.",
+            "objective": "Temperature 37.2 °C; SpO₂ 98%; weight 70 kg on 2000-07-20.",
+        }
+        self.conditions = (
+            f'Subjective: {self.patient["subjective"]}\n'
+            f'Objective: {self.patient["objective"]}'
+        )
+        self.normalization_response = DEFAULT_NORMALIZATION_RESPONSE
         self.questions = '{"Key Questions": ["Question one?", "Question two?"]}'
         self.guideline_text = "GUIDELINE_RESPONSE_ONLY\nGuideline evidence with café."
         self.plan = "## Plan\n1. MOCK_FINAL_PLAN"
         self.candidates = [{"id": "candidate-one"}, {"id": "candidate-two"}]
-        self.results = ["SELECTED_SIMILAR_CASE_AND_PLAN", "UNSELECTED_SIMILAR_CASE"]
+        self.results = [
+            "SELECTED_SIMILAR_CASE\nAssessment: REFERENCE_DIAGNOSIS\nPlan: REFERENCE_PLAN",
+            "UNSELECTED_SIMILAR_CASE",
+        ]
         self.context = {
             "sources": pd.DataFrame({
                 "id": list(range(135)),
@@ -118,6 +131,8 @@ class PipelineFixture:
             stage = ["normalization", "questions", "final"][len(fixture.calls) - 1]
             fixture.fail_at(stage)
             content = [json.dumps(fixture.patient), fixture.questions, fixture.plan][len(fixture.calls) - 1]
+            if stage == "normalization" and fixture.normalization_response is not DEFAULT_NORMALIZATION_RESPONSE:
+                content = fixture.normalization_response
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
         def client(api_key):
@@ -290,6 +305,19 @@ class RunMedCopilotTests(unittest.TestCase):
             "community_level": 2, "response_type": "Multiple Paragraphs",
             "streaming": False, "query": fixture.questions, "verbose": True,
         }, fixture.caller)])
+        self.assertIn("STAGE 1: S/O", fixture.stdout.getvalue())
+        self.assertNotIn("STAGE 1: S/O/A", fixture.stdout.getvalue())
+        self.assertNotIn("Assessment:", fixture.conditions)
+        for field in fixture.patient.values():
+            self.assertIn(field, fixture.retrieval_calls[1][1])
+            self.assertIn(field, fixture.rerank_calls[1][1])
+            self.assertIn(field, fixture.calls[1]["messages"][-1]["content"])
+            self.assertIn(field, fixture.calls[2]["messages"][-1]["content"])
+        self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.retrieval_calls[1][1])
+        self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.rerank_calls[1][1])
+        self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.calls[1]["messages"][-1]["content"])
+        self.assertIn("Assessment: REFERENCE_DIAGNOSIS", fixture.calls[2]["messages"][-1]["content"])
+        self.assertIn("Plan: REFERENCE_PLAN", fixture.calls[2]["messages"][-1]["content"])
         self.assert_outputs()
 
     def test_script_entry_point_runs_the_full_pipeline(self):
@@ -320,10 +348,122 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertIn(patient_text, fixture.stdout.getvalue())
                 self.assert_outputs()
 
-    def test_project_prompts_are_verbatim_copies_of_upstream(self):
+    def test_trusted_so_preserves_empty_sections_and_field_text(self):
+        fixture_root = self.fixture.root
+        cases = {
+            "no_subjective": {"subjective": "", "objective": self.fixture.patient["objective"]},
+            "no_objective": {"subjective": self.fixture.patient["subjective"], "objective": ""},
+            "whitespace_section": {"subjective": " \n\t", "objective": self.fixture.patient["objective"]},
+            "preserved_whitespace": {
+                "subjective": " \n2000-07-20: No fever; cough for 3 days. café.\t ",
+                "objective": " Temperature 37.2 °C; SpO₂ 98%; weight 70 kg. \n",
+            },
+        }
+        for name, patient in cases.items():
+            with self.subTest(case=name):
+                self.fixture = PipelineFixture(fixture_root / name)
+                fixture = self.fixture
+                fixture.patient = patient
+                fixture.conditions = (
+                    f'Subjective: {patient["subjective"]}\n'
+                    f'Objective: {patient["objective"]}'
+                )
+                runner = self.load_runner()
+                with fixture.runtime():
+                    runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+                self.assertEqual(len(fixture.calls), 3)
+                self.assertEqual(fixture.retrieval_calls[1][1], fixture.conditions)
+                self.assertEqual(fixture.rerank_calls[1][1], fixture.conditions)
+                self.assertEqual(fixture.calls[1]["messages"][-1]["content"],
+                                 PROMPTS["KEY_QUESTIONS_TEMPLATE"].format(conditions=fixture.conditions))
+                self.assert_outputs()
+
+    def test_only_so_fields_from_trusted_response_reach_downstream(self):
+        fixture = self.fixture
+        fixture.patient.update({
+            "assessment": "UNUSED_TARGET_ASSESSMENT",
+            "diagnosis": "UNUSED_TARGET_DIAGNOSIS",
+            "plan": "UNUSED_TARGET_PLAN",
+            "metadata": {"source": "external normalization"},
+        })
+        runner = self.load_runner()
+        with fixture.runtime():
+            runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(len(fixture.calls), 3)
+        self.assertEqual(fixture.retrieval_calls[1][1], fixture.conditions)
+        self.assertEqual(fixture.rerank_calls[1][1], fixture.conditions)
+        for call in fixture.calls[1:]:
+            self.assertNotIn("UNUSED_TARGET", call["messages"][-1]["content"])
+        self.assertNotIn("UNUSED_TARGET", fixture.stdout.getvalue())
+        self.assert_outputs()
+
+    def test_undecodable_or_unusable_so_response_stops_before_retrieval(self):
+        fixture_root = self.fixture.root
+        valid = self.fixture.patient
+        # These are ordinary decoding/key-access failures, not schema checks.
+        cases = {
+            "no_content": (None, TypeError),
+            "nonstring_content": (valid, TypeError),
+            "blank_content": ("", json.JSONDecodeError),
+            "whitespace_content": (" \n\t", json.JSONDecodeError),
+            "malformed_json": ('{"subjective": "cough",', json.JSONDecodeError),
+            "markdown_wrapped_json": ("```json\n" + json.dumps(valid) + "\n```", json.JSONDecodeError),
+            "json_null": ("null", TypeError),
+            "json_array": (json.dumps([valid]), TypeError),
+            "empty_object": ("{}", KeyError),
+            "missing_subjective": (json.dumps({"objective": "measured evidence"}), KeyError),
+            "missing_objective": (json.dumps({"subjective": "reported evidence"}), KeyError),
+            "wrong_case": (json.dumps({"Subjective": "reported evidence", "objective": "measured evidence"}), KeyError),
+        }
+        for name, (raw_response, exception_type) in cases.items():
+            with self.subTest(case=name):
+                self.fixture = PipelineFixture(fixture_root / name)
+                fixture = self.fixture
+                fixture.normalization_response = raw_response
+                runner = self.load_runner()
+                with fixture.runtime():
+                    with self.assertRaises(exception_type) as caught:
+                        runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+                if exception_type is KeyError:
+                    self.assertEqual(caught.exception.args[0],
+                                     "objective" if name == "missing_objective" else "subjective")
+                self.assertEqual(len(fixture.calls), 1)
+                self.assertEqual(fixture.retrieval_calls, [])
+                self.assertEqual(fixture.rerank_calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertEqual(list(fixture.output.iterdir()), [])
+                self.assertEqual(fixture.note.read_text(encoding="utf-8"), fixture.patient_input)
+                self.assertNotIn("STAGE 1: S/O", fixture.stdout.getvalue())
+
+    def test_final_prompt_remains_verbatim_copy_of_upstream(self):
         upstream_prompts = prompt_literals(ROOT / "med_copilot/upstream/templates/SOA_P_TEMPLATE.py")
         self.assertEqual(set(PROMPTS), PROMPT_NAMES)
-        self.assertEqual(PROMPTS, upstream_prompts)
+        self.assertEqual(PROMPTS["EVALUATE_TEMPLATE_KEYINFO"], upstream_prompts["EVALUATE_TEMPLATE_KEYINFO"])
+
+    def test_question_prompt_describes_so_input_without_assessment(self):
+        rendered = PROMPTS["KEY_QUESTIONS_TEMPLATE"].format(conditions=self.fixture.conditions)
+        self.assertRegex(rendered.lower(), r"\(subjective,\s*objective\)")
+        self.assertNotIn("assessment", rendered.lower())
+        self.assertIn(self.fixture.conditions, rendered)
+        self.assertIn('"Key Questions"', rendered)
+
+    def test_normalization_prompts_request_so_without_diagnostic_interpretation(self):
+        for name in ["PATIENT_CASE_TEMPLATE", "PATIENT_CASE_SYSTEM_TEMPLATE"]:
+            with self.subTest(prompt=name):
+                prompt = " ".join(PROMPTS[name].lower().split())
+                self.assertIn("only subjective and objective", prompt)
+        system_prompt = PROMPTS["PATIENT_CASE_SYSTEM_TEMPLATE"]
+        instructions = " ".join(system_prompt.lower().split())
+        self.assertIn("valid json", instructions)
+        self.assertIn("do not infer diagnoses", instructions)
+        self.assertIn("diagnostic interpretations", instructions)
+        self.assertIn("only facts explicitly stated in the patient record", instructions)
+        # The prompt uses schematic (text) placeholders, not literal JSON values.
+        format_example = system_prompt[system_prompt.index("{"):system_prompt.rindex("}") + 1]
+        self.assertEqual(re.findall(r'"([^"]+)"\s*:', format_example), ["subjective", "objective"])
 
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture
