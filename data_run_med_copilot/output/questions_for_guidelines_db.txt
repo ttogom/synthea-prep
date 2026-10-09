@@ -1,8 +1,8 @@
 {
-  "Key Questions": [
-    "What are the recommended interventions to address the patient's blurred vision and potential neurological involvement, particularly focusing on any necessary referrals to specialists?",
-    "Given the patient's symptoms of confusion and decreased judgment, what specific cognitive assessments or tests should be conducted to evaluate his cognitive impairment?",
-    "What medications or treatments can be considered to alleviate the tingling in the patient's hands and feet, especially in the context of potential neurological decline?",
-    "How can stress management techniques be integrated into the patient's care plan to help mitigate symptoms of confusion and social isolation?"
-  ]
+"Key Questions": [
+    "What diagnostic criteria or imaging studies could help distinguish between potential causes of the patient's blurred vision and confusion, such as diabetic retinopathy related to his metformin use or possible neurological conditions like dementia or stroke?",
+    "Given the patient's symptoms of tingling in the hands and feet, what specific laboratory tests (such as vitamin B12 levels, glucose levels, or thyroid function tests) should be conducted to rule out metabolic or neuropathic causes?",
+    "Considering the patient's decreased judgment and communication skills, what non-pharmacological interventions (like cognitive therapy or social engagement strategies) could be implemented to address his confusion and enhance his cognitive function while determining the underlying cause?",
+    "In light of the patient's existing medications and his confusion, are there any adjustments or alternative medications you would recommend to better manage his symptoms, particularly concerning potential drug interactions or side effects from his current regimen?"
+    ]
 }

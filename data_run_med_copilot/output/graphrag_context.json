@@ -28,15 +28,85 @@
     ],
     "index": [
       0,
-      1
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
     ],
     "data": [
+      [
+        "12517",
+        "STROKE",
+        "COGNITIVE DIFFICULTIES",
+        "Cognitive difficulties are often experienced by stroke survivors, impacting their rehabilitation process",
+        "8.0",
+        "1",
+        true
+      ],
+      [
+        "35573",
+        "MYALGIC ENCEPHALOMYELITIS",
+        "COGNITIVE DIFFICULTIES",
+        "Myalgic encephalomyelitis (ME) is a complex and debilitating condition characterized by a range of symptoms, among which cognitive difficulties are particularly prominent. Individuals with ME frequently report experiencing significant cognitive challenges that hinder their ability to communicate effectively and process information. These cognitive difficulties are not merely incidental; they represent a core aspect of the disorder, profoundly impacting the daily functioning and overall quality of life of those affected.\n\nThe cognitive impairments associated with myalgic encephalomyelitis can manifest in various ways, including problems with memory, attention, and executive function. This cognitive burden can make it challenging for individuals to engage in everyday activities, maintain social interactions, and perform tasks that require mental effort. As a result, the cognitive difficulties experienced by individuals with ME are a critical consideration in understanding the full scope of the disorder and its effects on patients' lives.\n\nIn summary, cognitive difficulties are a significant and common symptom of myalgic encephalomyelitis, highlighting the cognitive impact of the condition and its implications for the daily lives of those affected.",
+        "36.0",
+        "1",
+        true
+      ],
       [
         "38098",
         "MULTIPLE SCLEROSIS",
         "COGNITIVE PROBLEMS",
         "Cognitive problems can be a symptom of multiple sclerosis, affecting the patient's mental processes",
         "10.0",
+        "1",
+        true
+      ],
+      [
+        "49583",
+        "VITAMIN B12 DEFICIENCY",
+        "COGNITIVE DIFFICULTIES",
+        "Vitamin B12 deficiency can cause cognitive difficulties, including memory loss and concentration issues",
+        "9.0",
+        "1",
+        true
+      ],
+      [
+        "25351",
+        "RENAL REPLACEMENT THERAPY",
+        "NEUROCOGNITIVE ISSUES",
+        "Neurocognitive issues can affect a patient's ability to understand and engage in renal replacement therapy decisions",
+        "8.0",
+        "1",
+        true
+      ],
+      [
+        "42040",
+        "HEARING LOSS",
+        "COGNITIVE DIFFICULTIES",
+        "Cognitive difficulties may prevent children from recognizing their hearing loss, leading to delays in diagnosis and treatment",
+        "8.0",
+        "1",
+        true
+      ],
+      [
+        "46575",
+        "COGNITIVE DIFFICULTIES",
+        "TRAUMATIC BRAIN INJURY",
+        "Cognitive difficulties are often reported by individuals with traumatic brain injury, affecting their daily functioning",
+        "10.0",
+        "1",
+        true
+      ],
+      [
+        "35564",
+        "SEVERE ME/CFS",
+        "COGNITIVE DIFFICULTIES",
+        "Cognitive difficulties are a significant symptom of severe ME/CFS, affecting the ability to perform daily tasks",
+        "9.0",
         "1",
         true
       ],
@@ -89,13 +159,6 @@
     ],
     "data": [
       [
-        "17941",
-        "COGNITIVE PROBLEMS",
-        "Cognitive problems encompass a range of difficulties related to mental processes, including memory, attention, and problem-solving abilities. These issues can arise in various contexts, notably in individuals diagnosed with multiple sclerosis, where cognitive impairments are a recognized symptom. Additionally, cognitive problems are also commonly reported by some individuals following a COVID-19 infection, often described as \"brain fog.\" This phenomenon includes challenges in concentration, memory retention, and overall mental clarity. \n\nIn both scenarios, cognitive problems can significantly impact daily functioning and quality of life. In the case of multiple sclerosis, cognitive difficulties may stem from the neurological effects of the disease, which can disrupt normal cognitive functioning. Similarly, post-COVID cognitive issues may result from the virus's impact on the brain, leading to persistent symptoms that affect mental acuity and focus.\n\nOverall, cognitive problems represent a significant concern for individuals affected by both multiple sclerosis and post-COVID conditions, highlighting the need for awareness and potential interventions to support those experiencing these challenges.",
-        "2",
-        true
-      ],
-      [
         "7265",
         "COGNITIVE DIFFICULTIES",
         "Cognitive difficulties encompass a variety of challenges that affect mental processes, including memory, attention, and problem-solving abilities. Often referred to colloquially as \"brain fog,\" these difficulties can manifest in different contexts and may arise from various underlying causes. \n\nOne significant context in which cognitive difficulties can occur is following a stroke. In such cases, individuals may experience impairments in their cognitive functions, which can hinder their ability to concentrate, remember information, and solve problems effectively. This highlights the impact of neurological events on cognitive health and the importance of rehabilitation in addressing these challenges.\n\nAdditionally, cognitive difficulties can also be linked to nutritional deficiencies, particularly vitamin B12 deficiency. Insufficient levels of this essential vitamin can lead to impairments in mental processes, including concentration and memory. This connection underscores the importance of proper nutrition in maintaining cognitive health and preventing difficulties that can arise from deficiencies.\n\nOverall, cognitive difficulties represent a complex interplay of various factors, including medical conditions like stroke and nutritional status, which can significantly affect an individual's cognitive functioning and quality of life.",
@@ -103,10 +166,10 @@
         true
       ],
       [
-        "6899",
-        "NEUROLOGICAL ASSESSMENT",
-        "The \"NEUROLOGICAL ASSESSMENT\" refers to a comprehensive clinical evaluation aimed at determining the function of the nervous system. This assessment is crucial for investigating various neurological disorders and is often performed in response to symptoms such as pain or sensory changes, particularly following surgical procedures. \n\nThe evaluation process typically involves a series of tests designed to assess reflexes, strength, coordination, and overall neurological function. It is particularly important in cases where conditions like subarachnoid hemorrhage are suspected, as it helps identify any abnormalities that may indicate serious underlying issues. \n\nAdditionally, the neurological assessment plays a vital role in diagnosing a range of neurological conditions, including but not limited to tremors, tics, and hypotonia. By identifying these conditions, healthcare professionals can determine appropriate treatment options tailored to the patient's specific needs. \n\nFurthermore, the assessment may also consider the impact of medications, such as opioid analgesics, on the nervous system, as these can influence the presence and severity of neurological disorders. Overall, the neurological assessment is an essential tool in the clinical setting for understanding and addressing the complexities of nervous system function and health.",
-        "18",
+        "17941",
+        "COGNITIVE PROBLEMS",
+        "Cognitive problems encompass a range of difficulties related to mental processes, including memory, attention, and problem-solving abilities. These issues can arise in various contexts, notably in individuals diagnosed with multiple sclerosis, where cognitive impairments are a recognized symptom. Additionally, cognitive problems are also commonly reported by some individuals following a COVID-19 infection, often described as \"brain fog.\" This phenomenon includes challenges in concentration, memory retention, and overall mental clarity. \n\nIn both scenarios, cognitive problems can significantly impact daily functioning and quality of life. In the case of multiple sclerosis, cognitive difficulties may stem from the neurological effects of the disease, which can disrupt normal cognitive functioning. Similarly, post-COVID cognitive issues may result from the virus's impact on the brain, leading to persistent symptoms that affect mental acuity and focus.\n\nOverall, cognitive problems represent a significant concern for individuals affected by both multiple sclerosis and post-COVID conditions, highlighting the need for awareness and potential interventions to support those experiencing these challenges.",
+        "2",
         true
       ],
       [
@@ -117,9 +180,65 @@
         true
       ],
       [
+        "281",
+        "DEMENTIA",
+        "Dementia is a progressive neurological disorder characterized by a significant decline in cognitive function, particularly affecting memory, thinking, and social abilities. This cognitive impairment is severe enough to interfere with daily life, often necessitating specialized care and support, especially in later stages. Dementia is commonly associated with aging and various health conditions, making it a prevalent issue among older adults.\n\nThe disorder manifests through a range of symptoms that can lead to confusion and disorientation, increasing the risk of falls due to gait and balance issues. Individuals with dementia may experience difficulties in self-care, including maintaining oral hygiene, which further complicates their overall health and well-being. As the condition progresses, it can severely impact decision-making capacity and independence, often requiring tailored care pathways to address the unique needs of each individual.\n\nDementia is not a single disease but rather a general term encompassing various types of cognitive decline that share common symptoms. These symptoms can include memory loss, changes in behavior, and challenges in social interactions, all of which can significantly affect daily functioning. The condition often necessitates palliative care in its later stages, highlighting the importance of early diagnosis and intervention.\n\nOverall, dementia represents a complex and multifaceted challenge that affects not only the individuals diagnosed but also their families and caregivers, emphasizing the need for comprehensive support systems and resources to manage its impact effectively.",
+        "208",
+        true
+      ],
+      [
+        "6899",
+        "NEUROLOGICAL ASSESSMENT",
+        "The \"NEUROLOGICAL ASSESSMENT\" refers to a comprehensive clinical evaluation aimed at determining the function of the nervous system. This assessment is crucial for investigating various neurological disorders and is often performed in response to symptoms such as pain or sensory changes, particularly following surgical procedures. \n\nThe evaluation process typically involves a series of tests designed to assess reflexes, strength, coordination, and overall neurological function. It is particularly important in cases where conditions like subarachnoid hemorrhage are suspected, as it helps identify any abnormalities that may indicate serious underlying issues. \n\nAdditionally, the neurological assessment plays a vital role in diagnosing a range of neurological conditions, including but not limited to tremors, tics, and hypotonia. By identifying these conditions, healthcare professionals can determine appropriate treatment options tailored to the patient's specific needs. \n\nFurthermore, the assessment may also consider the impact of medications, such as opioid analgesics, on the nervous system, as these can influence the presence and severity of neurological disorders. Overall, the neurological assessment is an essential tool in the clinical setting for understanding and addressing the complexities of nervous system function and health.",
+        "18",
+        true
+      ],
+      [
         "10196",
         "COGNITIVE ASSESSMENT",
         "Cognitive assessment involves evaluating a patient's cognitive functions, including memory, attention, and problem-solving skills, which is crucial for understanding the impact of MND on mental health.",
+        "1",
+        true
+      ],
+      [
+        "22499",
+        "DIAGNOSTIC SERVICE",
+        "Diagnostic services involve assessments and evaluations conducted to determine the presence of dementia and other cognitive disorders.",
+        "1",
+        true
+      ],
+      [
+        "22730",
+        "OPTIC NERVE DYSFUNCTION",
+        "Optic nerve dysfunction involves issues with the optic nerve that can lead to visual problems, including blurred vision and visual field loss, potentially linked to vitamin B12 deficiency.",
+        "1",
+        true
+      ],
+      [
+        "5842",
+        "COGNITIVE DECLINE",
+        "Cognitive decline is characterized by a decrease in cognitive function, which encompasses various mental processes including memory, attention, and problem-solving abilities. This decline can manifest in individuals suffering from a range of health conditions. Notably, it is observed in patients with epilepsy, especially those who experience additional complications related to their condition. Furthermore, cognitive decline can also be influenced by chronic health issues such as hypertension, which may exacerbate the deterioration of cognitive functions. Additionally, individuals with brain tumors are at risk of experiencing cognitive decline, as the presence of tumors can directly impact cognitive abilities. Overall, cognitive decline is a multifaceted issue that can arise from various medical conditions, highlighting the importance of understanding its underlying causes and implications for affected individuals.",
+        "7",
+        true
+      ],
+      [
+        "8012",
+        "NEUROLOGICAL SIGNS",
+        "Neurological signs are critical indicators of brain function, encompassing a range of behavioral, emotional, and psychological symptoms. These signs are often assessed during clinical reviews to evaluate a patient's neurological health. They can manifest physically, reflecting changes in a patient's condition that may necessitate further investigation. By observing these signs, healthcare professionals can gain insights into the underlying neurological status of an individual, guiding diagnosis and treatment decisions. Overall, neurological signs serve as essential markers for understanding brain function and identifying potential issues that may require medical attention.",
+        "7",
+        true
+      ],
+      [
+        "7952",
+        "NEUROLOGICAL SYMPTOMS",
+        "Neurological symptoms encompass a range of signs indicating dysfunction within the nervous system, which can manifest in various clinical contexts, including brain and spinal metastases, as well as conditions like Myalgic Encephalomyelitis/Chronic Fatigue Syndrome (ME/CFS). These symptoms may include cognitive and behavioral changes, physical impairments, pain, weakness, sensory alterations, and changes in consciousness or reflexes.\n\nIn patients with brain metastases, neurological symptoms can lead to significant alterations in cognition and behavior, affecting their overall quality of life. Similarly, individuals with spinal metastases may experience symptoms such as pain, weakness, and sensory changes, which are critical for assessing the extent of nervous system involvement. The presence of symptoms like paresthesia, weakness, or numbness can also indicate spinal injury, underscoring the importance of thorough neurological assessments in these cases.\n\nIn the context of ME/CFS, neurological symptoms may present as double vision, dizziness, and other visual disorders, which can severely impact daily activities and overall functioning. This highlights the diverse manifestations of neurological symptoms across different conditions, emphasizing the need for careful evaluation and management tailored to the specific underlying causes.\n\nOverall, neurological symptoms serve as vital indicators of nervous system dysfunction, necessitating comprehensive assessment and intervention strategies to address the varied impacts on patients' health and well-being.",
+        "14",
+        true
+      ],
+      [
+        "13749",
+        "COGNITIVE ISSUES",
+        "",
         "1",
         true
       ],
@@ -131,10 +250,31 @@
         true
       ],
       [
-        "8012",
-        "NEUROLOGICAL SIGNS",
-        "Neurological signs are critical indicators of brain function, encompassing a range of behavioral, emotional, and psychological symptoms. These signs are often assessed during clinical reviews to evaluate a patient's neurological health. They can manifest physically, reflecting changes in a patient's condition that may necessitate further investigation. By observing these signs, healthcare professionals can gain insights into the underlying neurological status of an individual, guiding diagnosis and treatment decisions. Overall, neurological signs serve as essential markers for understanding brain function and identifying potential issues that may require medical attention.",
-        "7",
+        "7069",
+        "MEDICATION NEEDS",
+        "Medication needs involve the management of prescribed drugs for stroke patients, ensuring they understand and adhere to their treatment plans.",
+        "1",
+        true
+      ],
+      [
+        "11325",
+        "RED FLAGS",
+        "Indicators that suggest the possibility of other neurological disorders that may require further investigation or referral to a specialist.",
+        "4",
+        true
+      ],
+      [
+        "22480",
+        "NURSE CONSULTANTS",
+        "Nurse consultants are advanced practice nurses who possess specialized expertise in diagnosing and treating various medical conditions, including Alzheimer's disease and other forms of dementia. They play a crucial role in patient management, utilizing their advanced training to assess and manage patients effectively. Their focus on dementia care allows them to provide tailored interventions and support for individuals affected by cognitive impairments, ensuring that patients receive comprehensive and compassionate care. Through their specialized knowledge, nurse consultants contribute significantly to improving the quality of life for patients and their families, addressing both medical and emotional needs associated with these conditions.",
+        "2",
+        true
+      ],
+      [
+        "22487",
+        "MEDICATION REVIEWS",
+        "Medication reviews are systematic evaluations of a patient's medications to ensure their appropriateness, safety, and effectiveness, particularly important for those with dementia.",
+        "1",
         true
       ],
       [
@@ -149,76 +289,6 @@
         "ASSESSMENT OF COGNITIVE SYMPTOMS",
         "Assessment of cognitive symptoms involves evaluating a patient's cognitive functions to determine the presence and extent of cognitive impairment.",
         "2",
-        true
-      ],
-      [
-        "13749",
-        "COGNITIVE ISSUES",
-        "",
-        "1",
-        true
-      ],
-      [
-        "7069",
-        "MEDICATION NEEDS",
-        "Medication needs involve the management of prescribed drugs for stroke patients, ensuring they understand and adhere to their treatment plans.",
-        "1",
-        true
-      ],
-      [
-        "22480",
-        "NURSE CONSULTANTS",
-        "Nurse consultants are advanced practice nurses who possess specialized expertise in diagnosing and treating various medical conditions, including Alzheimer's disease and other forms of dementia. They play a crucial role in patient management, utilizing their advanced training to assess and manage patients effectively. Their focus on dementia care allows them to provide tailored interventions and support for individuals affected by cognitive impairments, ensuring that patients receive comprehensive and compassionate care. Through their specialized knowledge, nurse consultants contribute significantly to improving the quality of life for patients and their families, addressing both medical and emotional needs associated with these conditions.",
-        "2",
-        true
-      ],
-      [
-        "7952",
-        "NEUROLOGICAL SYMPTOMS",
-        "Neurological symptoms encompass a range of signs indicating dysfunction within the nervous system, which can manifest in various clinical contexts, including brain and spinal metastases, as well as conditions like Myalgic Encephalomyelitis/Chronic Fatigue Syndrome (ME/CFS). These symptoms may include cognitive and behavioral changes, physical impairments, pain, weakness, sensory alterations, and changes in consciousness or reflexes.\n\nIn patients with brain metastases, neurological symptoms can lead to significant alterations in cognition and behavior, affecting their overall quality of life. Similarly, individuals with spinal metastases may experience symptoms such as pain, weakness, and sensory changes, which are critical for assessing the extent of nervous system involvement. The presence of symptoms like paresthesia, weakness, or numbness can also indicate spinal injury, underscoring the importance of thorough neurological assessments in these cases.\n\nIn the context of ME/CFS, neurological symptoms may present as double vision, dizziness, and other visual disorders, which can severely impact daily activities and overall functioning. This highlights the diverse manifestations of neurological symptoms across different conditions, emphasizing the need for careful evaluation and management tailored to the specific underlying causes.\n\nOverall, neurological symptoms serve as vital indicators of nervous system dysfunction, necessitating comprehensive assessment and intervention strategies to address the varied impacts on patients' health and well-being.",
-        "14",
-        true
-      ],
-      [
-        "281",
-        "DEMENTIA",
-        "Dementia is a progressive neurological disorder characterized by a significant decline in cognitive function, particularly affecting memory, thinking, and social abilities. This cognitive impairment is severe enough to interfere with daily life, often necessitating specialized care and support, especially in later stages. Dementia is commonly associated with aging and various health conditions, making it a prevalent issue among older adults.\n\nThe disorder manifests through a range of symptoms that can lead to confusion and disorientation, increasing the risk of falls due to gait and balance issues. Individuals with dementia may experience difficulties in self-care, including maintaining oral hygiene, which further complicates their overall health and well-being. As the condition progresses, it can severely impact decision-making capacity and independence, often requiring tailored care pathways to address the unique needs of each individual.\n\nDementia is not a single disease but rather a general term encompassing various types of cognitive decline that share common symptoms. These symptoms can include memory loss, changes in behavior, and challenges in social interactions, all of which can significantly affect daily functioning. The condition often necessitates palliative care in its later stages, highlighting the importance of early diagnosis and intervention.\n\nOverall, dementia represents a complex and multifaceted challenge that affects not only the individuals diagnosed but also their families and caregivers, emphasizing the need for comprehensive support systems and resources to manage its impact effectively.",
-        "208",
-        true
-      ],
-      [
-        "270",
-        "EVIDENCE REVIEW I",
-        "\"EVIDENCE REVIEW I\" encompasses a comprehensive examination of various medical and healthcare topics, providing insights into clinical practices, patient management, and advocacy. \n\nThe review discusses intravenous fluid management strategies during the perioperative period, highlighting the importance of appropriate fluid administration to optimize patient outcomes. It also addresses the challenges faced by caregivers during transitions in their roles, emphasizing the support they require to effectively manage these changes.\n\nIn the realm of respiratory health, \"EVIDENCE REVIEW I\" assesses bronchial challenge testing with mannitol as a diagnostic tool for asthma, and it focuses on oxygen therapy, exploring its implications for treating respiratory conditions. Additionally, the review examines the risk factors, signs, and symptoms associated with COVID-19, contributing to a better understanding of the disease's prevalence and impact.\n\nThe review further delves into the clinical and cost-effectiveness of various medications for osteoarthritis management, including oral, topical, and transdermal options. It discusses the detection and management of intracranial hypertension, outlining how routine monitoring can significantly affect patient outcomes. \n\nIn the context of surgical interventions, \"EVIDENCE REVIEW I\" evaluates the effectiveness of treatments for diabetic retinopathy in relation to cataract surgery, and it emphasizes the use of ultra-clean air ventilation in operating theatres for joint replacement surgeries to enhance patient safety. The review also details the surgical management of pelvic organ prolapse, comparing colpocleisis with sacrospinous fixation, and provides insights into the committee's findings and recommendations.\n\nMoreover, the review focuses on independent advocacy in healthcare for children and young people, stressing the importance of training, skills, and support for advocates to enhance their effectiveness. It highlights the significance of information sharing for effective communication in end-of-life care, ensuring that patients and families receive the necessary support during critical times.\n\nLastly, \"EVIDENCE REVIEW I\" examines the clinical effectiveness of interventions related to eating and drinking, particularly for patients with swallowing difficulties, and it provides a thorough analysis of risk stratification for localized prostate cancer, utilizing the 5-tier CPG risk model to influence treatment recommendations.\n\nOverall, \"EVIDENCE REVIEW I\" serves as a vital resource, synthesizing evidence across multiple domains of healthcare to inform best practices and improve patient care outcomes.",
-        "27",
-        true
-      ],
-      [
-        "11325",
-        "RED FLAGS",
-        "Indicators that suggest the possibility of other neurological disorders that may require further investigation or referral to a specialist.",
-        "4",
-        true
-      ],
-      [
-        "268",
-        "EVIDENCE REVIEW C",
-        "EVIDENCE REVIEW C is a comprehensive document that encompasses a wide range of health-related topics, focusing on various interventions, diagnostic assessments, and management strategies across different medical conditions. \n\nOne of the primary areas of focus is the promotion of routine vaccinations, where EVIDENCE REVIEW C highlights reminders and interventions designed to increase vaccine uptake. Additionally, it assesses the diagnostic accuracy of point-of-care tests, particularly in differentiating between viral and bacterial infections, and evaluates the effectiveness of peak expiratory flow variability as a diagnostic tool for asthma.\n\nThe review also addresses significant barriers to accessing end-of-life care services, shedding light on the challenges faced by patients and their families. It discusses the implications of coexisting long-term conditions, particularly their relationship with pelvic floor dysfunction, and emphasizes the need for combined approaches to identify, assess, and monitor the health, social care, and educational needs of children and young people.\n\nIn terms of mental health, EVIDENCE REVIEW C examines targeted organizational-level strategies aimed at enhancing mental wellbeing and evaluates the prevalence of comorbidity and its effects on individuals with complex psychosis. It also focuses on the health and social care service access for individuals suffering from myalgic encephalomyelitis/chronic fatigue syndrome (ME/CFS).\n\nThe document further delves into the assessment of carers as defined by the Care Act 2014, and it provides insights into safe withdrawal practices and interventions for managing withdrawal symptoms. It discusses the treat-to-target strategy for managing rheumatoid arthritis and evaluates the clinical and cost-effectiveness of exercise in managing osteoarthritis.\n\nMoreover, EVIDENCE REVIEW C assesses the use of non-selective beta-blockers for the primary prevention of decompensation in patients with compensated cirrhosis, and it examines the sequencing of modalities in renal replacement therapy, offering guidance for future practices. \n\nThe review also includes discussions on the early management of suspected sepsis, providing clinical guidelines and recommendations, and it addresses intravenous iron therapy for heart failure. It highlights the risks to cognitive function associated with anticholinergic drugs for women with overactive bladder and discusses the assessment of pre-eclampsia using predictive models.\n\nLastly, EVIDENCE REVIEW C presents a systematic evaluation of radical radiotherapy for prostate cancer, informing treatment guidelines, and analyzes the management of non-small-cell lung cancer stage IIIA-N2, contributing to a comprehensive understanding of these complex medical issues. \n\nOverall, EVIDENCE REVIEW C serves as a vital resource for healthcare professionals, offering evidence-based insights and recommendations across a diverse array of health topics.",
-        "36",
-        true
-      ],
-      [
-        "7101",
-        "COGNITIVE FUNCTIONING",
-        "Cognitive functioning refers to a range of mental processes that are essential for acquiring knowledge and comprehension. This includes critical functions such as thinking, memory, attention, and problem-solving. These cognitive processes are vital for everyday activities and overall mental health. However, cognitive functioning can be significantly impacted by various factors, including injuries and neurological events.\n\nIn particular, cognitive functioning can be adversely affected by traumatic injuries, which may disrupt the brain's ability to process information effectively. Such injuries can lead to difficulties in memory retention, attention span, and the execution of complex tasks, which are all components of executive functions. Additionally, neurological events like strokes can also impair cognitive functioning, leading to challenges in these same areas.\n\nOverall, cognitive functioning is a complex interplay of various mental processes that are crucial for effective learning and problem-solving. Understanding the factors that can influence cognitive functioning, such as injuries and neurological conditions, is essential for developing strategies to support individuals facing cognitive challenges.",
-        "10",
-        true
-      ],
-      [
-        "269",
-        "EVIDENCE REVIEW H",
-        "\"EVIDENCE REVIEW H\" is a comprehensive document that synthesizes a wide range of clinical evidence and recommendations across various medical topics. It serves as a resource for healthcare professionals, focusing on effective treatment strategies and patient care practices.\n\nOne of the key areas addressed in \"EVIDENCE REVIEW H\" is the management of patients with metastatic spinal cord compression, outlining effective forms of immobilization and remobilization. Additionally, it discusses preoperative fasting practices, emphasizing their implications for patient safety and outcomes.\n\nThe review also highlights the importance of adjusting standard treatment protocols for individuals undergoing rehabilitation, as well as the necessity of providing support services for caregivers of patients at the end of life. This includes a focus on the support needs of adult carers, ensuring they receive adequate assistance during challenging times.\n\nIn terms of service planning, \"EVIDENCE REVIEW H\" details the steps and considerations necessary for commissioning advocacy services. It also provides recommendations aimed at preventing infections during primary elective joint replacements, which is crucial for improving surgical outcomes.\n\nThe document evaluates the effectiveness of healthy living programs designed to combat overweight and obesity in children and young people, and it examines the clinical and cost-effectiveness of various devices used in managing osteoarthritis. Furthermore, it discusses the use of beta-blockers in the management of patients post-myocardial infarction and the role of bronchial challenge tests with histamine and methacholine in asthma diagnosis.\n\n\"Evidence Review H\" also addresses interventions for preventing falls in residential care settings, summarizing the committee's recommendations and discussions on this critical issue. It explores non-antimicrobial pharmacological interventions for children suffering from otitis media with effusion and outlines respiratory support strategies for managing patients with COVID-19.\n\nThe review includes an analysis of different endoscopic ablation techniques for Barrett's oesophagus with dysplasia and compares the long-term outcomes of using pessaries versus surgery for pelvic organ prolapse. It provides guidance on the management of myalgic encephalomyelitis/chronic fatigue syndrome (ME/CFS) and discusses the recommendations related to stenting before surgery, particularly in the context of shockwave lithotripsy.\n\nAdditionally, \"EVIDENCE REVIEW H\" standardizes the case definition for COVID-19, aiding in diagnosis and treatment approaches. It reviews symptom recognition in patients receiving renal replacement therapy or conservative management and analyzes prophylactic cranial irradiation for extensive-stage small-cell lung cancer, detailing the rationale behind treatment guidelines.\n\nLastly, the document discusses clinical features relevant to switching or stopping treatment for diabetic macular edema and provides guidelines for the identification and management of adrenal crisis, ensuring that healthcare providers are equipped with the necessary knowledge to make informed decisions in clinical practice.\n\nOverall, \"EVIDENCE REVIEW H\" serves as a vital resource, consolidating evidence-based recommendations across a spectrum of medical conditions and treatment strategies, ultimately aiming to enhance patient care and outcomes.",
-        "32",
         true
       ]
     ]
@@ -237,14 +307,6 @@
     ],
     "data": [
       [
-        "3630",
-        "-19 , such as post -COVID assessment ser vices in England \nor specialist clinics. \nThe patient e xperience e vidence described ho w some people w ere not off ered tests and \nother people w ere refused a r eferral b y healt hcare professionals because t hey did not \nhave a positiv e SARS-Co V-2 test result. Man y people who had acut e CO VID-19 w ere not \ntested, par ticularly earlier in t he pandemic. The panel w ere clear t hat access t o ser vices \nshould not be r estrict ed by the need f or a positiv e SARS-Co V-2 test (PCR, antigen or \nantibody) if t he case definition crit eria in section  1 on identification  are met. \nReturn t o recommendations \nPlanning c are \nRecommendations 4 .1 to 4.3 \nWhy we made the r ecommenda tions \nTo ensur e people get t he right car e and suppor t, the exper t panel agr eed t hat a tier ed \nappr oach could be used in which e veryone get s advice f or self -management, wit h the \nadditional option of suppor ted self -management if needed. P eople can t hen also be \noffered car e from diff erent ser vices t o mat ch the le vel of t heir needs. The \nrecommendation applies t o all age gr oups and allo ws for discussion wit h the family or \ncarers of t he person if appr opriat e. \nTher e was not enough e vidence t o recommend specific crit eria f or referral and t he panel \nagreed t he right le vel of car e would be agr eed in shar ed decision making wit h the person \nafter their holistic assessment. COVID-19 rapid guideline: managing t he long-t erm eff ects of CO VID-19 (NG188)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 42 of\n50\nReturn t o recommendations \nSelf-manag emen t and suppor ted self -manag emen t \nRecommendations 5 .1.1 to 5.1.3 \nWhy we made the r ecommenda tions \nTher e was v ery little evidence on int erventions such as specific pharmacological \ntreatment s for ongoing sympt omatic CO VID-19 or post -COVID-19 syndr ome, but t he panel \nagreed t hat e veryone should ha ve self -management suppor t and inf ormation. Ther e was a \nlack of CO VID-19-specific e vidence on managing man y of t he common sympt oms r elated \nto CO VID-19 , such as f atigue, dizziness and cognitiv e problems (such as 'brain f og'). \nHowever, there are established tr eatment s for managing individual common sympt oms. \nFor example, antihistamines can be used t o treat some skin rashes. The panel not ed that, \ngiven the fluctuating natur e of t he sympt oms, r egular r eview and monit oring is needed f or \npeople r eceiving an y form of tr eatment. \nNICE will continue t o monit or and r eview new e vidence in t his ar ea as par t of it s living \nappr oach t o maintaining t he guideline. \nPatient or ganisations and online suppor t groups can help t o suppor t self -management. \nThe Your CO VID r ecovery websit e was also highlight ed as a pot ential sour ce of r eliable, \nup-to-dat e information and suppor t. \nThe panel w ere concerned t hat people ar e buying o ver-the-count er vitamins and \nsupplement s that ma y not help wit h their sympt oms. The y agr eed t hat it w ould be helpful \nto highlight t he lack of kno wledge in t his ar ea. \nThe panel agr eed t hat suppor t to return t o education or w ork, such as setting achie vable \ngoals, should be tailor ed to the person's needs. This might in volve suppor t to work or \nstudy at home, fle xible w orking or a phased r eturn. \nFor the No vember 2021 updat e, the panel hear d exper t testimonies fr om Stark 2021 and \nWhittak er 2021 ( see e vidence r eview J: childr en and y oung people ) describing t hat \nabsence fr om or poor per formance in education was associat ed wit h poor out comes f or \nchildr en and y oung people wit h ongoing sympt omatic CO VID-19 or post -COVID-19 \nsyndr ome. The panel agr eed t hat t his w ould also apply t o adult s returning t o work or COVID-19 rapid guideline: managing t he long-t erm eff ects of CO VID-19 (NG188)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 43 of\n50\neducation. Healt hcare professionals should be awar e that people who ar e struggling t o \nreturn t o work or education ma y"
-      ],
-      [
-        "3759",
-        "culosk eletal pain and off er treatment appr opriat e to the cause, f or example \nsee t he sections on managing mobility pr oblems  and spasticity , and NICE's \nguideline on lo w back pain and sciatica in o ver 16s . [2022] \nFor a shor t explanation of wh y the committ ee made t hese r ecommendations and ho w \nthey might aff ect practice, see t he rationale and impact section on pain . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  G: \nnon-pharmacological management of pain . \nCogni tive and memor y problems \n1.5.41 Be awar e that t he sympt oms of MS can include cognitiv e problems, including \nmemor y problems, t hat t he person ma y not immediat ely recognise or associat e \nwith their MS. [2022] \n1.5.42 Assess cognition as par t of t he person's compr ehensiv e review . Tailor t he \nassessment t o the person's needs, f or example, use a clinic int erview or brief \nformal assessment, or consider r eferral f or a full neur opsy chological assessment \nif needed.  [2022] \n1.5.43 Be awar e that anxiety , depr ession, difficulty sleeping, f atigue and medication can \naffect cognition. Assess f or and off er management appr opriat e for these issues in \npeople wit h MS and cognitiv e or memor y problems (f or example, see t he section \non fatigue  and NICE's guidelines on generalised anxiety disor der and panic \ndisor der in adult s and depr ession in adult s wit h a chr onic ph ysical healt h \nproblem ). [2022] \n1.5.44 Consider r eferring people wit h MS and persisting cognitiv e impairment s to an \noccupational t herapist and/or a neur opsy chologist t o assess and manage t hese \nsympt oms accor ding t o the person's needs. [2022] Multiple scler osis in adult s: management (NG220)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 2 4 of\n55\nFor a shor t explanation of wh y the committ ee made t hese r ecommendations and ho w \nthey might aff ect practice, see t he rationale and impact section on cognitiv e and \nmemor y problems . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  H: \nnon-pharmacological management of memor y and cognitiv e problems . \nAtaxia and tr emor \nThe e vidence was r eview ed for the pharmacological management of ataxia and tr emor , \nand t he committ ee made a recommendation f or resear ch. \nFor a shor t explanation of wh y the committ ee only made a r ecommendation f or \nresear ch, see t he rationale section on pharmacological management of ataxia and \ntremor . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  I: \npharmacological management of ataxia and tr emor . \nDystonia and tr emor \nFor guidance on deep brain stimulation f or tremor and dyst onia, see t he NICE \ninterventional pr ocedur es guidance on deep brain stimulation f or tremor and dyst onia \n(excluding Parkinson's disease) . \n1.6 Com prehensi ve review \n1.6.1 Ensur e all people wit h MS ha ve a compr ehensiv e review of all aspect s of t heir \ncare at least once a y ear. [2014] \n1.6.2 Ensur e the compr ehensiv e review is carried out b y healt hcare professionals wit h \nexper tise in MS and it s complications. In volve diff erent healt hcare professionals \nwith exper tise in specific ar eas of t he review if needed. [2014] Multiple scler osis in adult s: management (NG220)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 25 of\n55\n1.6.3 Tailor t he compr ehensiv e review t o the needs of t he person wit h MS assessing: \n\u2022 MS sympt oms: \n\uff0d mobility and balance including f alls \n\uff0d need f or mobility aids including wheelchair assessment \n\uff0d use of arms and hands \n\uff0d muscle spasms and stiffness \n\uff0d tremor \n\uff0d bladder , bowel and se xual function (see NICE's guidelines on urinar y \nincontinence in neur ological disease  and faecal incontinence in adult s) \n\uff0d sensor y sympt oms and pain \n\uff0d speech and swallo wing (see NICE's guideline on nutrition suppor t for \nadult s) \n\uff0d vision \n\uff0d cognitiv e sympt oms \n\uff0d fatigue \n\uff0d depr ession and anxiety (see NICE's guidelines on depr ession in adult s \nwith a chr onic ph ysical"
-      ],
-      [
         "1193",
         " pr ogrammes, t he committ ee agr eed b y consensus \nto recommend r eferral t o return-t o-work pr ogrammes, wher e available, f or those wishing \nto resume w ork aft er str oke. \nHow the r ecommenda tion mig ht affect practice \nThis r ecommendation ma y incr ease t he demand f or return-t o-work pr ogrammes f or people \nafter str oke. \nReturn t o the recommendation \nSelf-manag emen t interventions \nWhy the c ommi ttee made no r ecommenda tions \nThe committ ee did not mak e any recommendations f or self -management int erventions, \nwhich f ocus on empo wering t he person aft er str oke to manage t heir o wn sympt oms (f or \nexample t hrough component s like problem-solving, goal-setting, decision-making, self -Stroke rehabilitation in adult s (NG236)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 68\nof 73\nmonit oring or using coping strat egies). This is because t hey were not f ound t o be mor e \nclinically eff ectiv e than ot her int erventions. The e vidence was suppor ted by the \ncommitt ee's o wn e xperiences of self -management int erventions, alt hough some \ncommitt ee members did r epor t having positiv e personal e xperiences of using t hem. The \ncommitt ee therefore agr eed self -management int erventions could still pla y a useful r ole in \nsuppor ting t he healt h of people aft er str oke but fur ther studies w ere needed int o their \nbenefit s, as w ell as eff ectiv e component s and optimal fr equency . The y made a \nrecommendation f or resear ch on t he clinical and cost eff ectiv eness of self -management \ninterventions f or people aft er str oke. \nComm unity par ticipa tion pr ogrammes \nRecommendation 1 .17.6 \nWhy the c ommi ttee made the r ecommenda tion \nCommunity par ticipation pr ogrammes  can co ver a wide range of int erests and activities. \nThe cont ent of each pr ogramme and t he degr ee to which healt hcare professionals run or \noversee t hem also v aries. The e vidence mainly look ed at diff erent types of gr oup-based \nphysical e xercise, but some co vered ar t or music activities. In general, people who t ook \npart in t hese pr ogrammes f ound t heir quality of lif e impr oved alt hough, as e xpect ed, t he \nbenefit s they experienced v aried betw een t he pr ogrammes used in t he studies. Members \nof the committ ee also had positiv e experiences of taking par t in t hese pr ogrammes and \nagreed t hey were of v alue t o people aft er str oke. Ther efore, the committ ee recommended \nthat people could be r eferred to a community pr ogramme if t here was 1  available which \nmet t heir needs. The y also agr eed t hat f amily members and car ers could find t he \nprogrammes beneficial because t hey can help pr event f eelings of social isolation, impr ove \nquality of lif e and r educe car egiver strain. \nHow the r ecommenda tion mig ht affect practice \nCurrent practice is inconsist ent acr oss t he countr y, with some pr ogrammes commissioned \nby the NHS and deliv ered by charities, and ot hers deliv ered pur ely b y charities wit h \nfunding fr om grant s. Availability and pr ogramme type also v aries. This r ecommendation \nmay incr ease t he demand f or community par ticipation pr ogrammes. \nReturn t o the recommendation Stroke rehabilitation in adult s (NG236)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 69\nof 73\nContext \nStroke can ha ve a de vastating impact on t he liv es of people, t heir f amilies and car ers. \nMorbidity fr om str oke is t he single lar gest cause of comple x impairment s and limitations on \nactivity . Mood disturbance, cognitiv e difficulties, vision pr oblems and f atigue ar e par ticular \nissues t hat e xacerbat e other pr oblems and impede o verall r ecovery. \nAlthough str oke is one of t he biggest causes of deat h in t he UK, most people sur vive a \nfirst str oke. Thanks t o impr ovement s in str oke car e and new , acut e treatment s, the overall \nsurvival rat e from first str oke has impr oved over the past 10  years. This has led t o \nincreases in t he number of people in t he community who need compr ehensiv e post -stroke \ncare and r ehabilitation. \nThe pr evious NICE guideline on str oke rehabilitation was first published in 201"
       ],
@@ -255,6 +317,14 @@
       [
         "4927",
         "\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 7 of\n56\n1.2 R ecognising vi tamin B12 deficienc y \n1.2.1 Be awar e that sympt oms and signs of vitamin B12 deficiency: \n\u2022 can v ary from person t o person and \n\u2022 are oft en not e xclusiv e to vitamin B12 deficiency . \n1.2.2 Take into account t hat vitamin B12 deficiency is highly lik ely in people aft er total \ngastr ectomy or complet e terminal ileal r esection, if t hey are not r eceiving eit her \noral or intramuscular vitamin B12 r eplacement . \n1.2.3 Do not rule out a diagnosis of vitamin B12 deficiency based solely on t he absence \nof eit her anaemia or macr ocytosis. \n1.2.4 Be awar e that vitamin B12 deficiency can be associat ed wit h mental healt h \nproblems, including sympt oms of depr ession, anxiety or psy chosis. \nWhen to test \n1.2.5 Offer an initial diagnostic t est for vitamin B12 deficiency t o people who ha ve: \n\u2022 at least 1 common sympt om or sign (see box 1) and \n\u2022 at least 1 common risk f actor for the condition (see box 2). \n1.2.6 Use clinical judgement when deciding whet her t o test people who ha ve at least 1 \ncommon sympt om or sign (see bo x 1) but no common risk f actors (see bo x 2). \nSee t he recommendations on initial t ests. \nBox 1 \nCommon sympt oms and signs of vitamin B12 deficiency Vitamin B12 deficiency in o ver 16s: diagnosis and management (NG239)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 8 of\n56\n\u2022 abnormal findings on a blood count such as anaemia or macr ocytosis \n\u2022 cognitiv e difficulties such as difficulty concentrating or shor t-term memor y loss \n(sometimes described as 'brain f og'), which can also be sympt oms of delirium or \ndementia \n\u2022 eyesight pr oblems r elated to optic ner ve dysfunction: \n\uff0d blurr ed vision \n\uff0d optic atr ophy \n\uff0d visual field loss (scot oma) \n\u2022 glossitis \n\u2022 neurological or mobility pr oblems r elated to peripheral neur opat hy, or t o central \nnervous syst em disease including m yelopat hy (spinal cor d disease): \n\uff0d balance issues and f alls caused b y impair ed pr oprioception (t he ability t o \nsense mo vement, action and location) and link ed to sensor y ataxia (which \nmay have been caused b y spinal cor d damage) \n\uff0d impair ed gait \n\uff0d pins and needles or numbness (paraest hesia) \n\u2022 sympt oms or signs of anaemia t hat suggest ir on tr eatment is not w orking \nproperly during pr egnancy or br eastf eeding \n\u2022 unexplained f atigue. \nBox 2 \nCommon risk f actors f or vitamin B12 deficiency Vitamin B12 deficiency in o ver 16s: diagnosis and management (NG239)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 9 of\n56\n\u2022 diet lo w in vitamin B12 (wit hout t he regular use of over-the-count er \npreparations ), for example, in people who: \n\uff0d follow a diet t hat e xcludes, or is lo w in, animal-sour ce foods (such as a v egan \ndiet, or diet s excluding meat f or religious belief s) \n\uff0d do not consume f ood or drinks f ortified wit h vitamin B12 \n\uff0d have an aller gy to some f oods such as eggs, milk or fish \n\uff0d find it difficult t o buy or pr epar e food (f or example, people who ha ve \ndementia or frailty , or t hose wit h mental healt h conditions) \n\uff0d find it difficult t o obtain or aff ord foods rich in vitamin B12 (f or example, \npeople on lo w income) \n\uff0d have a restrict ed diet (f or example, because of an eating disor der) \n\u2022 family hist ory of vitamin B12 deficiency or an aut oimmune condition \n\u2022 healt h conditions: \n\uff0d atrophic gastritis aff ecting t he gastric body \n\uff0d coeliac disease or anot her aut oimmune condition (such as t hyroid disease, \nSj\u00f6gr en's syndr ome or type 1 diabet es) \n\u2022 medicines: \n\uff0d colchicine \n\uff0d H2-recept or antagonist s \n\uff0d metf ormin (see t he MHRA saf ety advice on metf ormin and r educed vitamin \nB12) \n\uff0d phenobarbital \n\uff0d pregabalin \n\uff0d primidone Vitamin B12 deficiency in o ver 16s: diagnosis and management (NG239)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of"
+      ],
+      [
+        "3630",
+        "-19 , such as post -COVID assessment ser vices in England \nor specialist clinics. \nThe patient e xperience e vidence described ho w some people w ere not off ered tests and \nother people w ere refused a r eferral b y healt hcare professionals because t hey did not \nhave a positiv e SARS-Co V-2 test result. Man y people who had acut e CO VID-19 w ere not \ntested, par ticularly earlier in t he pandemic. The panel w ere clear t hat access t o ser vices \nshould not be r estrict ed by the need f or a positiv e SARS-Co V-2 test (PCR, antigen or \nantibody) if t he case definition crit eria in section  1 on identification  are met. \nReturn t o recommendations \nPlanning c are \nRecommendations 4 .1 to 4.3 \nWhy we made the r ecommenda tions \nTo ensur e people get t he right car e and suppor t, the exper t panel agr eed t hat a tier ed \nappr oach could be used in which e veryone get s advice f or self -management, wit h the \nadditional option of suppor ted self -management if needed. P eople can t hen also be \noffered car e from diff erent ser vices t o mat ch the le vel of t heir needs. The \nrecommendation applies t o all age gr oups and allo ws for discussion wit h the family or \ncarers of t he person if appr opriat e. \nTher e was not enough e vidence t o recommend specific crit eria f or referral and t he panel \nagreed t he right le vel of car e would be agr eed in shar ed decision making wit h the person \nafter their holistic assessment. COVID-19 rapid guideline: managing t he long-t erm eff ects of CO VID-19 (NG188)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 42 of\n50\nReturn t o recommendations \nSelf-manag emen t and suppor ted self -manag emen t \nRecommendations 5 .1.1 to 5.1.3 \nWhy we made the r ecommenda tions \nTher e was v ery little evidence on int erventions such as specific pharmacological \ntreatment s for ongoing sympt omatic CO VID-19 or post -COVID-19 syndr ome, but t he panel \nagreed t hat e veryone should ha ve self -management suppor t and inf ormation. Ther e was a \nlack of CO VID-19-specific e vidence on managing man y of t he common sympt oms r elated \nto CO VID-19 , such as f atigue, dizziness and cognitiv e problems (such as 'brain f og'). \nHowever, there are established tr eatment s for managing individual common sympt oms. \nFor example, antihistamines can be used t o treat some skin rashes. The panel not ed that, \ngiven the fluctuating natur e of t he sympt oms, r egular r eview and monit oring is needed f or \npeople r eceiving an y form of tr eatment. \nNICE will continue t o monit or and r eview new e vidence in t his ar ea as par t of it s living \nappr oach t o maintaining t he guideline. \nPatient or ganisations and online suppor t groups can help t o suppor t self -management. \nThe Your CO VID r ecovery websit e was also highlight ed as a pot ential sour ce of r eliable, \nup-to-dat e information and suppor t. \nThe panel w ere concerned t hat people ar e buying o ver-the-count er vitamins and \nsupplement s that ma y not help wit h their sympt oms. The y agr eed t hat it w ould be helpful \nto highlight t he lack of kno wledge in t his ar ea. \nThe panel agr eed t hat suppor t to return t o education or w ork, such as setting achie vable \ngoals, should be tailor ed to the person's needs. This might in volve suppor t to work or \nstudy at home, fle xible w orking or a phased r eturn. \nFor the No vember 2021 updat e, the panel hear d exper t testimonies fr om Stark 2021 and \nWhittak er 2021 ( see e vidence r eview J: childr en and y oung people ) describing t hat \nabsence fr om or poor per formance in education was associat ed wit h poor out comes f or \nchildr en and y oung people wit h ongoing sympt omatic CO VID-19 or post -COVID-19 \nsyndr ome. The panel agr eed t hat t his w ould also apply t o adult s returning t o work or COVID-19 rapid guideline: managing t he long-t erm eff ects of CO VID-19 (NG188)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 43 of\n50\neducation. Healt hcare professionals should be awar e that people who ar e struggling t o \nreturn t o work or education ma y"
+      ],
+      [
+        "3759",
+        "culosk eletal pain and off er treatment appr opriat e to the cause, f or example \nsee t he sections on managing mobility pr oblems  and spasticity , and NICE's \nguideline on lo w back pain and sciatica in o ver 16s . [2022] \nFor a shor t explanation of wh y the committ ee made t hese r ecommendations and ho w \nthey might aff ect practice, see t he rationale and impact section on pain . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  G: \nnon-pharmacological management of pain . \nCogni tive and memor y problems \n1.5.41 Be awar e that t he sympt oms of MS can include cognitiv e problems, including \nmemor y problems, t hat t he person ma y not immediat ely recognise or associat e \nwith their MS. [2022] \n1.5.42 Assess cognition as par t of t he person's compr ehensiv e review . Tailor t he \nassessment t o the person's needs, f or example, use a clinic int erview or brief \nformal assessment, or consider r eferral f or a full neur opsy chological assessment \nif needed.  [2022] \n1.5.43 Be awar e that anxiety , depr ession, difficulty sleeping, f atigue and medication can \naffect cognition. Assess f or and off er management appr opriat e for these issues in \npeople wit h MS and cognitiv e or memor y problems (f or example, see t he section \non fatigue  and NICE's guidelines on generalised anxiety disor der and panic \ndisor der in adult s and depr ession in adult s wit h a chr onic ph ysical healt h \nproblem ). [2022] \n1.5.44 Consider r eferring people wit h MS and persisting cognitiv e impairment s to an \noccupational t herapist and/or a neur opsy chologist t o assess and manage t hese \nsympt oms accor ding t o the person's needs. [2022] Multiple scler osis in adult s: management (NG220)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 2 4 of\n55\nFor a shor t explanation of wh y the committ ee made t hese r ecommendations and ho w \nthey might aff ect practice, see t he rationale and impact section on cognitiv e and \nmemor y problems . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  H: \nnon-pharmacological management of memor y and cognitiv e problems . \nAtaxia and tr emor \nThe e vidence was r eview ed for the pharmacological management of ataxia and tr emor , \nand t he committ ee made a recommendation f or resear ch. \nFor a shor t explanation of wh y the committ ee only made a r ecommendation f or \nresear ch, see t he rationale section on pharmacological management of ataxia and \ntremor . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  I: \npharmacological management of ataxia and tr emor . \nDystonia and tr emor \nFor guidance on deep brain stimulation f or tremor and dyst onia, see t he NICE \ninterventional pr ocedur es guidance on deep brain stimulation f or tremor and dyst onia \n(excluding Parkinson's disease) . \n1.6 Com prehensi ve review \n1.6.1 Ensur e all people wit h MS ha ve a compr ehensiv e review of all aspect s of t heir \ncare at least once a y ear. [2014] \n1.6.2 Ensur e the compr ehensiv e review is carried out b y healt hcare professionals wit h \nexper tise in MS and it s complications. In volve diff erent healt hcare professionals \nwith exper tise in specific ar eas of t he review if needed. [2014] Multiple scler osis in adult s: management (NG220)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 25 of\n55\n1.6.3 Tailor t he compr ehensiv e review t o the needs of t he person wit h MS assessing: \n\u2022 MS sympt oms: \n\uff0d mobility and balance including f alls \n\uff0d need f or mobility aids including wheelchair assessment \n\uff0d use of arms and hands \n\uff0d muscle spasms and stiffness \n\uff0d tremor \n\uff0d bladder , bowel and se xual function (see NICE's guidelines on urinar y \nincontinence in neur ological disease  and faecal incontinence in adult s) \n\uff0d sensor y sympt oms and pain \n\uff0d speech and swallo wing (see NICE's guideline on nutrition suppor t for \nadult s) \n\uff0d vision \n\uff0d cognitiv e sympt oms \n\uff0d fatigue \n\uff0d depr ession and anxiety (see NICE's guidelines on depr ession in adult s \nwith a chr onic ph ysical"
       ]
     ]
   }
