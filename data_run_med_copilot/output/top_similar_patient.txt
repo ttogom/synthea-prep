@@ -1,43 +1,43 @@
 
 Result 1
 Subjective:
-Patient is a ___ year old male with history of CAD, HTN, HLD, and stage V CKD on ASA 81, presenting with word-finding difficulty and lethargy over the past ___ weeks. Patient and family report multiple falls in the past year, with the last fall two days prior to presentation. Denies loss of consciousness, numbness, weakness, nausea, vomiting, blurred or double vision, and dizziness.
+Patient is a ___ year old male with a history of sarcoidosis on prednisone and azathioprine, previous ITP status post splenectomy, and other medical issues. He presents with severe back pain affecting daily activities. Patient reports pain below the scapula and slightly below that area. He denies numbness or tingling in the arms, weakness, or bowel/bladder dysfunction. He mentions some numbness and had not had a bowel movement today, although typically he has 1-2 daily.
 Objective:
-Physical Exam on Admission: T: 98.0, BP: 132/79, HR: 71, RR: 22, O2 Sat: 100%. Patient is well-developed, well-nourished, and comfortable. Neurologically, patient is awake and alert, cooperative, and oriented to person, place, and date. Speech is fluent but with frequent word-finding difficulties. Cranial nerves II-XII are grossly intact. Motor exam shows full strength with normal bulk and tone. Sensation intact. CT Head shows large left holohemispheric chronic SDH with subacute components, 2.4 cm thick, and 1 cm midline shift. Post-op CT shows evacuation of left subdural collection with mild midline shift decrease but focal area of increased mass effect due to pneumocephalus.
+On initial ED evaluation, vital signs were 97.8°F, heart rate 107 bpm, blood pressure 123/77 mmHg, respiratory rate 18, and oxygen saturation 99%. Neurological examination in the ED was intact with normal strength and sensation. Laboratory results showed WBC 13, CRP 68.9, ESR 55. MRI revealed T6 and T8 compression fractures with an epidural hematoma extending from T5-T8. Discharge vitals were 97.5°F, heart rate 125 bpm, blood pressure 125/82 mmHg, respiratory rate 18, and oxygen saturation 98%. The discharge physical exam was otherwise unchanged from the admission exam.
 Assessment:
-Chronic subdural hematoma with neurological deficits, post-operative status following evacuation of hematoma. Patient has increased risk for falls due to confusion and lethargy.
+1. Thoracic spine compression fractures at T6 and T8 with accompanying epidural hematoma and moderate cord compression. Neurological examination shows hyper-reflexia but no significant weakness that corresponds to the compression level. 2. Sarcoidosis with multiorgan involvement requiring adjustment of immunosuppressive therapy. 3. History of AVNRT, with episodes of tachycardia managed with Diltiazem. 4. Depression, controlled on fluoxetine. 5. Hyperlipidemia, managed with simvastatin. 6. Obstructive sleep apnea, continues on CPAP.
 Plan:
-Discharge to rehabilitation for further evaluation and management. Medications upon discharge include Acetaminophen, Bisacodyl, Docusate Sodium, Doxazosin, Heparin, Hydralazine, Ondansetron, Oxycodone, Senna, Simvastatin, and Levetiracetam. Instruct patient to monitor incision for infection signs, limit exercise, increase fluid and fiber intake, adhere to medication regimen including Dilantin for seizure prophylaxis, and ensure follow-up with neurosurgery and laboratory for lab work. Educate to call surgeon for any concerning symptoms like seizures, confusion, or signs of infection.
-Rerank score: -2.2888
+1. Fitted with TLSO brace for compression fractures; instruct to avoid twisting movements. 2. Follow up with spine surgery for evaluation after discharge. 3. Outpatient follow-up with endocrinology, and possible lab work in one week for azathioprine monitoring. 4. Cardiology follow-up for tachyarrhythmia management. 5. Medications adjusted upon discharge: decrease prednisone to 30 mg daily for 7 days, then taper to 20 mg daily; increase azathioprine to 150 mg daily; continue all other home medications; start calcium supplementation. Follow-up appointments will be arranged with the respective specialists.
+Rerank score: -5.6050
 
 Dominant medical concepts (contribution >= 0.85):
- - Doxazosin (0.9326)
- - Dilantin (0.9303)
- - Ondansetron (0.9279)
- - Heparin (0.9147)
- - Docusate Sodium (0.9121)
- - Acetaminophen (0.9079)
- - Hydralazine (0.9034)
- - lethargy (0.9013)
- - lethargy (0.9013)
- - Cranial nerves (0.9009)
- - Oxycodone (0.8946)
- - Levetiracetam (0.8914)
- - seizures (0.8887)
- - Simvastatin (0.8852)
- - neurosurgery (0.8836)
- - pneumocephalus (0.8833)
- - neurological deficits (0.8829)
- - large left holohemispheric chronic SDH (0.8809)
- - medication regimen (0.8757)
- - Chronic subdural hematoma (0.8725)
- - Bisacodyl (0.8720)
- - family report multiple falls (0.8672)
- - left holohemispheric (0.8658)
- - two days (0.8628)
- - fluid and fiber intake (0.8620)
- - mild midline shift (0.8618)
- - Motor exam (0.8597)
- - past year (0.8581)
- - word-finding difficulty (0.8572)
- - subacute components (0.8555)
+ - azathioprine (0.9085)
+ - azathioprine (0.9085)
+ - azathioprine (0.9085)
+ - hyper-reflexia (0.8994)
+ - prednisone (0.8971)
+ - prednisone (0.8971)
+ - sarcoidosis (0.8936)
+ - Sarcoidosis (0.8936)
+ - 2. Sarcoidosis (0.8899)
+ - Diltiazem (0.8873)
+ - tachycardia (0.8867)
+ - a bowel movement (0.8827)
+ - simvastatin (0.8817)
+ - 6. Obstructive sleep apnea (0.8799)
+ - fluoxetine (0.8784)
+ - bowel/bladder dysfunction (0.8777)
+ - 5. Hyperlipidemia (0.8774)
+ - epidural hematoma (0.8771)
+ - epidural hematoma (0.8771)
+ - Hyperlipidemia (0.8771)
+ - endocrinology (0.8766)
+ - TLSO brace (0.8765)
+ - Obstructive sleep apnea (0.8765)
+ - compression fractures (0.8732)
+ - Thoracic spine compression fractures (0.8717)
+ - moderate cord compression (0.8691)
+ - previous ITP status (0.8666)
+ - calcium supplementation (0.8660)
+ - 4. Cardiology follow-up (0.8633)
+ - Neurological examination (0.8586)
