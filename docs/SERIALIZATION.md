@@ -62,10 +62,6 @@ off by default.
 re-runs with the same options. Tests 3 and 4 compare the text with the history, so
 they are skipped for `--no-history` files.
 
-When running `scripts/extract_presenting.py` on a test run, pass `--report` with a
-path outside `docs/`. Its default report path overwrites the committed
-`docs/PRESENTING_<condition>.md`.
-
 To check the output:
 
 ```bash
