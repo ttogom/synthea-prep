@@ -107,25 +107,34 @@ The same command on the same commit produces byte-identical output.
 
 ## Known limitations
 
-- **Hypertension and COPD**: 71% and 62% of positives respectively have no
-  presenting evidence, because Synthea's 10-year export window excludes older
-  diagnoses. Evaluate these conditions on both the full split and the
-  with-presenting-evidence subset. See `docs/CONDITION_SELECTION.md` (Export
-  window section) and `docs/BINS.md` for details.
-- **Class imbalance**: viral pharyngitis (43%) and hypertension (23%) dominate.
-  Use `class_weight=balanced` or equivalent.
-- **Synthea artifacts**: record-shape shortcuts exist (balanced accuracy 33.6%
-  from age, sex, and encounter count alone). Any model must be evaluated against
-  this floor.
-- **CHIEF COMPLAINTS section removed (v1 deliberate choice)**: Synthea populates
-  the note chief complaints from the same symptom model that drives the
-  presenting complaint. In a 56% of COPD records and ~10% of acute-condition
-  records with presenting evidence, at least one presenting symptom also
-  appeared verbatim in the windowed CHIEF COMPLAINTS history. To ensure
-  presenting evidence appears in exactly one place, the CHIEF COMPLAINTS section
-  (generated from note chief complaints) is omitted from all records. A future
-  version could re-introduce it after excluding symptoms that match the label.
-- **Lauren's serialization fixes**: check `manifest.json`
-  `lauren_serialization_fixes_included` to see whether the `--no-history`
-  ablation flag and heart-failure presenting-symptom fix from the
-  `serialization-update` branch were available when this release was built.
+- **Chief complaints removed**: the CHIEF COMPLAINTS history section was dropped
+  because it repeated at least one presenting symptom verbatim in ~10% of
+  records (56% for COPD), creating double signal. Presenting evidence now appears
+  only in the PRESENTING COMPLAINT section.
+- **Corpus TREATMENT empty in 40% of records**: clinically expected for viral
+  pharyngitis (Synthea generates no prescription for most cases) and for bacterial
+  sinusitis (Synthea codes ~half its antibiotic prescriptions under
+  `REASONCODE=444814009` Viral sinusitis rather than the bacterial sinusitis code,
+  so they don't match). Records with no matched items show `- none recorded`.
+- **Cystitis results are lower confidence**: Synthea links cystitis conditions to
+  encounters that started 1–1000 days before the condition was formally recorded,
+  pulling the serialization cutoff earlier than the diagnosis date. The presenting
+  symptoms are correct, but the history window may exclude events from the
+  diagnosis day.
+- **Presenting complaints are near-fixed templates**: Synthea assigns the same
+  small set of symptoms to every episode of a condition, so a model that sees the
+  PRESENTING COMPLAINT section can identify most conditions by template-matching.
+  Strep throat vs. viral pharyngitis is the main hard case (overlapping symptoms).
+- **10-year export window**: Synthea's `exporter.years_of_history = 10` excludes
+  observations older than 10 years before the reference date. COPD (62%) and
+  hypertension (71%) positives have no presenting evidence because their diagnoses
+  predate the window. Evaluate those conditions on the with-presenting-evidence
+  subset as well as the full split.
+- **Class imbalance**: viral pharyngitis (43%) and hypertension (23%) dominate;
+  use `class_weight=balanced` or equivalent.
+- **Synthea record-shape shortcuts**: balanced accuracy of 33.6% is achievable
+  from age, sex, and encounter count alone. Evaluate any model against this floor.
+- **Lauren's serialization fixes not included**: the `serialization-update`
+  branch's "days/years ago" wording fix and heart-failure presenting-symptom fix
+  are not merged into main. Check `manifest.json`
+  `lauren_serialization_fixes_included`.

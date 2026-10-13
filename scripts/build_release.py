@@ -396,8 +396,9 @@ def add_corpus_sections(record, treatment_info):
     diag  = treatment_info.get("diagnosis", "")
     items = treatment_info.get("treatment", [])
     extra = f"\n\nDIAGNOSIS\n- {diag}" if diag else ""
-    if items:
-        extra += "\n\nTREATMENT\n" + "\n".join(f"- {t}" for t in items)
+    extra += "\n\nTREATMENT\n" + (
+        "\n".join(f"- {t}" for t in items) if items else "- none recorded"
+    )
     return record["text"] + extra
 
 
