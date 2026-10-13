@@ -117,6 +117,14 @@ The same command on the same commit produces byte-identical output.
 - **Synthea artifacts**: record-shape shortcuts exist (balanced accuracy 33.6%
   from age, sex, and encounter count alone). Any model must be evaluated against
   this floor.
+- **CHIEF COMPLAINTS section removed (v1 deliberate choice)**: Synthea populates
+  the note chief complaints from the same symptom model that drives the
+  presenting complaint. In a 56% of COPD records and ~10% of acute-condition
+  records with presenting evidence, at least one presenting symptom also
+  appeared verbatim in the windowed CHIEF COMPLAINTS history. To ensure
+  presenting evidence appears in exactly one place, the CHIEF COMPLAINTS section
+  (generated from note chief complaints) is omitted from all records. A future
+  version could re-introduce it after excluding symptoms that match the label.
 - **Lauren's serialization fixes**: check `manifest.json`
   `lauren_serialization_fixes_included` to see whether the `--no-history`
   ablation flag and heart-failure presenting-symptom fix from the

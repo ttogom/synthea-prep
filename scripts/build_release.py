@@ -307,68 +307,83 @@ def load_jsonl(path):
 
 def load_treatment_data(corpus_examples):
     """
-    For each corpus (patient, condition) example, finds the diagnosing encounter
-    and collects medications, procedures, care plans started at that encounter.
+    For each corpus (patient, condition) example, collects medications, procedures,
+    and care plans whose REASONCODE is one of the target condition's SNOMED codes,
+    started on or before the condition's START date in conditions.csv.
+
+    Using the condition START date (not the serialization cutoff) is necessary
+    because some patients have a cutoff pulled earlier by a shared encounter date
+    unrelated to the target condition (a Synthea artifact). Treatment prescribed
+    on the actual diagnosis date would otherwise be excluded.
 
     corpus_examples: list of {patient_id, condition, cutoff_date}
     Returns {(pid, cond_name): {"diagnosis": str, "treatment": [str]}}
     """
-    # Build: cond_name -> set of (pid, enc_id) pairs we need
-    cond_pids = defaultdict(set)
-    pid_cutoff = {}
-    for ex in corpus_examples:
-        cond_pids[ex["condition"]].add(ex["patient_id"])
-        pid_cutoff[ex["patient_id"]] = ex["cutoff_date"]
-
-    # Find diagnosing encounter per (pid, cond)
-    diag_enc = {}  # (pid, cond_name) -> enc_id
     cond_by_name = {c["name"]: c for c in CONDITIONS}
-    conditions_csv = SRC_DIR / "csv" / "conditions.csv"
-    with open(conditions_csv, newline="", encoding="utf-8") as f:
+
+    pid_cond_cutoff = defaultdict(dict)
+    for ex in corpus_examples:
+        pid_cond_cutoff[ex["patient_id"]][ex["condition"]] = ex["cutoff_date"]
+    all_pids = set(pid_cond_cutoff)
+
+    # Find condition START date per (pid, cond_name) from conditions.csv.
+    # Use the earliest occurrence (same as extract_labels).
+    cond_start = {}  # (pid, cond_name) -> YYYY-MM-DD
+    with open(SRC_DIR / "csv" / "conditions.csv", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             pid = row["PATIENT"]
+            if pid not in all_pids:
+                continue
             code = row["CODE"]
-            for cond_name, pids in cond_pids.items():
-                if pid not in pids:
-                    continue
-                if code not in cond_by_name[cond_name]["codes"]:
-                    continue
-                if (pid, cond_name) not in diag_enc:
-                    diag_enc[(pid, cond_name)] = row["ENCOUNTER"]
+            start = (row.get("START", "") or "")[:10]
+            if not start:
+                continue
+            for cond_name in pid_cond_cutoff[pid]:
+                if code in cond_by_name[cond_name]["codes"]:
+                    key = (pid, cond_name)
+                    if key not in cond_start or start < cond_start[key]:
+                        cond_start[key] = start
 
-    enc_set = set(diag_enc.values())
-
-    # Load treatments for those encounters
-    enc_meds  = defaultdict(list)
-    enc_procs = defaultdict(list)
-    enc_plans = defaultdict(list)
-
-    for stem, bucket in [("medications", enc_meds), ("procedures", enc_procs),
-                          ("careplans", enc_plans)]:
+    # Collect items per (pid, cond_name) where REASONCODE is a target code,
+    # started on or before the condition START date.
+    items_by_key = defaultdict(list)
+    for stem in ("medications", "procedures", "careplans"):
         path = SRC_DIR / "csv" / f"{stem}.csv"
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                enc = row.get("ENCOUNTER", "")
-                if enc not in enc_set:
+                pid = row.get("PATIENT", "")
+                if pid not in all_pids:
                     continue
-                bucket[enc].append(row.get("DESCRIPTION", "").strip())
+                rc = row.get("REASONCODE", "")
+                if not rc:
+                    continue
+                desc = row.get("DESCRIPTION", "").strip()
+                if not desc:
+                    continue
+                item_start = (row.get("START", "") or "")[:10]
+                for cond_name in pid_cond_cutoff[pid]:
+                    if rc not in cond_by_name[cond_name]["codes"]:
+                        continue
+                    cutoff = cond_start.get((pid, cond_name), "")
+                    if item_start and cutoff and item_start > cutoff:
+                        continue
+                    items_by_key[(pid, cond_name)].append(desc)
 
-    # Build result
-    result = {}
+    # Diagnosis descriptions
     cond_descriptions = {}
-    for cond_name, labels in {c["name"]: json.loads(labels_path(c).read_text())
-                               for c in CONDITIONS}.items():
-        for pid, info in labels.items():
-            cond_descriptions[(pid, cond_name)] = info["description"]
+    for c in CONDITIONS:
+        for pid, info in json.loads(labels_path(c).read_text()).items():
+            cond_descriptions[(pid, c["name"])] = info["description"]
 
-    for (pid, cond_name), enc in diag_enc.items():
-        items = []
-        seen = set()
-        for bucket in [enc_meds[enc], enc_procs[enc], enc_plans[enc]]:
-            for desc in bucket:
-                if desc and desc not in seen:
-                    items.append(desc)
-                    seen.add(desc)
+    result = {}
+    for ex in corpus_examples:
+        pid = ex["patient_id"]
+        cond_name = ex["condition"]
+        seen, items = set(), []
+        for desc in items_by_key.get((pid, cond_name), []):
+            if desc not in seen:
+                items.append(desc)
+                seen.add(desc)
         result[(pid, cond_name)] = {
             "diagnosis": cond_descriptions.get((pid, cond_name), cond_name),
             "treatment": items,
@@ -380,7 +395,7 @@ def add_corpus_sections(record, treatment_info):
     """Append DIAGNOSIS and TREATMENT sections to the record text."""
     diag  = treatment_info.get("diagnosis", "")
     items = treatment_info.get("treatment", [])
-    extra = f"\nDIAGNOSIS\n- {diag}" if diag else ""
+    extra = f"\n\nDIAGNOSIS\n- {diag}" if diag else ""
     if items:
         extra += "\n\nTREATMENT\n" + "\n".join(f"- {t}" for t in items)
     return record["text"] + extra
