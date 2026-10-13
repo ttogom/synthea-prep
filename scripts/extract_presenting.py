@@ -14,7 +14,7 @@ Also produces:
 Usage:
     python3 scripts/extract_presenting.py <scrub_dir> <src_dir> <labels_json>
         [--out <presenting_json>]   default: data/presenting/<scrub_stem>.json
-        [--report <path>]           default: docs/PRESENTING_<scrub_stem>.md
+        [--report <path>]           default: data/presenting/PRESENTING_<scrub_stem>.md
         [--probe]                   run both classifier probes (requires sklearn)
 """
 
@@ -173,10 +173,12 @@ def load_diagnosing_vitals(labels: dict, src_dir: Path, codes: list) -> dict:
     """
     For each positive in labels, finds its diagnosing encounter (the first row in
     conditions.csv where PATIENT matches and CODE is in codes), then returns whitelisted
-    vital sign readings from that encounter's observations.
+    vital sign readings from that encounter's observations — restricted to readings
+    dated on the diagnosis (cutoff) date only.
 
     Returns {pid: [{"name": ..., "value": ..., "unit": ...}]}.
-    Patients whose diagnosing encounter has no whitelisted vitals are included with [].
+    Patients whose diagnosing encounter has no whitelisted vitals on the diagnosis date
+    are included with [].
     """
     code_set = set(codes)
     pos_pids = set(labels)
@@ -193,12 +195,17 @@ def load_diagnosing_vitals(labels: dict, src_dir: Path, codes: list) -> dict:
                 diag_enc[pid] = enc
 
     enc_set = set(diag_enc.values())
+    # Each encounter's expected date = the patient's diagnosis/cutoff date
+    enc_cutoff: dict = {enc: labels[pid]["cutoff"][:10]
+                        for pid, enc in diag_enc.items()}
 
-    # Collect whitelisted vitals at those encounters
+    # Collect whitelisted vitals at those encounters, on the diagnosis date only
     enc_vitals: dict = collections.defaultdict(list)
     for row in _iter_csv(src_dir / "csv" / "observations.csv"):
         enc = row.get("ENCOUNTER", "")
         if enc not in enc_set:
+            continue
+        if row.get("DATE", "")[:10] != enc_cutoff[enc]:
             continue
         loinc = row.get("CODE", "")
         if loinc not in VITAL_SIGN_WHITELIST:
@@ -627,7 +634,7 @@ def main():
     presenting_dir = scrub_dir.parent.parent / "data" / "presenting"
     out_path = Path(args.out) if args.out else presenting_dir / f"{stem}.json"
     report_path = Path(args.report) if args.report else \
-        scrub_dir.parent.parent / "docs" / f"PRESENTING_{stem.upper()}.md"
+        out_path.parent / f"PRESENTING_{stem.upper()}.md"
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
