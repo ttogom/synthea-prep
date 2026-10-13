@@ -37,7 +37,7 @@ DATE = re.compile(r"\b(19|20)\d{2}-\d{2}-\d{2}\b")
 # A 4-digit number that looks like a year, unless a unit follows it
 # (e.g. income "1967 /a", "2000 MG").
 YEAR = re.compile(r"\b(19|20)\d{2}\b(?!\.\d|\s*(/|[A-Za-z%{\[]))")
-AGO = re.compile(r"(-?\d+) (day|month|year)s? ago")
+AGO = re.compile(r"(-?\d+) (day|month|year)s? (?:ago|earlier)")
 
 
 def read_by_patient(path, patients):
@@ -70,6 +70,8 @@ def serialize(train_dir, labels, out, settings):
         cmd += ["--presenting", settings["presenting"]]
     if settings.get("no_history"):
         cmd.append("--no-history")
+    if settings.get("time_from"):
+        cmd += ["--time-from", settings["time_from"]]
     subprocess.run(cmd, check=True, capture_output=True)
 
 

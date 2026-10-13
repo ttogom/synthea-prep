@@ -362,6 +362,26 @@ Balanced accuracy; chance is 14.3%, Randy's symptoms + vitals classifier 79.5%.
 - **Hardest pair:** strep throat (57% recall with presenting) vs viral
   pharyngitis, which share most symptoms.
 
+### Time anchoring (`--time-from last-record`, 2026-10-13)
+
+By default, times count back from the diagnosis ("3 years ago"). The text probe
+found that this leaks Synthea's visit timing: many acute-condition patients
+had a routine check-up a few days before diagnosis, so "N days ago" pointed to
+the condition. With `--time-from last-record`, times count back from the
+patient's most recent record ("3 years earlier"), and a line in PATIENT says
+so. The gap between the last record and the diagnosis is no longer visible.
+`build_release.py` uses this option.
+
+| History only (7 conditions, 10k) | Text probe | Shape-only probe |
+|---|---|---|
+| Times from the diagnosis | 49.4% | 33.8% |
+| Times from the most recent record | 45.6% | 33.6% |
+
+The direct shortcut is gone and real antecedents remain top features (COPD:
+smoker; hypertension: type 2 diabetes). Some timing signal remains from the
+spacing between visits inside the history (e.g. "days earlier"); removing it
+would mean dropping all timing.
+
 ### Earlier test runs (2026-09-29)
 
 Before the seven conditions were fixed, the pipeline was tested on other
