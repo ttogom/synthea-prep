@@ -47,6 +47,12 @@ neither symptoms nor whitelisted vitals are written without the section. The fla
 intentionally separate from the core pipeline so that history and presentation can be
 ablated independently.
 
+**Note for serialization-update branch:** the `data/presenting/*.json` files were
+regenerated in the `dataset-splits` branch (fix: vitals now restricted to readings
+dated on the diagnosis day; 14 patients affected, balanced accuracy unchanged at
+79.5%). Rebase or merge `dataset-splits` before re-serializing to pick up the
+corrected files.
+
 To check the output:
 
 ```bash

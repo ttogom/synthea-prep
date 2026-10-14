@@ -8,10 +8,10 @@ Coverage after adding whitelisted vitals (body temperature, systolic/diastolic B
 
 | Condition | Positives | With symptoms | With vitals | With any evidence |
 |-----------|----------:|-------------:|------------:|------------------:|
-| COPD | 384 | 141 | 139 | 144 (38%) |
-| Hypertension | 2650 | 0 | 757 | 757 (29%) |
-| Strep throat | 1499 | 1486 | 1493 | 1493 (100%) |
-| Viral pharyngitis | 5108 | 5076 | 5088 | 5089 (100%) |
+| COPD | 384 | 141 | 138 | 144 (38%) |
+| Hypertension | 2650 | 0 | 756 | 756 (29%) |
+| Strep throat | 1499 | 1486 | 1492 | 1492 (100%) |
+| Viral pharyngitis | 5108 | 5076 | 5080 | 5081 (99%) |
 | Bacterial sinusitis | 656 | 600 | 0 | 600 (91%) |
 | Cystitis | 1160 | 856 | 277 | 912 (79%) |
 | CHF | 313 | 311 | 0 | 311 (99%) |
@@ -72,25 +72,25 @@ Coverage after adding whitelisted vitals (body temperature, systolic/diastolic B
 | `CHF` | 0 | 311 | 0 | 0 | 2 | 0 | 0 |
 | `COPD` | 0 | 0 | 141 | 2 | 241 | 0 | 0 |
 | `Cystitis` | 0 | 0 | 10 | 892 | 257 | 1 | 0 |
-| `Hypertension` | 0 | 0 | 82 | 9 | 2559 | 0 | 0 |
-| `Strep throat` | 0 | 0 | 0 | 0 | 12 | 1061 | 426 |
+| `Hypertension` | 0 | 0 | 82 | 8 | 2560 | 0 | 0 |
+| `Strep throat` | 0 | 0 | 0 | 0 | 13 | 1060 | 426 |
 | `Viral pharyn` | 0 | 0 | 0 | 0 | 32 | 767 | 4309 |
 
 **Strep vs viral pharyngitis:**
-- Strep correctly predicted: 1061/1499 (70.8%);  predicted as viral: 426 (28.4%)
+- Strep correctly predicted: 1060/1499 (70.7%);  predicted as viral: 426 (28.4%)
 - Viral correctly predicted: 4309/5108 (84.4%);  predicted as strep: 767 (15.0%)
 - **Features more predictive of strep than viral:** `Body temperature`, `Systolic Blood Pressure`, `Diastolic Blood Pressure`, `Heart rate`, `Headache`
-- **Features more predictive of viral than strep:** `Respiratory rate`, `Body Aches`, `Difficulty Swallowing`, `Decreased Appetite`, `Runny/Stuffy Nose`
+- **Features more predictive of viral than strep:** `Respiratory rate`, `Oxygen saturation`, `Cough`, `Sore Throat`, `Fever`
 
 **Top discriminating features per condition:**
 
 - **Bacterial sinusitis:** `Pain with Bright Lights`, `Headache`, `Sinus Pain`, `Nasal Congestion`, `Nasal Discharge`
 - **CHF:** `Rales (finding)`, `Edema (finding)`, `Paroxysmal dyspnea (finding)`, `Dyspnea (finding)`, `Orthopnea (finding)`
 - **COPD:** `Shortness of Breath`, `Cough`, `Respiratory rate`, `Oxygen saturation`, `Heart rate`
-- **Cystitis:** `Urgent desire to urinate`, `Dysuria`, `Suprapubic pain`, `Increased frequency of urination`, `Heart rate`
+- **Cystitis:** `Urgent desire to urinate`, `Dysuria`, `Suprapubic pain`, `Increased frequency of urination`, `Oxygen saturation`
 - **Hypertension:** `Systolic Blood Pressure`, `Diastolic Blood Pressure`, `Respiratory rate`, `Oxygen saturation`, `Heart rate`
-- **Strep throat:** `Body temperature`, `Decreased Appetite`, `Runny/Stuffy Nose`, `Difficulty Swallowing`, `Fatigue`
-- **Viral pharyngitis:** `Runny/Stuffy Nose`, `Decreased Appetite`, `Body Aches`, `Difficulty Swallowing`, `Fatigue`
+- **Strep throat:** `Body temperature`, `Swollen Lymph Nodes`, `Swollen Tonsils`, `Decreased Appetite`, `Runny/Stuffy Nose`
+- **Viral pharyngitis:** `Swollen Tonsils`, `Swollen Lymph Nodes`, `Decreased Appetite`, `Runny/Stuffy Nose`, `Fatigue`
 
 ## b. Shortcut probe
 
@@ -111,21 +111,21 @@ Coverage after adding whitelisted vitals (body temperature, systolic/diastolic B
 
 **Feature:** `has_evidence` — binary flag for whether the patient has any presenting evidence (symptoms from `symptoms.csv` or whitelisted vitals from the diagnosing encounter).
 
-**Overall accuracy:** 39.0%  **Balanced accuracy:** 24.4%  **Chance level:** 14.3%
+**Overall accuracy:** 32.8%  **Balanced accuracy:** 24.3%  **Chance level:** 14.3%
 
 **Per-condition absence rate (no evidence at all):**
 
 | Condition | n | No evidence | % absent | Interpretation |
 |-----------|--:|------------:|--------:|----------------|
-| Hypertension | 2650 | 1893 | 71.4% | **Strong absence signal** |
+| Hypertension | 2650 | 1894 | 71.5% | **Strong absence signal** |
 | COPD | 384 | 240 | 62.5% | Partial absence |
 | Cystitis | 1160 | 248 | 21.4% | Partial absence |
 | Bacterial sinusitis | 656 | 56 | 8.5% | Mostly present |
 | CHF | 313 | 2 | 0.6% | Mostly present |
-| Strep throat | 1499 | 6 | 0.4% | Mostly present |
-| Viral pharyngitis | 5108 | 19 | 0.4% | Mostly present |
+| Strep throat | 1499 | 7 | 0.5% | Mostly present |
+| Viral pharyngitis | 5108 | 27 | 0.5% | Mostly present |
 
-> **Hypertension absence rate is now 71.4%** (down from 100% when only symptoms were used). The 71% without evidence were likely diagnosed at specialist encounters that Synthea does not record a vital signs panel for. Presence alone no longer perfectly identifies hypertension, but remains a partial signal.
+> **Hypertension absence rate is now 71.5%** (down from 100% when only symptoms were used). The remaining 71.5% of hypertension patients lack both symptoms and whitelisted vitals at their diagnosing encounter — likely diagnosed at specialist encounters that Synthea does not record a vital signs panel for. Presence alone no longer perfectly identifies hypertension, but remains a partial signal.
 
 ## Open design questions
 
@@ -133,7 +133,7 @@ These are unresolved decisions the team needs to make before training:
 
 1. ~~**Strep vs viral pharyngitis separability.**~~ **Resolved.** Strep recall is 71% once body temperature is included. Body temperature cleanly separates the two: strep patients present with fever (median 38.3°C, 67% ≥38°C); viral pharyngitis does not (median 37.5°C, 0% ≥38.5°C). Keep them as separate classes.
 
-2. **Hypertension partial absence.** 71.4% of hypertension patients still have no presenting evidence. A multi-task model that observes whether a presenting section exists will still find partial signal for hypertension. Decide whether to ablate the presence flag or accept this as a known confound.
+2. **Hypertension partial absence.** 71.5% of hypertension patients still have no presenting evidence. A multi-task model that observes whether a presenting section exists will still find partial signal for hypertension. Decide whether to ablate the presence flag or accept this as a known confound.
 
 3. **Demographic confounding.** The shortcut probe shows record shape alone is discriminative (2.3× chance). Age, sex, and encounter density differ systematically across conditions. Any evaluation of symptom/vital-based models should be compared against this floor, not against random chance.
 

@@ -16,7 +16,7 @@ The label is kept in its own field and never written into "text".
 Compression (all configurable, see --help):
   * Long-lived facts (conditions, medications, immunizations) cover the whole
     history but are collapsed: one line per item with a count and dates.
-  * Detailed facts (visits, procedures, vitals/labs, chief complaints) cover
+  * Detailed facts (visits, procedures, vitals/labs) cover
     only the --window-years up to the patient's last visit (or the cutoff,
     with --window-from cutoff). Identical visits are collapsed.
   * Vitals/labs keep the latest --max-values readings per test.
@@ -61,8 +61,6 @@ SOCIAL_ITEMS = (
 )
 SOCIAL_CATEGORIES = {"social-history", "survey"}
 CHARS_PER_TOKEN = 4  # rough estimate until a model/tokenizer is chosen
-NOTE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -134,26 +132,6 @@ def read_rows(path, patients, drop):
                 grouped[row["PATIENT"]].append(row)
     return grouped
 
-
-def read_chief_complaints(notes_dir, patients):
-    """patient id -> list of (date, complaint) from note Chief Complaint sections."""
-    result = defaultdict(list)
-    if not notes_dir.exists():
-        return result
-    for path in notes_dir.glob("*.txt"):
-        patient = path.stem.rsplit("_", 1)[-1]
-        if patient not in patients:
-            continue
-        entry_date, in_complaint = None, False
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if NOTE_DATE.match(line):
-                entry_date, in_complaint = date.fromisoformat(line), False
-            elif line.startswith("#"):
-                in_complaint = line == "# Chief Complaint"
-            elif in_complaint and line.startswith("- ") and entry_date:
-                result[patient].append((entry_date, line[2:].strip()))
-    return result
 
 
 # ── Sections ──────────────────────────────────────────────────────────────────
@@ -260,16 +238,6 @@ def observations(rows, cutoff, since, max_values):
     return measures, social
 
 
-def complaints(entries, cutoff, since):
-    by_text = defaultdict(list)
-    for d, text in entries:
-        if since is None or d >= since:
-            by_text[text.lower()].append(d)
-    items = [(max(ds), f"{text} (reported {times(len(ds))}, last {ago(max(ds), cutoff)})")
-             for text, ds in by_text.items()]
-    return [t for _, t in sorted(items, reverse=True)]
-
-
 def encounters(rows, cutoff, since, max_encounters):
     """Identical visits (same class, type and reason) collapsed, newest first."""
     by_kind = defaultdict(list)
@@ -328,8 +296,6 @@ def serialize_patient(pid, label, data, args):
     parts = [
         section("PATIENT", [demographics(data["patients"][pid], cutoff)] + social),
         section("PRESENTING COMPLAINT", presenting_lines),
-        section(f"CHIEF COMPLAINTS AT VISITS ({window})",
-                complaints(data["complaints"][pid], cutoff, since)),
         section("ACTIVE PROBLEMS", active),
         section("PAST PROBLEMS", past),
         section("OTHER FINDINGS", findings),
@@ -356,7 +322,7 @@ def main():
     ap.add_argument("labels", type=Path, help="labels JSON from extract_labels.py")
     ap.add_argument("--out", type=Path, required=True, help="output .jsonl path")
     ap.add_argument("--window-years", type=int, default=5,
-                    help="history window for visits, procedures, vitals/labs, complaints (default 5)")
+                    help="history window for visits, procedures, vitals/labs (default 5)")
     ap.add_argument("--window-from", choices=("last-visit", "cutoff"), default="last-visit",
                     help="where the history window ends (default: the patient's last visit)")
     ap.add_argument("--max-values", type=int, default=3,
@@ -391,9 +357,6 @@ def main():
         "devices", "procedures", "immunizations", "encounters")}
     data["patients"] = {r["Id"]: r for r in csv.DictReader(open(csv_dir / "patients.csv", encoding="utf-8"))
                         if r["Id"] in patients}
-    data["complaints"] = {pid: [(d, c) for d, c in entries if not any(t in c.lower() for t in drop)]
-                          for pid, entries in read_chief_complaints(args.train_dir / "notes", patients).items()}
-    data["complaints"] = defaultdict(list, data["complaints"])
     data["presenting"] = {}
     if args.presenting and args.presenting.exists():
         raw = json.loads(args.presenting.read_text())
