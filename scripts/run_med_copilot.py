@@ -1,104 +1,63 @@
+import json
+import os
 from pathlib import Path
 import sys
-import os
-import json
+
 import pandas as pd
+from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
-# ---------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------
-
+# These script-local paths must be available before importing project modules.
 ROOT = Path(__file__).resolve().parents[1] #project root dir
 MED = ROOT / "med_copilot"
-UPSTREAM = MED / "upstream" 
+UPSTREAM = MED / "upstream"
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(UPSTREAM))
 GUIDELINES = MED / "data" / "guidelines"
 OUTPUT = ROOT / "data_run_med_copilot" / "output"
-
+OUTPUT.mkdir(parents=True, exist_ok=True)
 # Similar-patient corpus: change this path to select another JSON corpus.
-# save new corpus in med_copilot/data/patient_corpus
+# TODO: save new corpus in med_copilot/data/patient_corpus
 PATIENT_CORPUS = UPSTREAM / "soap_with_metadata.json"
+# Prepared S/O input for the experiment.
+PATIENT_INPUT = ROOT / "data_run_med_copilot" / "input" / "patient_records_so.jsonl"
 
-# sole input datapoint used: 
-NOTE = ROOT / "data_run_med_copilot" / "input" / "Peter292_Gleichner915_0db4522b-544a-43b1-ad63-3caeb72be2ab.txt"
+# Apple-Silicon compatibility: initialize BioClinicalBERT before importing
+# create_embeddings, whose imports load FAISS.
+_preloaded_bioclinicalbert = SentenceTransformer("emilyalsentzer/Bio_ClinicalBERT")
 
+from create_embeddings import HybridRetriever, CrossEncoderReranker
+from graphrag.cli.query import run_local_search
+from med_copilot.prompts.diagnosis_plan import (
+    KEY_QUESTIONS_TEMPLATE,
+    EVALUATE_TEMPLATE_KEYINFO,
+)
+from scripts.med_copilot_helpers import load_patient_records
+
+# TODO: decide on API key to use for full experiment
+api_key = os.environ["OPENAI_API_KEY"]
+model = "gpt-4o-mini"
+client = OpenAI(api_key=api_key)
 
 def main():
+# %% ------------------------------------------------------------------
+#  Load input patient records in Subjective / Objective format
+# ---------------------------------------------------------------------
 
-    sys.path.insert(0, str(ROOT))
-    sys.path.insert(0, str(UPSTREAM))
+    # Load all patient records before running the pipeline.
+    patients = load_patient_records(PATIENT_INPUT)
 
-    # ---------------------------------------------------------------------
-    # Apple-Silicon compatibility workaround.
-    # BioClinicalBERT must initialize before create_embeddings imports FAISS.
-    # ---------------------------------------------------------------------
-
-    from sentence_transformers import SentenceTransformer
-
-    _preloaded_bioclinicalbert = SentenceTransformer(
-        "emilyalsentzer/Bio_ClinicalBERT"
-    )
-
-    from openai import OpenAI
-    from create_embeddings import HybridRetriever, CrossEncoderReranker
-    from graphrag.cli.query import run_local_search
-    from med_copilot.prompts.diagnosis_plan import (
-        KEY_QUESTIONS_TEMPLATE,
-        EVALUATE_TEMPLATE_KEYINFO,
-        PATIENT_CASE_TEMPLATE,
-        PATIENT_CASE_SYSTEM_TEMPLATE,
-    )
-
-    # ---------------------------------------------------------------------
-    # Input
-    # ---------------------------------------------------------------------
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    patient_case = NOTE.read_text(encoding="utf-8")
-
-    api_key = os.environ["OPENAI_API_KEY"]
-    model = "gpt-4o-mini"
-    client = OpenAI(api_key=api_key)
-
-    print("\n========== INPUT PATIENT CASE ==========\n")
-    print(patient_case)
-
-    # ---------------------------------------------------------------------
-    # Stage 1: MED-COPILOT patient free-text -> Subjective / Objective
-    # ---------------------------------------------------------------------
-
-    patient_case_instance = PATIENT_CASE_TEMPLATE.format(
-        patient_case=patient_case
-    )
-
-    response = client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": PATIENT_CASE_SYSTEM_TEMPLATE,
-            },
-            {
-                "role": "user",
-                "content": patient_case_instance,
-            },
-        ],
-    )
-
-    patient = json.loads(response.choices[0].message.content)
+    # TEMPORARY TEST RUN: select only the first patient.
+    # TODO: replace this selection with a loop over patients and per-patient
+    # outputs when running the full experiment.
+    patient = patients[0]
     s_o = (
         f'Subjective: {patient["subjective"]}\n'
         f'Objective: {patient["objective"]}'
     )
-
-    print("\n========== STAGE 1: S/O ==========\n")
-    print(s_o)
-    with open(OUTPUT / "case_SO.txt", "w") as f:
-        f.write(s_o)
-
-    # ---------------------------------------------------------------------
-    # Stage 2: Similar-patient retrieval + reranking
-    # ---------------------------------------------------------------------
-
+# %% ------------------------------------------------------------------
+# Similar-patient retrieval + reranking
+# ---------------------------------------------------------------------
     with open(PATIENT_CORPUS, "r", encoding="utf-8") as f:
         df = pd.DataFrame(json.load(f))
 
@@ -124,14 +83,14 @@ def main():
 
     retrieved_info = results[0] if results else "No reference patient available."
 
-    print("\n========== STAGE 2: TOP SIMILAR PATIENT ==========\n")
+    print("\n========== TOP SIMILAR PATIENT ==========\n")
     print(retrieved_info)
     with open(OUTPUT / "top_similar_patient.txt", "w") as f:
         f.write(retrieved_info)
-    # ---------------------------------------------------------------------
-    # Stage 3: Key clinical questions
-    # ---------------------------------------------------------------------
 
+# %% ------------------------------------------------------------------
+# Generate key questions to query Clinical Guidelines graph db
+# ---------------------------------------------------------------------
     key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(
         conditions=s_o
     )
@@ -153,13 +112,14 @@ def main():
 
     key_questions = key_response.choices[0].message.content
 
-    print("\n========== STAGE 3: KEY QUESTIONS ==========\n")
+    print("\n========== KEY QUESTIONS ==========\n")
     print(key_questions)
     with open(OUTPUT / "questions_for_guidelines_db.txt", "w") as f:
         f.write(key_questions)
-    # ---------------------------------------------------------------------
-    # Stage 4: GraphRAG guideline retrieval
-    # ---------------------------------------------------------------------
+
+# %% ------------------------------------------------------------------
+# GraphRAG clinical guideline retrieval
+# ---------------------------------------------------------------------
 
     key_info, graphrag_context = run_local_search(
         config_filepath=GUIDELINES / "settings.yaml",
@@ -172,7 +132,7 @@ def main():
         verbose=True,
     )
 
-    print("\n========== STAGE 4: GUIDELINE EVIDENCE ==========\n")
+    print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
     print(key_info)
     with open(OUTPUT / "answers_from_guidelines_db.txt", "w") as f:
         f.write(key_info)
@@ -182,9 +142,10 @@ def main():
             default=lambda table: json.loads(table.to_json(orient="split")),
             indent=2,
         )
-    # ---------------------------------------------------------------------
-    # Stage 5: Restore MED-COPILOT's commented-out final generation call
-    # ---------------------------------------------------------------------
+
+# %% ------------------------------------------------------------------
+# Generate Assessment / Plan
+# ---------------------------------------------------------------------
 
     final_prompt = EVALUATE_TEMPLATE_KEYINFO.format(
         conditions=s_o,
@@ -210,7 +171,7 @@ def main():
 
     generated_plan = final_response.choices[0].message.content
 
-    print("\n========== MED-COPILOT FINAL OUTPUT ==========\n")
+    print("\n========== ASSESSMENT AND PLAN ==========\n")
     print(generated_plan)
     with open(OUTPUT / "final_output.txt", "w") as f:
         f.write(str(generated_plan))
