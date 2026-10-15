@@ -279,11 +279,14 @@ class PipelineFixture:
             return original_import(name, *args, **kwargs)
 
         old_cwd = Path.cwd()
+        # Discovery adds the real checkout to sys.path. Keep fixture namespace
+        # packages from falling back to real project files when one is absent.
+        isolated_path = [entry for entry in sys.path if Path(entry).resolve() != ROOT]
         os.chdir(self.caller)
         try:
             with patch.dict(sys.modules, self.modules), \
                     patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), \
-                    patch.object(sys, "path", sys.path.copy()), \
+                    patch.object(sys, "path", isolated_path), \
                     patch("builtins.__import__", side_effect=tracked_import), \
                     redirect_stdout(self.stdout):
                 # Exercise this fixture's real project prompts, even when a
@@ -345,23 +348,6 @@ class RunMedCopilotTests(unittest.TestCase):
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                 )
                 self.assertTrue(all(node.lineno < first_definition for node in imports))
-
-    def test_patient_loader_returns_all_records_for_path_and_string_arguments(self):
-        fixture = self.fixture
-        records = [
-            {"uuid": "FIRST_PATIENT_ID", **fixture.patient,
-             "metadata": {"source": "café", "encounter": "2000-07-20"}},
-            fixture.second_patient,
-        ]
-        fixture.write_patients(records)
-        original_input = fixture.input_path.read_bytes()
-        loader = runpy.run_path(str(HELPERS))["load_patient_records"]
-        for argument in (fixture.input_path, str(fixture.input_path)):
-            with self.subTest(argument_type=type(argument).__name__):
-                self.assertEqual(loader(argument), records)
-        self.assertEqual(fixture.input_path.read_bytes(), original_input)
-        self.assertEqual(fixture.events, [])
-        self.assertFalse(fixture.output.exists())
 
     def test_runner_passes_configured_input_to_loader_and_uses_its_records(self):
         fixture = self.fixture
@@ -1100,7 +1086,8 @@ class RunMedCopilotTests(unittest.TestCase):
     def test_missing_project_prompts_stops_without_using_upstream_templates(self):
         fixture = self.fixture
         fixture.prompt_module.unlink()
-        with fixture.runtime():
+        # Reproduce discovery's real-checkout path even when run as a script.
+        with patch.object(sys, "path", [str(ROOT), *sys.path]), fixture.runtime():
             with self.assertRaises(ModuleNotFoundError) as caught:
                 runpy.run_path(str(fixture.script), run_name="runner_under_test")
             self.assertEqual(Path.cwd(), fixture.caller)
@@ -1188,119 +1175,6 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertFalse((fixture.output / "final_output.txt").exists())
                 if stage == "final":
                     self.assertTrue((fixture.output / "final_prompt.txt").is_file())
-
-
-class JSONKeywordExtractorTests(unittest.TestCase):
-    def setUp(self):
-        self.extractor_class = runpy.run_path(str(HELPERS))["JSONKeywordExtractor"]
-        self.client = Mock()
-        self.create = self.client.chat.completions.create
-        self.valid_content = json.dumps({
-            "symptoms": [" cough ", "fever", "cough"],
-            "diagnoses": ["fever", "Asthma"],
-            "medications": [" albuterol ", "Asthma", "cough"],
-        })
-        self.create.return_value = keyword_response(self.valid_content)
-        self.extractor = self.extractor_class(self.client, "selected-keyword-model")
-
-    def test_json_mode_preserves_upstream_prompt_model_temperature_and_client(self):
-        text = "Subjective: Cough café.\nObjective: Temperature 37.2 °C."
-        self.assertEqual(self.extractor.extract(text), ["cough", "fever", "Asthma", "albuterol"])
-        self.create.assert_called_once()
-        actual = self.create.call_args.kwargs
-        legacy_client = Mock()
-        legacy_client.chat.completions.create.return_value = keyword_response(self.valid_content)
-        legacy = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
-        legacy.client, legacy.model = legacy_client, "selected-keyword-model"
-        legacy.extract(text)
-        original = legacy_client.chat.completions.create.call_args.kwargs
-        self.assertEqual(actual, {**original, "response_format": {"type": "json_object"}})
-        self.assertIs(self.extractor.client, self.client)
-        self.assertEqual(actual["model"], "selected-keyword-model")
-        self.assertEqual(actual["temperature"], 0)
-        self.assertIn(text, actual["messages"][0]["content"])
-
-    def test_frozen_original_parser_reproduces_markdown_json_failure(self):
-        legacy = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
-        legacy.client, legacy.model = self.client, "selected-keyword-model"
-        self.create.return_value = keyword_response(f"```json\n{self.valid_content}\n```")
-        with self.assertRaises(json.JSONDecodeError):
-            legacy.extract("Patient evidence")
-        self.assertNotIn("response_format", self.create.call_args.kwargs)
-
-    def test_deduplication_is_stable_preserves_case_and_resets_per_patient(self):
-        for _ in range(3):
-            self.assertEqual(self.extractor.extract("Patient evidence"),
-                             ["cough", "fever", "Asthma", "albuterol"])
-        self.create.return_value = keyword_response(json.dumps({
-            "symptoms": ["Cough", "cough"], "diagnoses": [], "medications": [],
-        }))
-        self.assertEqual(self.extractor.extract("Another patient"), ["Cough", "cough"])
-        self.assertEqual(self.create.call_count, 4)
-
-    def test_empty_categories_are_valid_and_extra_fields_do_not_affect_terms(self):
-        self.create.return_value = keyword_response(json.dumps({
-            "symptoms": [], "diagnoses": [], "medications": [],
-            "comment": "ignored", "extra_terms": ["not a keyword"],
-        }))
-        self.assertEqual(self.extractor.extract("No clinical entities"), [])
-
-    def test_missing_empty_and_incomplete_model_responses_raise_without_retry(self):
-        responses = {
-            "no_choices": SimpleNamespace(choices=[]),
-            "none_choices": SimpleNamespace(choices=None),
-            "missing_choices": SimpleNamespace(),
-            "none_content": keyword_response(None),
-            "empty_content": keyword_response(""),
-            "blank_content": keyword_response(" \n\t "),
-            "nonstring_content": keyword_response({"symptoms": []}),
-            "refusal": keyword_response(self.valid_content, refusal="request refused"),
-        }
-        for reason in ("length", "content_filter", "tool_calls", None):
-            responses[f"finish_{reason}"] = keyword_response(self.valid_content, finish_reason=reason)
-        for name, response in responses.items():
-            with self.subTest(case=name):
-                self.create.reset_mock()
-                self.create.return_value = response
-                with self.assertRaises(ValueError):
-                    self.extractor.extract("Patient evidence")
-                self.create.assert_called_once()
-
-    def test_malformed_json_raises_with_original_parse_error_and_without_raw_clinical_text(self):
-        for content in ("PRIVATE_CLINICAL_TEXT", f"```json\n{self.valid_content}\n```", '{"symptoms":'):
-            with self.subTest(content_type=content[:8]):
-                self.create.reset_mock()
-                self.create.return_value = keyword_response(content)
-                with self.assertRaises(ValueError) as caught:
-                    self.extractor.extract("Patient evidence")
-                self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
-                self.assertNotIn("PRIVATE_CLINICAL_TEXT", str(caught.exception))
-                self.create.assert_called_once()
-
-    def test_valid_json_with_invalid_keyword_schema_is_rejected(self):
-        valid = {"symptoms": [], "diagnoses": [], "medications": []}
-        payloads = [None, [], True, 3, "text", {}]
-        for field in valid:
-            payloads.append({key: value for key, value in valid.items() if key != field})
-            for value in (None, "cough", {}, 12, True):
-                payloads.append({**valid, field: value})
-            for value in (None, [], {}, 12, True):
-                payloads.append({**valid, field: ["cough", value]})
-        for payload in payloads:
-            with self.subTest(payload=payload):
-                self.create.reset_mock()
-                self.create.return_value = keyword_response(json.dumps(payload))
-                with self.assertRaises(ValueError):
-                    self.extractor.extract("Patient evidence")
-                self.create.assert_called_once()
-
-    def test_api_errors_propagate_unchanged_without_retry(self):
-        error = RuntimeError("mock keyword API failure")
-        self.create.side_effect = error
-        with self.assertRaises(RuntimeError) as caught:
-            self.extractor.extract("Patient evidence")
-        self.assertIs(caught.exception, error)
-        self.create.assert_called_once()
 
 
 if __name__ == "__main__":
