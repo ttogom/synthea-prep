@@ -32,7 +32,7 @@ from med_copilot.prompts.diagnosis_plan import (
     KEY_QUESTIONS_TEMPLATE,
     EVALUATE_TEMPLATE_KEYINFO,
 )
-from scripts.med_copilot_helpers import load_patient_records
+from scripts.med_copilot_helpers import JSONKeywordExtractor, load_patient_records
 
 # TODO: decide on API key to use for full experiment
 api_key = os.environ["OPENAI_API_KEY"]
@@ -68,10 +68,17 @@ def main():
     try:
         results = []
         if not df.empty:
+            # HybridRetriever combines embedding similarity and keyword overlap to find reference patients
             retriever = HybridRetriever(df, alpha=0.5)
+            # Enforce JSON without changing the vendored retriever or its models.
+            retriever.keyword_extractor = JSONKeywordExtractor(
+                client=retriever.keyword_extractor.client,
+                model=retriever.keyword_extractor.model,
+            )
             candidates = retriever.search(s_o, topk=20)
 
             if candidates:
+                #CrossEncoderReranker jointly scores the target patient and each similar-patient candidate, then reorders candidates by relevance
                 reranker = CrossEncoderReranker()
                 results = reranker.rerank(
                     s_o,

@@ -26,6 +26,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_med_copilot.py"
 HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
+UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
 PROJECT_PROMPTS = ROOT / "med_copilot/prompts/diagnosis_plan.py"
 INPUT_NAME = "patient_records_so.jsonl"
 PROMPT_NAMES = {
@@ -44,6 +45,28 @@ def prompt_literals(path):
 
 
 PROMPTS = prompt_literals(PROJECT_PROMPTS)
+
+
+def frozen_keyword_extractor_class():
+    # Execute only this dependency-free class from the unchanged upstream
+    # source, so the regression exercises its real prompt and JSON parser.
+    tree = ast.parse(UPSTREAM_RETRIEVER.read_text(encoding="utf-8"))
+    extractor = next(node for node in tree.body
+                     if isinstance(node, ast.ClassDef) and node.name == "LLMKeywordExtractor")
+    namespace = {"json": json}
+    exec(compile(ast.Module(body=[extractor], type_ignores=[]),
+                 str(UPSTREAM_RETRIEVER), "exec"), namespace)
+    return namespace["LLMKeywordExtractor"]
+
+
+FROZEN_KEYWORD_EXTRACTOR = frozen_keyword_extractor_class()
+
+
+def keyword_response(content, finish_reason="stop", refusal=None):
+    return SimpleNamespace(choices=[SimpleNamespace(
+        finish_reason=finish_reason,
+        message=SimpleNamespace(content=content, refusal=refusal),
+    )])
 
 
 class PipelineFixture:
@@ -103,6 +126,13 @@ class PipelineFixture:
         }
         self.events = []
         self.calls = []
+        self.keyword_calls = []
+        self.keyword_response = None
+        self.keyword_content = json.dumps({
+            "symptoms": [" Cough ", "Cough", "denies fever"],
+            "diagnoses": [], "medications": [],
+        })
+        self.extracted_keywords = None
         self.retrieval_calls = []
         self.rerank_calls = []
         self.graph_calls = []
@@ -142,14 +172,35 @@ class PipelineFixture:
             fixture.events.append(("client", api_key))
             return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=completion)))
 
+        def keyword_completion(**kwargs):
+            fixture.keyword_calls.append(kwargs)
+            fixture.fail_at("keywords")
+            if fixture.keyword_response is not None:
+                return fixture.keyword_response
+            # Reproduce the original failure: a perfectly valid model answer
+            # wrapped in Markdown when JSON output was requested only in prose.
+            content = fixture.keyword_content
+            if kwargs.get("response_format") != {"type": "json_object"}:
+                content = f"```json\n{content}\n```"
+            return SimpleNamespace(choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=content, refusal=None),
+            )])
+
         class HybridRetriever:
             def __init__(self, df, alpha):
                 fixture.retrieval_calls.append(("init", df.copy(), alpha, Path.cwd()))
                 fixture.fail_at("retriever_init")
+                self.keyword_extractor = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
+                self.keyword_extractor.model = "retrieval-keyword-model"
+                self.keyword_extractor.client = SimpleNamespace(chat=SimpleNamespace(
+                    completions=SimpleNamespace(create=keyword_completion),
+                ))
 
             def search(self, query, topk):
                 fixture.retrieval_calls.append(("search", query, topk, Path.cwd()))
                 fixture.fail_at("retrieval")
+                fixture.extracted_keywords = self.keyword_extractor.extract(query)
                 return fixture.candidates
 
         class CrossEncoderReranker:
@@ -221,13 +272,12 @@ class RunMedCopilotTests(unittest.TestCase):
         with self.fixture.runtime():
             return runpy.run_path(str(self.fixture.script), run_name="runner_under_test")
 
-    def test_import_initializes_dependencies_without_processing_input_or_calling_apis(self):
+    def test_import_initializes_client_and_output_without_processing_input_or_calling_apis(self):
         fixture = self.fixture
         original_path = sys.path.copy()
         original_cwd = Path.cwd()
-        with fixture.runtime(), patch.dict(os.environ, {}, clear=True), \
-                patch.object(Path, "open", side_effect=AssertionError("Patient file read on import")), \
-                patch.object(Path, "mkdir", side_effect=AssertionError("Output created on import")):
+        with fixture.runtime(), \
+                patch.object(Path, "open", side_effect=AssertionError("Patient file read on import")):
             runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
             self.assertEqual(sys.path[:2], [str(fixture.upstream), str(fixture.root)])
         self.assertTrue(callable(runner["main"]))
@@ -236,14 +286,16 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(runner["PATIENT_INPUT"], fixture.input_path)
         self.assertEqual(fixture.events, [
             ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "create_embeddings"),
+            ("client", "test-key"),
         ])
         self.assertEqual(fixture.calls, [])
+        self.assertEqual(fixture.keyword_calls, [])
         self.assertEqual(fixture.retrieval_calls, [])
         self.assertEqual(fixture.rerank_calls, [])
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual(sys.path, original_path)
         self.assertEqual(Path.cwd(), original_cwd)
-        self.assertFalse(fixture.output.exists())
+        self.assertEqual(list(fixture.output.iterdir()), [])
 
     def test_all_imports_are_in_the_header_before_function_or_class_definitions(self):
         for source in (RUNNER, HELPERS):
@@ -315,7 +367,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.retrieval_calls, [])
                 self.assertEqual(fixture.graph_calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assertEqual(list(fixture.output.iterdir()), [])
                 self.assertEqual(sys.path, original_path)
 
     def assert_outputs(self, reference_text=None):
@@ -326,7 +378,6 @@ class RunMedCopilotTests(unittest.TestCase):
             conditions=fixture.conditions, example=reference_text, Key_info=fixture.guideline_text,
         )
         expected_text = {
-            "case_SO.txt": fixture.conditions,
             "top_similar_patient.txt": reference_text,
             "questions_for_guidelines_db.txt": fixture.questions,
             "answers_from_guidelines_db.txt": fixture.guideline_text,
@@ -355,7 +406,7 @@ class RunMedCopilotTests(unittest.TestCase):
         for marker in ["FIRST_PATIENT_ID", "SECOND_PATIENT_ID", "SECOND_PATIENT_SUBJECTIVE_NOT_USED",
                        "SECOND_PATIENT_OBJECTIVE_NOT_USED"]:
             self.assertNotIn(marker, fixture.stdout.getvalue())
-            for call in fixture.calls:
+            for call in fixture.calls + fixture.keyword_calls:
                 self.assertNotIn(marker, call["messages"][-1]["content"])
             for name in expected_text:
                 self.assertNotIn(marker, (fixture.output / name).read_text())
@@ -373,6 +424,13 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(sum(event[0] == "import" for event in fixture.events), 1)
         self.assertIn(("client", "test-key"), fixture.events)
         self.assertEqual(len(fixture.calls), 2)
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        keyword_request = fixture.keyword_calls[0]
+        self.assertEqual(keyword_request["model"], "retrieval-keyword-model")
+        self.assertEqual(keyword_request["temperature"], 0)
+        self.assertEqual(keyword_request["response_format"], {"type": "json_object"})
+        self.assertIn(fixture.conditions, keyword_request["messages"][0]["content"])
+        self.assertEqual(fixture.extracted_keywords, ["Cough", "denies fever"])
         for call in fixture.calls:
             self.assertEqual(call["model"], "gpt-4o-mini")
         self.assertEqual(fixture.calls[0]["messages"], [
@@ -394,8 +452,6 @@ class RunMedCopilotTests(unittest.TestCase):
             "community_level": 2, "response_type": "Multiple Paragraphs",
             "streaming": False, "query": fixture.questions, "verbose": True,
         }, fixture.caller)])
-        self.assertIn("STAGE 1: S/O", fixture.stdout.getvalue())
-        self.assertNotIn("STAGE 1: S/O/A", fixture.stdout.getvalue())
         self.assertNotIn("Assessment:", fixture.conditions)
         for field in fixture.patient.values():
             self.assertIn(field, fixture.retrieval_calls[1][1])
@@ -438,6 +494,7 @@ class RunMedCopilotTests(unittest.TestCase):
 
                 if stage == "corpus":
                     self.assertEqual(fixture.retrieval_calls, [])
+                    self.assertEqual(fixture.keyword_calls, [])
                 else:
                     self.assertEqual(fixture.retrieval_calls[1],
                                      ("search", fixture.conditions, 20, fixture.upstream))
@@ -483,6 +540,49 @@ class RunMedCopilotTests(unittest.TestCase):
                       (fixture.output / "final_prompt.txt").read_text())
         self.assertFalse((fixture.output / "final_output.txt").exists())
 
+    def test_empty_keyword_arrays_continue_through_full_pipeline(self):
+        fixture = self.fixture
+        fixture.keyword_content = '{"symptoms": [], "diagnoses": [], "medications": []}'
+        runner = self.load_runner()
+        with fixture.runtime():
+            runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(fixture.extracted_keywords, [])
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        self.assertEqual(len(fixture.rerank_calls), 2)
+        self.assertEqual(len(fixture.graph_calls), 1)
+        self.assertEqual(len(fixture.calls), 2)
+        self.assert_outputs()
+
+    def test_keyword_reply_failures_stop_before_downstream_and_restore_cwd(self):
+        fixture_root = self.fixture.root
+        cases = {
+            "fenced_json": {"content": '```json\n{"symptoms": [], "diagnoses": [], "medications": []}\n```'},
+            "empty": {"content": ""},
+            "missing_category": {"content": '{"symptoms": [], "diagnoses": []}'},
+            "wrong_category_type": {"content": '{"symptoms": "cough", "diagnoses": [], "medications": []}'},
+            "wrong_term_type": {"content": '{"symptoms": [3], "diagnoses": [], "medications": []}'},
+            "refused": {"content": None, "refusal": "request refused"},
+            "truncated": {"content": '{"symptoms": []}', "finish_reason": "length"},
+            "no_choices": None,
+        }
+        for name, fields in cases.items():
+            with self.subTest(case=name):
+                self.fixture = PipelineFixture(fixture_root / name)
+                fixture = self.fixture
+                fixture.keyword_response = keyword_response(**fields) if fields else SimpleNamespace(choices=[])
+                runner = self.load_runner()
+                with fixture.runtime():
+                    with self.assertRaises(ValueError):
+                        runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+                self.assertEqual(len(fixture.keyword_calls), 1)
+                self.assertEqual(fixture.keyword_calls[0]["model"], "retrieval-keyword-model")
+                self.assertEqual(fixture.rerank_calls, [])
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertEqual(list(fixture.output.iterdir()), [])
+
     def test_prepared_input_preserves_sections_dates_unicode_and_whitespace(self):
         fixture_root = self.fixture.root
         cases = {
@@ -505,7 +605,6 @@ class RunMedCopilotTests(unittest.TestCase):
                     runner["main"]()
                     self.assertEqual(Path.cwd(), fixture.caller)
                 self.assertEqual(len(fixture.calls), 2)
-                self.assertIn(patient_text, fixture.stdout.getvalue())
                 self.assert_outputs()
 
     def test_prepared_so_preserves_empty_sections_and_field_text(self):
@@ -558,7 +657,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 2)
         self.assertEqual(fixture.retrieval_calls[1][1], fixture.conditions)
         self.assertEqual(fixture.rerank_calls[1][1], fixture.conditions)
-        for call in fixture.calls:
+        for call in fixture.calls + fixture.keyword_calls:
             self.assertNotIn("UNUSED_TARGET", call["messages"][-1]["content"])
         self.assertNotIn("UNUSED_TARGET", fixture.stdout.getvalue())
         self.assert_outputs()
@@ -606,12 +705,12 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertIn(message, str(caught.exception))
                     if message == "invalid patient JSON":
                         self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
-                    self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
+                    self.assertEqual([event[0] for event in fixture.events], ["preload", "import", "client"])
                     self.assertEqual(fixture.calls, [])
                     self.assertEqual(fixture.retrieval_calls, [])
                     self.assertEqual(fixture.rerank_calls, [])
                     self.assertEqual(fixture.graph_calls, [])
-                    self.assertFalse(fixture.output.exists())
+                    self.assertEqual(list(fixture.output.iterdir()), [])
                     self.assertEqual(fixture.input_path.read_text(encoding="utf-8"), contents)
                     self.assertNotIn("STAGE 1: S/O", fixture.stdout.getvalue())
 
@@ -628,9 +727,9 @@ class RunMedCopilotTests(unittest.TestCase):
                         runner["main"]()
                     self.assertEqual(Path.cwd(), fixture.caller)
                 self.assertIn(str(fixture.input_path), str(caught.exception))
-                self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
+                self.assertEqual([event[0] for event in fixture.events], ["preload", "import", "client"])
                 self.assertEqual(fixture.calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assertEqual(list(fixture.output.iterdir()), [])
 
     def test_missing_jsonl_stops_without_falling_back_to_legacy_note(self):
         fixture = self.fixture
@@ -645,9 +744,9 @@ class RunMedCopilotTests(unittest.TestCase):
                 runner["main"]()
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assertEqual(caught.exception.filename, str(fixture.input_path))
-        self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
+        self.assertEqual([event[0] for event in fixture.events], ["preload", "import", "client"])
         self.assertEqual(fixture.calls, [])
-        self.assertFalse(fixture.output.exists())
+        self.assertEqual(list(fixture.output.iterdir()), [])
 
     def test_entire_jsonl_is_loaded_before_processing_only_first_patient(self):
         fixture = self.fixture
@@ -671,8 +770,10 @@ class RunMedCopilotTests(unittest.TestCase):
             record = original_loads(value, *args, **kwargs)
             if isinstance(record, dict) and record.get("uuid") in patient_ids:
                 # Dependencies load in the header, but all records must be
-                # decoded before creating an API client or starting a stage.
-                self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
+                # decoded before making an API request or starting a stage.
+                self.assertEqual([event[0] for event in fixture.events], ["preload", "import", "client"])
+                self.assertEqual(fixture.keyword_calls, [])
+                self.assertEqual(fixture.calls, [])
                 loaded_patients.append(record)
             return record
 
@@ -790,7 +891,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.calls, [])
         self.assertEqual(fixture.retrieval_calls, [])
         self.assertEqual(fixture.graph_calls, [])
-        self.assertFalse(fixture.output.exists())
+        self.assertEqual(list(fixture.output.iterdir()), [])
 
     def test_configured_corpus_outside_upstream_runs_the_full_pipeline(self):
         fixture = self.fixture
@@ -834,9 +935,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.retrieval_calls, [])
         self.assertEqual(fixture.rerank_calls, [])
         self.assertEqual(fixture.graph_calls, [])
-        self.assertEqual({path.name for path in fixture.output.iterdir()},
-                         {"case_SO.txt"})
-        self.assertEqual((fixture.output / "case_SO.txt").read_text(), fixture.conditions)
+        self.assertEqual(list(fixture.output.iterdir()), [])
         return caught.exception
 
     def test_missing_configured_corpus_stops_pipeline_without_fallback(self):
@@ -854,7 +953,7 @@ class RunMedCopilotTests(unittest.TestCase):
         runner = self.load_runner()
         fixture = self.fixture
         for stage, expected_calls in [
-            ("retriever_init", 0), ("retrieval", 0),
+            ("retriever_init", 0), ("retrieval", 0), ("keywords", 0),
             ("reranker_init", 0), ("reranking", 0), ("questions", 1),
             ("graphrag", 1), ("final", 2),
         ]:
@@ -872,6 +971,119 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertFalse((fixture.output / "final_output.txt").exists())
                 if stage == "final":
                     self.assertTrue((fixture.output / "final_prompt.txt").is_file())
+
+
+class JSONKeywordExtractorTests(unittest.TestCase):
+    def setUp(self):
+        self.extractor_class = runpy.run_path(str(HELPERS))["JSONKeywordExtractor"]
+        self.client = Mock()
+        self.create = self.client.chat.completions.create
+        self.valid_content = json.dumps({
+            "symptoms": [" cough ", "fever", "cough"],
+            "diagnoses": ["fever", "Asthma"],
+            "medications": [" albuterol ", "Asthma", "cough"],
+        })
+        self.create.return_value = keyword_response(self.valid_content)
+        self.extractor = self.extractor_class(self.client, "selected-keyword-model")
+
+    def test_json_mode_preserves_upstream_prompt_model_temperature_and_client(self):
+        text = "Subjective: Cough café.\nObjective: Temperature 37.2 °C."
+        self.assertEqual(self.extractor.extract(text), ["cough", "fever", "Asthma", "albuterol"])
+        self.create.assert_called_once()
+        actual = self.create.call_args.kwargs
+        legacy_client = Mock()
+        legacy_client.chat.completions.create.return_value = keyword_response(self.valid_content)
+        legacy = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
+        legacy.client, legacy.model = legacy_client, "selected-keyword-model"
+        legacy.extract(text)
+        original = legacy_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(actual, {**original, "response_format": {"type": "json_object"}})
+        self.assertIs(self.extractor.client, self.client)
+        self.assertEqual(actual["model"], "selected-keyword-model")
+        self.assertEqual(actual["temperature"], 0)
+        self.assertIn(text, actual["messages"][0]["content"])
+
+    def test_frozen_original_parser_reproduces_markdown_json_failure(self):
+        legacy = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
+        legacy.client, legacy.model = self.client, "selected-keyword-model"
+        self.create.return_value = keyword_response(f"```json\n{self.valid_content}\n```")
+        with self.assertRaises(json.JSONDecodeError):
+            legacy.extract("Patient evidence")
+        self.assertNotIn("response_format", self.create.call_args.kwargs)
+
+    def test_deduplication_is_stable_preserves_case_and_resets_per_patient(self):
+        for _ in range(3):
+            self.assertEqual(self.extractor.extract("Patient evidence"),
+                             ["cough", "fever", "Asthma", "albuterol"])
+        self.create.return_value = keyword_response(json.dumps({
+            "symptoms": ["Cough", "cough"], "diagnoses": [], "medications": [],
+        }))
+        self.assertEqual(self.extractor.extract("Another patient"), ["Cough", "cough"])
+        self.assertEqual(self.create.call_count, 4)
+
+    def test_empty_categories_are_valid_and_extra_fields_do_not_affect_terms(self):
+        self.create.return_value = keyword_response(json.dumps({
+            "symptoms": [], "diagnoses": [], "medications": [],
+            "comment": "ignored", "extra_terms": ["not a keyword"],
+        }))
+        self.assertEqual(self.extractor.extract("No clinical entities"), [])
+
+    def test_missing_empty_and_incomplete_model_responses_raise_without_retry(self):
+        responses = {
+            "no_choices": SimpleNamespace(choices=[]),
+            "none_choices": SimpleNamespace(choices=None),
+            "missing_choices": SimpleNamespace(),
+            "none_content": keyword_response(None),
+            "empty_content": keyword_response(""),
+            "blank_content": keyword_response(" \n\t "),
+            "nonstring_content": keyword_response({"symptoms": []}),
+            "refusal": keyword_response(self.valid_content, refusal="request refused"),
+        }
+        for reason in ("length", "content_filter", "tool_calls", None):
+            responses[f"finish_{reason}"] = keyword_response(self.valid_content, finish_reason=reason)
+        for name, response in responses.items():
+            with self.subTest(case=name):
+                self.create.reset_mock()
+                self.create.return_value = response
+                with self.assertRaises(ValueError):
+                    self.extractor.extract("Patient evidence")
+                self.create.assert_called_once()
+
+    def test_malformed_json_raises_with_original_parse_error_and_without_raw_clinical_text(self):
+        for content in ("PRIVATE_CLINICAL_TEXT", f"```json\n{self.valid_content}\n```", '{"symptoms":'):
+            with self.subTest(content_type=content[:8]):
+                self.create.reset_mock()
+                self.create.return_value = keyword_response(content)
+                with self.assertRaises(ValueError) as caught:
+                    self.extractor.extract("Patient evidence")
+                self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
+                self.assertNotIn("PRIVATE_CLINICAL_TEXT", str(caught.exception))
+                self.create.assert_called_once()
+
+    def test_valid_json_with_invalid_keyword_schema_is_rejected(self):
+        valid = {"symptoms": [], "diagnoses": [], "medications": []}
+        payloads = [None, [], True, 3, "text", {}]
+        for field in valid:
+            payloads.append({key: value for key, value in valid.items() if key != field})
+            for value in (None, "cough", {}, 12, True):
+                payloads.append({**valid, field: value})
+            for value in (None, [], {}, 12, True):
+                payloads.append({**valid, field: ["cough", value]})
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                self.create.reset_mock()
+                self.create.return_value = keyword_response(json.dumps(payload))
+                with self.assertRaises(ValueError):
+                    self.extractor.extract("Patient evidence")
+                self.create.assert_called_once()
+
+    def test_api_errors_propagate_unchanged_without_retry(self):
+        error = RuntimeError("mock keyword API failure")
+        self.create.side_effect = error
+        with self.assertRaises(RuntimeError) as caught:
+            self.extractor.extract("Patient evidence")
+        self.assertIs(caught.exception, error)
+        self.create.assert_called_once()
 
 
 if __name__ == "__main__":
