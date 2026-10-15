@@ -75,7 +75,7 @@ reporting:
 vector_store:
   default_vector_store:
     type: lancedb
-    db_uri: output\lancedb
+    db_uri: output/lancedb
     container_name: default
     overwrite: True
 
