@@ -2,11 +2,13 @@
 
 Run directly: python3 tests/test_run_med_copilot.py
 Or discover: python3 -m unittest discover -s tests -p 'test_*.py'
-Models and API clients are mocked; upstream modules are never imported.
+Models and API clients are mocked; selected upstream functions are loaded
+without importing their heavyweight dependencies.
 Prepared S/O text is trusted; the loader checks JSON objects and string fields.
 """
 
 import ast
+import asyncio
 import builtins
 from contextlib import contextmanager, redirect_stdout
 import io
@@ -27,6 +29,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_med_copilot.py"
 HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
+UPSTREAM_GRAPH_QUERY = ROOT / "med_copilot/upstream/graphrag/cli/query.py"
+UPSTREAM_GRAPH_STORAGE = ROOT / "med_copilot/upstream/graphrag/utils/storage.py"
+GUIDELINE_SETTINGS = ROOT / "med_copilot/data/guidelines/settings.yaml"
+GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
 PROJECT_PROMPTS = ROOT / "med_copilot/prompts/diagnosis_plan.py"
 INPUT_NAME = "patient_records_so.jsonl"
 PROMPT_NAMES = {
@@ -62,6 +68,32 @@ def frozen_keyword_extractor_class():
 FROZEN_KEYWORD_EXTRACTOR = frozen_keyword_extractor_class()
 
 
+def frozen_graphrag_query(load_config, create_storage, api):
+    # Run the real vendored CLI/table-loading functions while replacing only
+    # config, storage construction, and the external query API.
+    storage_names = {"load_table_from_storage", "storage_has_table"}
+    storage_namespace = {"pd": pd, "PipelineStorage": object}
+    storage_tree = ast.parse(UPSTREAM_GRAPH_STORAGE.read_text(encoding="utf-8"))
+    storage_functions = [node for node in storage_tree.body
+                         if isinstance(node, ast.AsyncFunctionDef)
+                         and node.name in storage_names]
+    exec(compile(ast.Module(body=storage_functions, type_ignores=[]),
+                 str(UPSTREAM_GRAPH_STORAGE), "exec"), storage_namespace)
+    query_namespace = {
+        "asyncio": asyncio, "sys": sys, "Path": Path,
+        "GraphRagConfig": object, "Any": object, "api": api,
+        "load_config": load_config, "create_storage_from_config": create_storage,
+        **{name: storage_namespace[name] for name in storage_names},
+    }
+    query_tree = ast.parse(UPSTREAM_GRAPH_QUERY.read_text(encoding="utf-8"))
+    query_functions = [node for node in query_tree.body
+                       if isinstance(node, ast.FunctionDef)
+                       and node.name in {"run_local_search", "_resolve_output_files"}]
+    exec(compile(ast.Module(body=query_functions, type_ignores=[]),
+                 str(UPSTREAM_GRAPH_QUERY), "exec"), query_namespace)
+    return query_namespace["run_local_search"]
+
+
 def keyword_response(content, finish_reason="stop", refusal=None):
     return SimpleNamespace(choices=[SimpleNamespace(
         finish_reason=finish_reason,
@@ -78,9 +110,11 @@ class PipelineFixture:
         self.output = root / "data_run_med_copilot/output"
         self.caller = root / "caller"
         self.script = root / "scripts/run_med_copilot.py"
-        for directory in [self.upstream, self.guidelines, self.caller,
+        for directory in [self.upstream, self.guidelines / "output", self.caller,
                           self.script.parent, root / "data_run_med_copilot/input"]:
             directory.mkdir(parents=True)
+        for name in GUIDELINE_TABLES:
+            (self.guidelines / "output" / f"{name}.parquet").write_text("MOCK_TABLE")
         # An unchanged copy lets runpy exercise the actual __main__ guard.
         self.script.write_text(RUNNER.read_text())
         self.helper_module = self.script.parent / "med_copilot_helpers.py"
@@ -136,6 +170,7 @@ class PipelineFixture:
         self.retrieval_calls = []
         self.rerank_calls = []
         self.graph_calls = []
+        self.completion_cwds = []
         self.failure = None
         self.error = RuntimeError("mock stage failure")
         self.stdout = io.StringIO()
@@ -163,6 +198,7 @@ class PipelineFixture:
 
         def completion(**kwargs):
             fixture.calls.append(kwargs)
+            fixture.completion_cwds.append(Path.cwd())
             stage = ["questions", "final"][len(fixture.calls) - 1]
             fixture.fail_at(stage)
             content = [fixture.questions, fixture.final_output][len(fixture.calls) - 1]
@@ -451,7 +487,8 @@ class RunMedCopilotTests(unittest.TestCase):
             "data_dir": fixture.guidelines / "output", "root_dir": fixture.guidelines,
             "community_level": 2, "response_type": "Multiple Paragraphs",
             "streaming": False, "query": fixture.questions, "verbose": True,
-        }, fixture.caller)])
+        }, fixture.guidelines / "output")])
+        self.assertEqual(fixture.completion_cwds, [fixture.caller, fixture.caller])
         self.assertNotIn("Assessment:", fixture.conditions)
         for field in fixture.patient.values():
             self.assertIn(field, fixture.retrieval_calls[1][1])
@@ -471,6 +508,186 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), self.fixture.caller)
         self.assertEqual(len(self.fixture.calls), 2)
         self.assert_outputs()
+
+    def real_guideline_search(self):
+        fixture = self.fixture
+        state = SimpleNamespace(reads=[], api_calls=[], config_calls=[])
+
+        class Storage:
+            def __init__(self, directory):
+                # Match FilePipelineStorage: it has _root_dir, not base_path.
+                self._root_dir = directory
+
+            async def has(self, filename):
+                return (Path(self._root_dir) / filename).is_file()
+
+        def load_config(root, config_filepath, overrides):
+            state.config_calls.append((root, config_filepath, overrides, Path.cwd()))
+            return SimpleNamespace(outputs={}, output=SimpleNamespace(
+                base_dir=overrides["output.base_dir"],
+            ))
+
+        async def local_search(**kwargs):
+            state.api_calls.append((kwargs, Path.cwd()))
+            fixture.fail_at("graphrag_api")
+            return fixture.guideline_text, fixture.context
+
+        query = frozen_graphrag_query(
+            load_config, lambda config: Storage(config.base_dir),
+            SimpleNamespace(local_search=local_search),
+        )
+
+        def graph_search(**kwargs):
+            fixture.graph_calls.append((kwargs, Path.cwd()))
+            return query(**kwargs)
+
+        def read_parquet(path):
+            path = Path(path).resolve()
+            state.reads.append(path)
+            return pd.DataFrame({"origin": [path.read_text(encoding="utf-8")]})
+
+        fixture.modules["graphrag.cli.query"].run_local_search = graph_search
+        state.read_parquet = read_parquet
+        return state
+
+    def write_guideline_tables(self, directory, prefix="SELECTED", include_covariates=False):
+        names = list(GUIDELINE_TABLES)
+        if include_covariates:
+            names.append("covariates")
+        directory.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (directory / f"{name}.parquet").write_text(f"{prefix}_{name}", encoding="utf-8")
+        return names
+
+    def test_real_guideline_loader_uses_selected_output_from_scripts_and_unrelated_cwds(self):
+        fixture_root = self.fixture.root
+        for location, optional in [("scripts", False), ("unrelated", True)]:
+            with self.subTest(caller=location, covariates=optional):
+                self.fixture = PipelineFixture(fixture_root / location)
+                fixture = self.fixture
+                if location == "scripts":
+                    fixture.caller = fixture.script.parent
+                output = fixture.guidelines / "output"
+                names = self.write_guideline_tables(output, include_covariates=optional)
+                # A caller/repository-wide search could select unrelated tables.
+                self.write_guideline_tables(fixture.caller, prefix="WRONG_CALLER")
+                self.write_guideline_tables(fixture.guidelines / "stale", prefix="WRONG_STALE")
+                state = self.real_guideline_search()
+                runner = self.load_runner()
+                with fixture.runtime(), patch("pandas.read_parquet", side_effect=state.read_parquet):
+                    runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+                self.assertEqual(state.reads, [output / f"{name}.parquet" for name in names])
+                self.assertEqual(len(state.api_calls), 1)
+                api_args, api_cwd = state.api_calls[0]
+                self.assertEqual(api_cwd, output)
+                for name in names:
+                    self.assertEqual(api_args[name].to_dict(orient="records"),
+                                     [{"origin": f"SELECTED_{name}"}])
+                if not optional:
+                    self.assertIsNone(api_args["covariates"])
+                self.assertEqual(api_args["query"], fixture.questions)
+                self.assertEqual(state.config_calls, [(
+                    fixture.guidelines, fixture.guidelines / "settings.yaml",
+                    {"output.base_dir": str(output)}, output,
+                )])
+                self.assertEqual(fixture.completion_cwds, [fixture.caller, fixture.caller])
+                self.assert_outputs()
+
+    def test_real_guideline_loader_respects_configured_directory_outside_project(self):
+        self.fixture = PipelineFixture(self.fixture.root / "project")
+        fixture = self.fixture
+        selected = fixture.root.parent / "alternate guidelines café"
+        output = selected / "output"
+        names = self.write_guideline_tables(output, prefix="ALTERNATE")
+        self.write_guideline_tables(fixture.guidelines / "output", prefix="WRONG_DEFAULT")
+        self.write_guideline_tables(fixture.caller, prefix="WRONG_CALLER")
+        state = self.real_guideline_search()
+        runner = self.load_runner()
+        with fixture.runtime(), \
+                patch.dict(runner["main"].__globals__, {"GUIDELINES": selected}), \
+                patch("pandas.read_parquet", side_effect=state.read_parquet):
+            runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(state.reads, [output / f"{name}.parquet" for name in names])
+        self.assertEqual(state.config_calls, [(
+            selected, selected / "settings.yaml", {"output.base_dir": str(output)}, output,
+        )])
+        for name in names:
+            self.assertEqual(state.api_calls[0][0][name].iloc[0]["origin"], f"ALTERNATE_{name}")
+        self.assertEqual(fixture.graph_calls[0][1], output)
+        self.assert_outputs()
+
+    def test_missing_guideline_table_does_not_use_caller_or_sibling_and_restores_cwd(self):
+        fixture_root = self.fixture.root
+        for missing in GUIDELINE_TABLES:
+            with self.subTest(missing=missing):
+                self.fixture = PipelineFixture(fixture_root / missing)
+                fixture = self.fixture
+                output = fixture.guidelines / "output"
+                missing_path = output / f"{missing}.parquet"
+                missing_path.unlink()
+                self.write_guideline_tables(fixture.caller, prefix="WRONG_CALLER")
+                self.write_guideline_tables(fixture.guidelines / "stale", prefix="WRONG_SIBLING")
+                self.write_guideline_tables(output / "stale", prefix="WRONG_NESTED")
+                state = self.real_guideline_search()
+                runner = self.load_runner()
+                with fixture.runtime(), patch("pandas.read_parquet", side_effect=state.read_parquet):
+                    with self.assertRaises(FileNotFoundError) as caught:
+                        runner["main"]()
+                    self.assertEqual(Path.cwd(), fixture.caller)
+                self.assertIn(str(missing_path), str(caught.exception))
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertEqual(state.reads, [])
+                self.assertEqual(state.api_calls, [])
+                self.assertEqual(len(fixture.calls), 1)
+                self.assertEqual({path.name for path in fixture.output.iterdir()}, {
+                    "top_similar_patient.txt", "questions_for_guidelines_db.txt",
+                })
+
+    def test_real_guideline_api_failure_restores_cwd_and_stops_final_generation(self):
+        fixture = self.fixture
+        output = fixture.guidelines / "output"
+        self.write_guideline_tables(output)
+        state = self.real_guideline_search()
+        fixture.failure = "graphrag_api"
+        runner = self.load_runner()
+        with fixture.runtime(), patch("pandas.read_parquet", side_effect=state.read_parquet):
+            with self.assertRaises(RuntimeError) as caught:
+                runner["main"]()
+            self.assertIs(caught.exception, fixture.error)
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(len(state.api_calls), 1)
+        self.assertEqual(len(fixture.calls), 1)
+        self.assertEqual({path.name for path in fixture.output.iterdir()}, {
+            "top_similar_patient.txt", "questions_for_guidelines_db.txt",
+        })
+
+    def test_missing_guideline_output_directory_restores_cwd_without_search_fallback(self):
+        fixture = self.fixture
+        output = fixture.guidelines / "output"
+        for path in output.iterdir():
+            path.unlink()
+        output.rmdir()
+        self.write_guideline_tables(fixture.caller, prefix="WRONG_CALLER")
+        runner = self.load_runner()
+        with fixture.runtime():
+            with self.assertRaises(FileNotFoundError) as caught:
+                runner["main"]()
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertIn(str(output), str(caught.exception))
+        self.assertEqual(fixture.graph_calls, [])
+        self.assertEqual(len(fixture.calls), 1)
+        self.assertFalse((fixture.output / "final_output.txt").exists())
+
+    def test_guideline_vector_database_path_is_portable(self):
+        # This project YAML has one db_uri; do not require a YAML parser just
+        # to verify that it uses the existing output/lancedb layout on POSIX.
+        entries = [line.split(":", 1)[1].strip().strip("\"'")
+                   for line in GUIDELINE_SETTINGS.read_text(encoding="utf-8").splitlines()
+                   if line.strip().startswith("db_uri:")]
+        self.assertEqual(entries, ["output/lancedb"])
+        self.assertEqual(Path(entries[0]).parts, ("output", "lancedb"))
 
     def test_empty_reference_stages_continue_through_guidelines_and_final_generation(self):
         fixture_root = self.fixture.root
@@ -508,7 +725,7 @@ class RunMedCopilotTests(unittest.TestCase):
                                  fixture.prompts["KEY_QUESTIONS_TEMPLATE"].format(conditions=fixture.conditions))
                 self.assertEqual(len(fixture.graph_calls), 1)
                 self.assertEqual(fixture.graph_calls[0][0]["query"], fixture.questions)
-                self.assertEqual(fixture.graph_calls[0][1], fixture.caller)
+                self.assertEqual(fixture.graph_calls[0][1], fixture.guidelines / "output")
                 final_prompt = fixture.calls[1]["messages"][-1]["content"]
                 for evidence in [fixture.conditions, fixture.guideline_text,
                                  "No reference patient available."]:
@@ -920,7 +1137,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.rerank_calls[1],
                          ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
         self.assertEqual(len(fixture.calls), 2)
-        self.assertEqual(fixture.graph_calls[0][1], fixture.caller)
+        self.assertEqual(fixture.graph_calls[0][1], fixture.guidelines / "output")
         self.assert_outputs()
 
     def assert_corpus_load_failure(self, corpus_path, exception_type):

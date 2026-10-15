@@ -1,3 +1,4 @@
+from contextlib import chdir
 import json
 import os
 from pathlib import Path
@@ -32,7 +33,11 @@ from med_copilot.prompts.diagnosis_plan import (
     KEY_QUESTIONS_TEMPLATE,
     EVALUATE_TEMPLATE_KEYINFO,
 )
-from scripts.med_copilot_helpers import JSONKeywordExtractor, load_patient_records
+from scripts.med_copilot_helpers import (
+    JSONKeywordExtractor,
+    load_patient_records,
+    validate_guideline_tables,
+)
 
 # TODO: decide on API key to use for full experiment
 api_key = os.environ["OPENAI_API_KEY"]
@@ -128,16 +133,20 @@ def main():
 # GraphRAG clinical guideline retrieval
 # ---------------------------------------------------------------------
 
-    key_info, graphrag_context = run_local_search(
-        config_filepath=GUIDELINES / "settings.yaml",
-        data_dir=GUIDELINES / "output",
-        root_dir=GUIDELINES,
-        community_level=2,
-        response_type="Multiple Paragraphs",
-        streaming=False,
-        query=key_questions,
-        verbose=True,
-    )
+    guideline_output = GUIDELINES / "output"
+    validate_guideline_tables(guideline_output)
+    # The vendored table loader uses the working directory instead of storage's root.
+    with chdir(guideline_output):
+        key_info, graphrag_context = run_local_search(
+            config_filepath=GUIDELINES / "settings.yaml",
+            data_dir=guideline_output,
+            root_dir=GUIDELINES,
+            community_level=2,
+            response_type="Multiple Paragraphs",
+            streaming=False,
+            query=key_questions,
+            verbose=True,
+        )
 
     print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
     print(key_info)

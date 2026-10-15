@@ -1,5 +1,6 @@
 """Helpers for the project-owned MED-COPILOT runner."""
 
+import errno
 import json
 from pathlib import Path
 
@@ -29,6 +30,15 @@ def load_patient_records(patient_input):
     if not patients:
         raise ValueError(f"{patient_input}: no patient records found")
     return patients
+
+
+def validate_guideline_tables(guideline_output):
+    """Require local-search tables directly in the selected output directory."""
+    guideline_output = Path(guideline_output)
+    for name in ("communities", "community_reports", "text_units", "relationships", "entities"):
+        table = guideline_output / f"{name}.parquet"
+        if not table.is_file():
+            raise FileNotFoundError(errno.ENOENT, "Required guideline table not found", str(table))
 
 
 class JSONKeywordExtractor:
