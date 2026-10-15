@@ -62,7 +62,7 @@ The pilot does not copy the accepted input into its output directory, save a sep
 
 ## Setup and Verification
 
-Follow the MED-COPILOT setup commands in the [root README](../../README.md). The root [requirements.txt](../../requirements.txt) supplies the Python dependencies and scientific-language model. Git LFS supplies tracked large artifacts; both `OPENAI_API_KEY` and `GRAPHRAG_API_KEY` must be available for live execution. Launch from the repository root because the vendored Parquet loader searches beneath the current working directory.
+Follow the MED-COPILOT setup commands in the [root README](../../README.md). The root [requirements.txt](../../requirements.txt) supplies the Python dependencies and scientific-language model. Git LFS supplies tracked large artifacts; both `OPENAI_API_KEY` and `GRAPHRAG_API_KEY` must be available for live execution. The runner validates required guideline tables and scopes local search to their configured output directory, restoring the launch directory afterward.
 
 The runner initializes BioClinicalBERT before importing FAISS as an Apple-Silicon compatibility workaround.
 

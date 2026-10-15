@@ -29,10 +29,11 @@ python -m pip check
 export OPENAI_API_KEY="your-key"
 export GRAPHRAG_API_KEY="$OPENAI_API_KEY"
 
+python tests/test_med_copilot_helpers.py
 python tests/test_run_med_copilot.py
 python scripts/run_med_copilot.py
 ```
 
 [requirements.txt](requirements.txt) contains the Python dependencies and the `en_core_sci_md` model. Keep it updated as the pipeline changes. BioClinicalBERT and the cross-encoder download from Hugging Face on the first run, so initial setup requires internet access.
 
-The runner uses the patient input configured by `NOTE` in [scripts/run_med_copilot.py](scripts/run_med_copilot.py) and saves results under `data_run_med_copilot/output/`. The tests mock external APIs; running the pipeline uses the configured OpenAI models. Run from the repository root so the guideline-table loader can find the artifacts under `med_copilot/data/guidelines/`.
+The runner loads all records from `data_run_med_copilot/input/patient_records_so.jsonl`, configured by `PATIENT_INPUT` in [scripts/run_med_copilot.py](scripts/run_med_copilot.py). A marked temporary test block selects only the first patient; it must be replaced with a patient loop and per-patient outputs for the full experiment. The runner uses the prepared `subjective` and `objective` strings directly, without an LLM normalization call, and saves results under `data_run_med_copilot/output/`. The tests mock external APIs; running the pipeline uses the configured OpenAI models. The runner locates guideline artifacts under `med_copilot/data/guidelines/` independently of the launch directory.
