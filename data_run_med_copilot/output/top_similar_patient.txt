@@ -1,43 +1,43 @@
 
 Result 1
 Subjective:
-Patient is a ___ year old male with a history of sarcoidosis on prednisone and azathioprine, previous ITP status post splenectomy, and other medical issues. He presents with severe back pain affecting daily activities. Patient reports pain below the scapula and slightly below that area. He denies numbness or tingling in the arms, weakness, or bowel/bladder dysfunction. He mentions some numbness and had not had a bowel movement today, although typically he has 1-2 daily.
+The patient is a diabetic male presenting with nephrolithiasis and acute kidney injury. He reports experiencing vomiting and left flank pain for ___ days. There is no fever reported, and his urine analysis shows unremarkable results. He has been advised about the possibility of ongoing blood in urine and other urinary symptoms due to stent placement.
 Objective:
-On initial ED evaluation, vital signs were 97.8°F, heart rate 107 bpm, blood pressure 123/77 mmHg, respiratory rate 18, and oxygen saturation 99%. Neurological examination in the ED was intact with normal strength and sensation. Laboratory results showed WBC 13, CRP 68.9, ESR 55. MRI revealed T6 and T8 compression fractures with an epidural hematoma extending from T5-T8. Discharge vitals were 97.5°F, heart rate 125 bpm, blood pressure 125/82 mmHg, respiratory rate 18, and oxygen saturation 98%. The discharge physical exam was otherwise unchanged from the admission exam.
+Physical examination shows a well-nourished, well-developed male in no acute distress. Abdomen is soft, non-tender, non-distended. Lower extremities have no edema or calf pain. Laboratory results show elevated creatinine levels of 1.4 on arrival and 1.5 after fluid rehydration. Urinalysis reveals hematuria (small), glucosuria (1000), and a final urine culture identifies Escherichia coli with a count of 10,000-100,000 CFU/mL. Imaging via CT scan revealed proximal and distal left ureteral stones.
 Assessment:
-1. Thoracic spine compression fractures at T6 and T8 with accompanying epidural hematoma and moderate cord compression. Neurological examination shows hyper-reflexia but no significant weakness that corresponds to the compression level. 2. Sarcoidosis with multiorgan involvement requiring adjustment of immunosuppressive therapy. 3. History of AVNRT, with episodes of tachycardia managed with Diltiazem. 4. Depression, controlled on fluoxetine. 5. Hyperlipidemia, managed with simvastatin. 6. Obstructive sleep apnea, continues on CPAP.
+The patient has nephrolithiasis with obstructing left ureteral stones leading to acute kidney injury. He also has a urinary tract infection due to Escherichia coli. There is a need for intervention given the elevated creatinine and associated symptoms.
 Plan:
-1. Fitted with TLSO brace for compression fractures; instruct to avoid twisting movements. 2. Follow up with spine surgery for evaluation after discharge. 3. Outpatient follow-up with endocrinology, and possible lab work in one week for azathioprine monitoring. 4. Cardiology follow-up for tachyarrhythmia management. 5. Medications adjusted upon discharge: decrease prednisone to 30 mg daily for 7 days, then taper to 20 mg daily; increase azathioprine to 150 mg daily; continue all other home medications; start calcium supplementation. Follow-up appointments will be arranged with the respective specialists.
-Rerank score: -5.6050
+The patient underwent cystoscopy and left ureteral stent placement to decompress the obstruction. He will continue intravenous hydration and receive prophylactic antibiotics postoperatively. Discharge medications include acetaminophen, cephalexin, docusate sodium, oxycodone, pravastatin, sodium bicarbonate, tamsulosin, amlodipine, aspirin, glipizide, and sitagliptin. Follow-up laboratory work is scheduled through the PCP in ___ days to monitor kidney function. The patient must follow up for stent removal/exchange and other definitive stone management as directed.
+Rerank score: -7.8975
 
 Dominant medical concepts (contribution >= 0.85):
- - azathioprine (0.9085)
- - azathioprine (0.9085)
- - azathioprine (0.9085)
- - hyper-reflexia (0.8994)
- - prednisone (0.8971)
- - prednisone (0.8971)
- - sarcoidosis (0.8936)
- - Sarcoidosis (0.8936)
- - 2. Sarcoidosis (0.8899)
- - Diltiazem (0.8873)
- - tachycardia (0.8867)
- - a bowel movement (0.8827)
- - simvastatin (0.8817)
- - 6. Obstructive sleep apnea (0.8799)
- - fluoxetine (0.8784)
- - bowel/bladder dysfunction (0.8777)
- - 5. Hyperlipidemia (0.8774)
- - epidural hematoma (0.8771)
- - epidural hematoma (0.8771)
- - Hyperlipidemia (0.8771)
- - endocrinology (0.8766)
- - TLSO brace (0.8765)
- - Obstructive sleep apnea (0.8765)
- - compression fractures (0.8732)
- - Thoracic spine compression fractures (0.8717)
- - moderate cord compression (0.8691)
- - previous ITP status (0.8666)
- - calcium supplementation (0.8660)
- - 4. Cardiology follow-up (0.8633)
- - Neurological examination (0.8586)
+ - Urinalysis (0.9115)
+ - glucosuria (0.9112)
+ - cephalexin (0.9107)
+ - acetaminophen (0.9057)
+ - docusate sodium (0.9045)
+ - a urinary tract infection (0.9042)
+ - hematuria (0.9012)
+ - aspirin (0.9008)
+ - distal left ureteral stones (0.9006)
+ - tamsulosin (0.8972)
+ - urinary tract infection (0.8971)
+ - fluid rehydration (0.8969)
+ - urinary symptoms (0.8968)
+ - left ureteral stones (0.8914)
+ - ureteral stent placement (0.8903)
+ - obstructing left ureteral stones (0.8898)
+ - Escherichia coli (0.8895)
+ - Escherichia coli (0.8895)
+ - sodium bicarbonate (0.8882)
+ - cystoscopy (0.8858)
+ - oxycodone (0.8841)
+ - diabetic (0.8826)
+ - intravenous hydration (0.8824)
+ - sitagliptin (0.8820)
+ - elevated creatinine levels (0.8819)
+ - nephrolithiasis (0.8810)
+ - nephrolithiasis (0.8810)
+ - amlodipine (0.8801)
+ - obstruction (0.8796)
+ - glipizide (0.8789)

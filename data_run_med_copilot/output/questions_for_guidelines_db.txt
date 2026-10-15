@@ -1,8 +1,8 @@
 {
 "Key Questions": [
-    "What diagnostic criteria or imaging studies could help distinguish between potential causes of the patient's blurred vision and confusion, such as diabetic retinopathy related to his metformin use or possible neurological conditions like dementia or stroke?",
-    "Given the patient's symptoms of tingling in the hands and feet, what specific laboratory tests (such as vitamin B12 levels, glucose levels, or thyroid function tests) should be conducted to rule out metabolic or neuropathic causes?",
-    "Considering the patient's decreased judgment and communication skills, what non-pharmacological interventions (like cognitive therapy or social engagement strategies) could be implemented to address his confusion and enhance his cognitive function while determining the underlying cause?",
-    "In light of the patient's existing medications and his confusion, are there any adjustments or alternative medications you would recommend to better manage his symptoms, particularly concerning potential drug interactions or side effects from his current regimen?"
+    "What specific diagnostic criteria should be used to evaluate the patient's historical gingival disease and assess if current treatment is necessary for potential active gingivitis or periodontal disease?",
+    "Considering the patient's history of acute infective cystitis, what investigations are recommended to determine if there are any recurrent infections or underlying causes that need to be addressed?",
+    "What management strategies or pharmacological treatments are advisable to alleviate any potential symptoms related to the patient's longstanding issues with dental health, specifically focusing on gingival disease and loose dental fillings?",
+    "Given the absence of current complaints and a detailed psychosocial history indicating periods of stress and social isolation, what appropriate screenings or assessments should be performed to evaluate the patient's mental health status and overall well-being?"
     ]
 }
