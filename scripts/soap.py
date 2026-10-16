@@ -15,6 +15,7 @@ Usage:
   python3 soap.py check [--dir soap]    # verify outputs against inputs -> <dir>/check_report.md
 
   --split corpus|dev|test [...]         # any command: limit to those splits, e.g. --split dev test (default: all)
+  --data DIR                            # any command: release folder to read/write (default: data/release-v2)
 
 Unattended: runs N calls at once, skips records already done, and on a usage
 limit pauses all workers, waits, and continues by itself. Ctrl-C stops cleanly
@@ -25,7 +26,8 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.join(REPO_ROOT, "data", "release-v2")  # inputs + outputs; override with --data
 MODEL = "claude-sonnet-4-6"  # pinned per SOAP_CONVERSION.md
 EFFORT = "low"
 SPLITS = ["dev", "test", "corpus"]  # dev/test first: needed soonest
@@ -634,7 +636,9 @@ if __name__ == "__main__":
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--dir", default="soap", help="output folder for status/check")
     ap.add_argument("--split", nargs="+", choices=SPLITS, help="limit to these splits (default: all)")
+    ap.add_argument("--data", default=ROOT, help="release folder with <split>.jsonl, prompts/, index.csv (default: data/release-v2)")
     a = ap.parse_args()
+    ROOT = os.path.abspath(a.data)
     splits = [s for s in SPLITS if s in a.split] if a.split else SPLITS
     if a.cmd == "pilot":
         sys.exit(run(os.path.join(ROOT, "soap_pilot"), pilot_sample(splits), a.workers))
