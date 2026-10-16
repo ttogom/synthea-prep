@@ -1,0 +1,132 @@
+
+You are a clinical expert.
+You will be given a patient's conditions in SOAP format (Subjective and Objective only).
+Your task is to generate the patient's **Assessment (A), including the most likely diagnosis, and Plan (P)**, using the Subjective and Objective as context.
+
+Follow the style of the example below:
+
+Result 1
+Subjective:
+The patient is a diabetic male presenting with nephrolithiasis and acute kidney injury. He reports experiencing vomiting and left flank pain for ___ days. There is no fever reported, and his urine analysis shows unremarkable results. He has been advised about the possibility of ongoing blood in urine and other urinary symptoms due to stent placement.
+Objective:
+Physical examination shows a well-nourished, well-developed male in no acute distress. Abdomen is soft, non-tender, non-distended. Lower extremities have no edema or calf pain. Laboratory results show elevated creatinine levels of 1.4 on arrival and 1.5 after fluid rehydration. Urinalysis reveals hematuria (small), glucosuria (1000), and a final urine culture identifies Escherichia coli with a count of 10,000-100,000 CFU/mL. Imaging via CT scan revealed proximal and distal left ureteral stones.
+Assessment:
+The patient has nephrolithiasis with obstructing left ureteral stones leading to acute kidney injury. He also has a urinary tract infection due to Escherichia coli. There is a need for intervention given the elevated creatinine and associated symptoms.
+Plan:
+The patient underwent cystoscopy and left ureteral stent placement to decompress the obstruction. He will continue intravenous hydration and receive prophylactic antibiotics postoperatively. Discharge medications include acetaminophen, cephalexin, docusate sodium, oxycodone, pravastatin, sodium bicarbonate, tamsulosin, amlodipine, aspirin, glipizide, and sitagliptin. Follow-up laboratory work is scheduled through the PCP in ___ days to monitor kidney function. The patient must follow up for stent removal/exchange and other definitive stone management as directed.
+Rerank score: -7.8975
+
+Dominant medical concepts (contribution >= 0.85):
+ - Urinalysis (0.9115)
+ - glucosuria (0.9112)
+ - cephalexin (0.9107)
+ - acetaminophen (0.9057)
+ - docusate sodium (0.9045)
+ - a urinary tract infection (0.9042)
+ - hematuria (0.9012)
+ - aspirin (0.9008)
+ - distal left ureteral stones (0.9006)
+ - tamsulosin (0.8972)
+ - urinary tract infection (0.8971)
+ - fluid rehydration (0.8969)
+ - urinary symptoms (0.8968)
+ - left ureteral stones (0.8914)
+ - ureteral stent placement (0.8903)
+ - obstructing left ureteral stones (0.8898)
+ - Escherichia coli (0.8895)
+ - Escherichia coli (0.8895)
+ - sodium bicarbonate (0.8882)
+ - cystoscopy (0.8858)
+ - oxycodone (0.8841)
+ - diabetic (0.8826)
+ - intravenous hydration (0.8824)
+ - sitagliptin (0.8820)
+ - elevated creatinine levels (0.8819)
+ - nephrolithiasis (0.8810)
+ - nephrolithiasis (0.8810)
+ - amlodipine (0.8801)
+ - obstruction (0.8796)
+ - glipizide (0.8789)
+
+If no reference patient is available, generate both Assessment and Plan from the patient's Subjective and Objective and any relevant additional information.
+
+Now, here is the patient's conditions:
+Subjective: Adalberto916 is a 52-year-old non-Hispanic White male at the latest documented encounter on 2023-08-20. The longitudinal record spans 1988-09-11 through 2023-08-20. No complaints are recorded at the latest encounter or elsewhere in the record. The documented longitudinal medical history includes gingival disease, viral sinusitis, acute bronchitis, lost dental fillings, acute infective cystitis, gingivitis, and loose dental fillings. These historical entries do not establish that every condition is currently active. Symptom onset, duration, severity, aggravating or relieving factors, and a detailed review of systems are not provided. Longitudinal psychosocial history records periods of part-time employment, reports of violence in the environment, periods of full-time employment, stress, and social isolation. The history lists multiple employment states; current employment status is not clearly established. Latest social history: Patient is married. Patient has never smoked. Patient identifies as heterosexual. Patient comes from a high socioeconomic background. Patient has completed some college courses. Patient currently has Blue Cross Blue Shield. The latest medication list contains acetaminophen 325 mg oral tablet; amoxicillin 250 mg / clavulanate 125 mg oral tablet; ciprofloxacin 500 mg oral tablet; sodium fluoride 0.0272 mg/mg oral gel. Dosing frequency, actual current use, adherence, treatment response, and adverse effects are not documented. No known allergies are recorded at the latest encounter. Family history is not provided.
+Objective: The record documents completion of the following tests, screenings, or examinations, but supplies no corresponding test values, descriptive findings, or screening scores.
+
+Dental plain x-ray bitewing: Performed on 2017-08-27, 2022-08-14, 2023-07-23, and 2023-08-20. No imaging findings are reported.
+
+Examination of gingivae: Performed on 2017-08-27, 2019-09-01, 2022-08-14, 2023-07-23, and 2023-08-20. No examination findings are reported.
+
+Basic metabolic panel (blood): Completed on 2015-08-09, 2017-08-13, 2019-08-18, 2021-07-25, 2022-02-13, 2022-07-31, 2023-07-09, and 2023-08-06. No component values or findings are reported.
+
+PHQ-2: Completed on 2015-08-09, 2017-08-13, 2019-08-18, 2022-02-13, 2022-07-31, 2023-07-09, and 2023-08-06. No responses, scores, classifications, or screening results are reported.
+
+AUDIT-C: Completed on 2019-08-18 and 2023-08-06. No responses, scores, classifications, or screening results are reported.
+
+CBC panel (automated blood count): Completed on 2017-08-13 and 2023-07-09. No component values or findings are reported.
+
+GAD-7: Completed on 2015-08-09, 2022-07-31, and 2023-07-09. No responses, scores, classifications, or screening results are reported.
+
+HARK questionnaire: Completed on 2022-07-31. No responses, scores, classifications, or screening results are reported.
+
+DAST-10: Completed on 2022-02-13 and 2022-07-31. No responses, scores, classifications, or screening results are reported.
+
+Plain x-ray of chest: Performed on 2022-02-05. No imaging findings are reported.
+
+Colonoscopy: Performed on 2021-08-01. No test results or procedure findings are reported.
+
+Lipid panel with direct LDL: Completed on 2017-08-13 and 2021-07-25. No component values or findings are reported.
+
+Urine dipstick panel: Completed on 2020-03-30. No component values or findings are reported.
+
+History and physical examination, limited: Performed on 2020-03-30. No examination findings are reported.
+
+Urinalysis with reflex to microscopy and culture: Performed on 2020-03-30. No urinalysis, microscopy, or culture results are reported; whether reflex microscopy or culture was actually performed is not specified.
+
+No vital-sign measurements are provided.
+
+No detailed physical examination findings are provided.
+
+Additional Information that may help you make a decision if relevant:
+### Diagnostic Criteria for Gingival Disease
+- **Historical Evaluation**:
+  - Review past dental records for documented instances of gingivitis or periodontal disease.
+  - Assess for symptoms such as bleeding gums, swelling, and pocket depth measurements during dental examinations.
+- **Current Assessment**:
+  - Use clinical indices such as the Gingival Index (GI) and Periodontal Index (PI) to evaluate the severity of gingival inflammation.
+  - Measure probing depth and attachment loss to determine the extent of periodontal disease.
+  - Radiographic evaluation may be necessary to assess bone loss associated with periodontal disease.
+
+### Investigations for Recurrent Cystitis
+- **Urinalysis and Culture**:
+  - Perform a urinalysis to check for leukocytes, nitrites, and blood.
+  - Urine culture to identify specific pathogens and their antibiotic sensitivities.
+- **Imaging Studies**:
+  - Consider renal ultrasound or CT scan to rule out anatomical abnormalities or obstructions.
+- **Further Testing**:
+  - Evaluate for underlying conditions such as diabetes or urinary tract abnormalities that may predispose to recurrent infections.
+
+### Management Strategies for Dental Health Issues
+- **Gingival Disease**:
+  - Recommend improved oral hygiene practices, including regular brushing and flossing.
+  - Professional dental cleanings to remove plaque and tartar buildup.
+  - Consider antimicrobial mouth rinses or topical treatments for localized inflammation.
+- **Loose Dental Fillings**:
+  - Assess the condition of existing fillings; if loose, they may need to be replaced or repaired.
+  - Discuss the potential need for restorative treatments to address any decay or structural issues in the teeth.
+
+### Mental Health Screenings and Assessments
+- **Screening Tools**:
+  - Utilize standardized questionnaires such as the Patient Health Questionnaire (PHQ-9) for depression and the Generalized Anxiety Disorder 7-item scale (GAD-7) for anxiety.
+- **Comprehensive Assessment**:
+  - Conduct a thorough psychosocial evaluation to identify stressors, coping mechanisms, and support systems.
+  - Consider referrals to mental health professionals if significant concerns are identified during screenings.
+- **Follow-Up**:
+  - Regular follow-up assessments to monitor mental health status and adjust interventions as necessary.
+
+Make the Plan consistent with the Assessment, covering appropriate investigations, treatment, and follow-up.
+
+Generate both sections **using Markdown formatting**, with the headings **## Assessment** and **## Plan**.
+Use numbered lists and bullet points for clarity.
+Do NOT output JSON. Only output Markdown text.
