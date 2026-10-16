@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Convert patient records to SOAP JSON using `claude -p` on a Claude subscription.
 
-  corpus -> subjective, objective, assessment, plan   (prompts/corpus.txt)
-  dev/test -> subjective, objective only              (prompts/dev_test.txt)
+  corpus -> subjective, objective, assessment, plan   (CORPUS_PROMPT)
+  dev/test -> subjective, objective only              (DEV_TEST_PROMPT)
 
-Prompts are SOAP_CONVERSION.md verbatim; the record replaces {text} and the
+Prompts are hard-coded below, SOAP_CONVERSION.md verbatim; the record replaces {text} and the
 whole prompt is sent as the user message (empty system prompt).
 
 Usage:
@@ -33,7 +33,45 @@ EFFORT = "low"
 SPLITS = ["dev", "test", "corpus"]  # dev/test first: needed soonest
 KEYS = {"corpus": ["subjective", "objective", "assessment", "plan"],
         "dev": ["subjective", "objective"], "test": ["subjective", "objective"]}
-PROMPT_FILE = {"corpus": "prompts/corpus.txt", "dev": "prompts/dev_test.txt", "test": "prompts/dev_test.txt"}
+
+CORPUS_PROMPT = """\
+Convert the following patient record into a SOAP note.
+Return a JSON object with exactly four keys:
+  "subjective"  — what the patient reports: chief complaints, symptoms,
+                  and relevant history as stated in the record
+  "objective"   — measurable or observed findings: vital signs, lab values,
+                  exam findings, and relevant past diagnoses
+  "assessment"  — the diagnosis, copied verbatim from the DIAGNOSIS section
+  "plan"        — the treatment, as a list of items from the TREATMENT section
+
+Rules:
+  - Restate only what the record says. Do not infer, expand, or add information.
+  - Do not mention the patient's name or any identifying detail.
+  - Output valid JSON only, no prose outside the JSON object.
+
+RECORD:
+{text}
+"""
+
+DEV_TEST_PROMPT = """\
+Convert the following patient record into a partial SOAP note.
+Return a JSON object with exactly two keys:
+  "subjective"  — what the patient reports: chief complaints, symptoms,
+                  and relevant history as stated in the record
+  "objective"   — measurable or observed findings: vital signs, lab values,
+                  exam findings, and relevant past diagnoses
+
+Rules:
+  - Restate only what the record says. Do not infer, expand, or add information.
+  - Do NOT name, suggest, hint at, or rank any diagnosis in either field.
+  - Do not mention the patient's name or any identifying detail.
+  - Output valid JSON only, no prose outside the JSON object.
+
+RECORD:
+{text}
+"""
+
+PROMPTS = {"corpus": CORPUS_PROMPT, "dev": DEV_TEST_PROMPT, "test": DEV_TEST_PROMPT}
 
 MAX_FORMAT_RETRIES = 2       # extra attempts after a bad reply or unrecognised CLI error
 MAX_UNCOUNTED_RETRIES = 10   # per record: retries after transient / circuit-breaker pauses
@@ -63,8 +101,7 @@ def out_path(out_dir, split):
 
 
 def read_prompt(split):
-    with open(os.path.join(ROOT, PROMPT_FILE[split])) as f:
-        return f.read()
+    return PROMPTS[split]
 
 
 def parse_reply(text, keys):
@@ -636,7 +673,7 @@ if __name__ == "__main__":
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--dir", default="soap", help="output folder for status/check")
     ap.add_argument("--split", nargs="+", choices=SPLITS, help="limit to these splits (default: all)")
-    ap.add_argument("--data", default=ROOT, help="release folder with <split>.jsonl, prompts/, index.csv (default: data/release-v2)")
+    ap.add_argument("--data", default=ROOT, help="release folder with <split>.jsonl, index.csv (default: data/release-v2)")
     a = ap.parse_args()
     ROOT = os.path.abspath(a.data)
     splits = [s for s in SPLITS if s in a.split] if a.split else SPLITS

@@ -15,3 +15,5 @@ memory/
 
 # ignore PDFs
 *.pdf
+
+__pycache__/
