@@ -108,6 +108,9 @@ COND_RANK = {c["name"]: i for i, c in enumerate(
 
 SPLIT_SEED    = 42
 MIN_PRIOR_ENC = 5
+# Count times back from each patient's most recent record, not the diagnosis:
+# removes the "last visit was N days before diagnosis" shortcut (SERIALIZATION.md).
+TIME_FROM     = "last-record"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -280,6 +283,7 @@ def serialize_condition(c, tmp_dir):
         "--out", str(out),
         "--presenting", str(presenting_path(c)),
         "--min-encounters", str(MIN_PRIOR_ENC),
+        "--time-from", TIME_FROM,
     ]
     if c["drop"] and c["drop"].exists():
         cmd += ["--drop", str(c["drop"])]
@@ -661,12 +665,13 @@ def write_manifest(out_dir, index_rows, split_map, counts, leak_summary,
             cond_inelig[r["condition"]] += 1
 
     manifest = {
-        "release": "v1",
+        "release": out_dir.name.replace("release-", ""),
         "source_run": SRC_RUN,
         "source_commit": _git_commit(),
         "split_seed": seed,
         "min_prior_encounters": MIN_PRIOR_ENC,
         "lauren_serialization_fixes_included": lauren_merged,
+        "time_from": TIME_FROM,
         "total_examples": total,
         "eligible_examples": eligible,
         "ineligible_examples": inelig,
@@ -693,8 +698,8 @@ def _git_commit():
 
 
 def zip_release(out_dir):
-    """Zip data/release-v1/ excluding any __scrub- or __train- subdirectories."""
-    zip_path = out_dir.parent / "release-v1.zip"
+    """Zip the release folder (e.g. data/release-v2/ -> data/release-v2.zip)."""
+    zip_path = out_dir.parent / f"{out_dir.name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(out_dir.rglob("*")):
             if path.is_file():
@@ -753,7 +758,7 @@ def main():
 
     # Check Lauren's branch
     lauren_merged = _check_lauren()
-    print(f"\n  Lauren's serialization-update: {'MERGED into main' if lauren_merged else 'NOT merged (building from main)'}")
+    print(f"\n  Lauren's serialization-update fixes: {'included' if lauren_merged else 'NOT included (building from main)'}")
 
     print("\n[1] Building index ...")
     all_labels      = load_labels()
@@ -812,7 +817,10 @@ def main():
 
 
 def _check_lauren():
-    """Return True if serialization-update has been merged into origin/main."""
+    """Return True if Lauren's serialization-update changes are in the checked-out code
+    (merged into origin/main, or building from that branch: serialize.py has --time-from)."""
+    if '"--time-from"' in (REPO_ROOT / "serialization" / "serialize.py").read_text():
+        return True
     try:
         r = subprocess.run(
             ["git", "branch", "-r", "--merged", "origin/main"],

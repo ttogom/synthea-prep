@@ -47,11 +47,20 @@ neither symptoms nor whitelisted vitals are written without the section. The fla
 intentionally separate from the core pipeline so that history and presentation can be
 ablated independently.
 
-**Note for serialization-update branch:** the `data/presenting/*.json` files were
-regenerated in the `dataset-splits` branch (fix: vitals now restricted to readings
-dated on the diagnosis day; 14 patients affected, balanced accuracy unchanged at
-79.5%). Rebase or merge `dataset-splits` before re-serializing to pick up the
-corrected files.
+**No-history flag (optional).** Pass `--no-history` together with `--presenting` to
+write only the demographics line and the `PRESENTING COMPLAINT` section, for the
+"remove history" ablation in [CONDITION_SELECTION.md](CONDITION_SELECTION.md). It is
+off by default.
+
+| Variant | Options | Contains |
+|---|---|---|
+| History only | (none) | Pre-diagnosis record |
+| History + presenting | `--presenting <file>` | Pre-diagnosis record + presenting complaint |
+| Presenting only | `--presenting <file> --no-history` | Demographics + presenting complaint |
+
+`.stats.json` records `presenting` and `no_history`, and `test_serialization.py`
+re-runs with the same options. Tests 3 and 4 compare the text with the history, so
+they are skipped for `--no-history` files.
 
 To check the output:
 
@@ -284,10 +293,99 @@ comparison.
 Test 4 found a bug, now fixed: same-day readings were ordered by value
 instead of time.
 
-## 5. Results (2026-09-29)
+## 5. Results
 
-Data: pop1000 and pop10000, regenerated with the UTC fix. The 10k run matches
-CHF_FINDINGS.md (11,504 patients, 313 heart failure).
+### The seven target conditions (pop10000, 2026-10-06)
+
+Each condition was serialized in all three variants with default compression
+and the drop lists in `configs/drop/`. All 21 files pass the text leak check
+and every applicable test (7/7, or 5/5 for presenting-only).
+
+| Condition | Bin | Patients | With presenting (symptoms / vitals) | Median tokens: history / + presenting / presenting only |
+|---|---|---|---|---|
+| COPD | history | 384 | 144 (141 / 139) | 289 / 289 / 14 |
+| Hypertension | history | 2,650 | 757 (0 / 757) | 271 / 274 / 14 |
+| Strep throat | acute | 1,498 | 1,492 (1,485 / 1,492) | 1,463 / 1,559 / 108 |
+| Viral pharyngitis | acute | 5,108 | 5,089 (5,076 / 5,088) | 1,625 / 1,721 / 110 |
+| Bacterial sinusitis | acute | 656 | 600 (600 / 0) | 1,603 / 1,675 / 86 |
+| Cystitis | acute | 1,160 | 912 (856 / 277) | 1,712 / 1,752 / 56 |
+| Heart failure | control | 313 | 311 (311 / 0) | 2,430 / 2,492 / 76 |
+
+Notes:
+- **No vitals for heart failure or bacterial sinusitis.** Their diagnosing
+  visits have no whitelisted vital signs, so their presenting section is
+  symptoms only.
+- **Presenting-only records for COPD and hypertension are mostly demographics.**
+  62% of COPD and 71% of hypertension patients have no presenting evidence
+  (diagnosed before the 10-year export window; see CONDITION_SELECTION.md).
+- **"Sore throat" is flagged for review in strep throat** (1,486 patients with
+  presenting). It is a presenting symptom, not the diagnosis: it also appears in
+  the presenting section of 5,076 viral pharyngitis and 600 bacterial sinusitis
+  patients. Kept.
+- **Heart failure's review list** no longer includes dyspnea, orthopnea and
+  edema. They are its presenting symptoms, included on purpose.
+- **Repeated vitals in 3 records** (2 cystitis, 1 viral pharyngitis): the vitals
+  line lists every reading at the diagnosing visit, so a long inpatient stay
+  gives a long line (up to ~800 tokens).
+
+### Text probe (pop10000, 2026-10-07)
+
+`serialization/probe_text.py` trains a bag-of-words classifier (TF-IDF +
+logistic regression, balanced, 5-fold CV grouped by patient) on the serialized
+text to predict which of the 7 conditions a record belongs to. A second
+"shape-only" probe sees only text length and which sections are present.
+3,052 of 8,075 patients are positives for 2+ conditions, so folds are grouped
+by patient.
+
+```bash
+python3 serialization/probe_text.py data/serialized/seven
+```
+
+| Variant | Text probe | Shape-only probe |
+|---|---|---|
+| History only | 49.4% | 33.8% |
+| History + presenting | 82.1% | 36.4% |
+| Presenting only | 75.5% | 71.4% |
+
+Balanced accuracy; chance is 14.3%, Randy's symptoms + vitals classifier 79.5%.
+
+- **History + presenting:** a bag-of-words model on the final text already
+  reaches 82.1%, so this is the bar an LLM must beat on that variant. Top
+  features are presenting symptoms.
+- **History only:** above the shape probe, with real antecedents among the
+  top features (COPD: cough, ex-smoker; strep: prior viral pharyngitis). But
+  for several conditions the top features are relative-time words ("days ago",
+  "years ago"), which reflect Synthea's visit timing, not clinical signal.
+- **Presenting only:** shape alone reaches 71.4%. Each condition has a fixed
+  symptom set, and some have no vitals (CHF, sinusitis) or no symptoms
+  (hypertension), so the number of lines nearly identifies the condition.
+- **Hardest pair:** strep throat (57% recall with presenting) vs viral
+  pharyngitis, which share most symptoms.
+
+### Time anchoring (`--time-from last-record`, 2026-10-13)
+
+By default, times count back from the diagnosis ("3 years ago"). The text probe
+found that this leaks Synthea's visit timing: many acute-condition patients
+had a routine check-up a few days before diagnosis, so "N days ago" pointed to
+the condition. With `--time-from last-record`, times count back from the
+patient's most recent record ("3 years earlier"), and a line in PATIENT says
+so. The gap between the last record and the diagnosis is no longer visible.
+`build_release.py` uses this option.
+
+| History only (7 conditions, 10k) | Text probe | Shape-only probe |
+|---|---|---|
+| Times from the diagnosis | 49.4% | 33.8% |
+| Times from the most recent record | 45.6% | 33.6% |
+
+The direct shortcut is gone and real antecedents remain top features (COPD:
+smoker; hypertension: type 2 diabetes). Some timing signal remains from the
+spacing between visits inside the history (e.g. "days earlier"); removing it
+would mean dropping all timing.
+
+### Earlier test runs (2026-09-29)
+
+Before the seven conditions were fixed, the pipeline was tested on other
+conditions to check it works for any of them (history only, no presenting).
 
 | Condition | Patients | Typical length (tokens) | Leak check | Tests |
 |---|---|---|---|---|

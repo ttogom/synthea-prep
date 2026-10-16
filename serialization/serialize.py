@@ -25,7 +25,8 @@ Compression (all configurable, see --help):
   * --no-compress disables the window and caps, for comparison.
 
 Dates are written relative to the cutoff ("3 years ago"), so the text never
-states the diagnosis date.
+states the diagnosis date. With --time-from last-record they are relative to
+the patient's most recent record instead ("3 years earlier").
 
 Usage:
     python3 serialization/serialize.py <train-dir> <labels.json> --out <file.jsonl>
@@ -70,16 +71,31 @@ def parse_date(value):
     return date.fromisoformat(value[:10]) if value else None
 
 
-def ago(d, cutoff):
-    """Human-readable time before the cutoff, e.g. '3 years ago'."""
-    days = (cutoff - d).days
+# "ago" when times count back from the cutoff, "earlier" when they count back
+# from the patient's most recent record (--time-from last-record).
+TIME_WORD = "ago"
+
+
+def ago(d, ref):
+    """Human-readable time before ref, e.g. '3 years ago' or '3 years earlier'."""
+    days = (ref - d).days
     if days < 31:
-        return f"{days} day{'s' if days != 1 else ''} ago"
+        return f"{days} day{'s' if days != 1 else ''} {TIME_WORD}"
     if days < 365:
         months = days // 30
-        return f"{months} month{'s' if months != 1 else ''} ago"
+        return f"{months} month{'s' if months != 1 else ''} {TIME_WORD}"
     years = days // 365
-    return f"{years} year{'s' if years != 1 else ''} ago"
+    return f"{years} year{'s' if years != 1 else ''} {TIME_WORD}"
+
+
+def latest_record(pid, data):
+    """Date of the patient's most recent dated entry before the cutoff."""
+    dates = []
+    for name, col in (("encounters", "START"), ("conditions", "START"), ("medications", "START"),
+                      ("observations", "DATE"), ("procedures", "START"), ("immunizations", "DATE"),
+                      ("careplans", "START"), ("allergies", "START"), ("devices", "START")):
+        dates += [parse_date(r[col]) for r in data[name][pid] if r[col]]
+    return max(dates) if dates else None
 
 
 def age_on(birth, on):
@@ -272,9 +288,18 @@ def serialize_patient(pid, label, data, args):
     window = (f"{args.window_years} years up to the last visit" if args.window_from == "last-visit"
               else f"last {args.window_years} years") if args.window_years else "full history"
 
-    active, past, findings = conditions(data["conditions"][pid], cutoff)
-    current_meds, past_meds = medications(data["medications"][pid], cutoff)
-    measures, social = observations(data["observations"][pid], cutoff, since, args.max_values)
+    # Reference date for "N years ago". With --time-from last-record, times count
+    # back from the most recent record, so the text no longer shows how long
+    # before the diagnosis the last visit was (a Synthea scheduling shortcut).
+    ref = cutoff
+    time_note = []
+    if args.time_from == "last-record":
+        ref = latest_record(pid, data) or cutoff
+        time_note = ["Times are counted back from this patient's most recent record"]
+
+    active, past, findings = conditions(data["conditions"][pid], ref)
+    current_meds, past_meds = medications(data["medications"][pid], ref)
+    measures, social = observations(data["observations"][pid], ref, since, args.max_values)
     allergies = [r["DESCRIPTION"] + (f" (reaction: {r['DESCRIPTION1']})" if r["DESCRIPTION1"] else "")
                  for r in data["allergies"][pid] if not r["STOP"]]
     careplans = [r["DESCRIPTION"] + (f" (for {r['REASONDESCRIPTION']})" if r["REASONDESCRIPTION"] else "")
@@ -293,8 +318,17 @@ def serialize_patient(pid, label, data, args):
             )
             presenting_lines.append(f"Vital signs at this visit: {vital_str}")
 
+    if args.no_history:
+        # "Remove history" ablation (CONDITION_SELECTION.md): demographics and
+        # the presenting complaint only, nothing from earlier visits.
+        parts = [
+            section("PATIENT", [demographics(data["patients"][pid], cutoff)]),
+            section("PRESENTING COMPLAINT", presenting_lines),
+        ]
+        return "\n\n".join(p for p in parts if p)
+
     parts = [
-        section("PATIENT", [demographics(data["patients"][pid], cutoff)] + social),
+        section("PATIENT", [demographics(data["patients"][pid], cutoff)] + time_note + social),
         section("PRESENTING COMPLAINT", presenting_lines),
         section("ACTIVE PROBLEMS", active),
         section("PAST PROBLEMS", past),
@@ -306,10 +340,10 @@ def serialize_patient(pid, label, data, args):
         section("DEVICES IN USE", devices),
         section(f"VITALS AND LABS ({window}, latest first)", measures),
         section(f"PROCEDURES ({window})",
-                counted(data["procedures"][pid], "START", cutoff, since)),
-        section("IMMUNIZATIONS", counted(data["immunizations"][pid], "DATE", cutoff)),
+                counted(data["procedures"][pid], "START", ref, since)),
+        section("IMMUNIZATIONS", counted(data["immunizations"][pid], "DATE", ref)),
         section(f"RECENT VISITS ({window}, newest first)",
-                encounters(data["encounters"][pid], cutoff, since, args.max_encounters)),
+                encounters(data["encounters"][pid], ref, since, args.max_encounters)),
     ]
     return "\n\n".join(p for p in parts if p)
 
@@ -339,7 +373,19 @@ def main():
     ap.add_argument("--presenting", type=Path, default=None,
                     help="presenting.json from extract_presenting.py; adds a PRESENTING COMPLAINT "
                          "section to each record that has an episode")
+    ap.add_argument("--time-from", choices=("cutoff", "last-record"), default="cutoff",
+                    help="count times back from the diagnosis ('3 years ago', default) or from the "
+                         "patient's most recent record ('3 years earlier')")
+    ap.add_argument("--no-history", action="store_true",
+                    help="'remove history' ablation: write only demographics and the presenting "
+                         "complaint (use with --presenting)")
     args = ap.parse_args()
+    global TIME_WORD
+    TIME_WORD = "earlier" if args.time_from == "last-record" else "ago"
+    if args.presenting and not args.presenting.exists():
+        sys.exit(f"ERROR: --presenting file not found: {args.presenting}")
+    if args.no_history and not args.presenting:
+        print("WARNING: --no-history without --presenting writes demographics only", file=sys.stderr)
     if args.no_compress:
         args.window_years = args.max_values = args.max_encounters = 0
 
@@ -358,7 +404,7 @@ def main():
     data["patients"] = {r["Id"]: r for r in csv.DictReader(open(csv_dir / "patients.csv", encoding="utf-8"))
                         if r["Id"] in patients}
     data["presenting"] = {}
-    if args.presenting and args.presenting.exists():
+    if args.presenting:
         raw = json.loads(args.presenting.read_text())
         data["presenting"] = raw.get("presenting", {})
 
@@ -395,8 +441,10 @@ def main():
         "patients_skipped_min_encounters": skipped,
         "settings": {k: getattr(args, k) for k in (
             "window_years", "window_from", "max_values", "max_encounters",
-            "min_encounters", "no_compress")} | {"drop": str(args.drop) if args.drop else None,
-                                                 "drop_terms": drop},
+            "min_encounters", "no_compress", "no_history", "time_from")} | {
+            "drop": str(args.drop) if args.drop else None,
+            "drop_terms": drop,
+            "presenting": str(args.presenting) if args.presenting else None},
         "est_tokens": {
             "min": min(lengths),
             "median": round(statistics.median(lengths)),

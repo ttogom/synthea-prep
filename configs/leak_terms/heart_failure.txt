@@ -7,9 +7,9 @@ ntprobnp
 ejection fraction
 lvef
 nyha                 # NYHA heart-failure class
-orthopnea            # CHF presenting symptoms, scrubbed with the diagnosis
-dyspnea
-edema
+# Not listed: dyspnea, orthopnea, edema. They are heart failure's presenting
+# symptoms, which the --presenting section includes on purpose
+# (CONDITION_SELECTION.md), so they would flag every record.
 furosemide           # loop diuretics / HF-specific drugs
 sacubitril
 spironolactone
