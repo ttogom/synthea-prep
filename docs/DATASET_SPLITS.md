@@ -105,6 +105,58 @@ The same command on the same commit produces byte-identical output.
 
 ---
 
+## "None of the above" (NOTA) examples — release-v2.1
+
+Five additional files in `data/release-v2.1/` extend the dataset with negative
+examples for the "none of the above" class:
+
+| File | Purpose | Format |
+|------|---------|--------|
+| `test_nota.jsonl` | NOTA test records — text only | `{"id", "text"}` |
+| `dev_nota.jsonl` | NOTA dev records | `{"id", "text"}` |
+| `corpus_nota.jsonl` | NOTA corpus records — text + DIAGNOSIS + TREATMENT | `{"id", "text"}` |
+| `test_nota_labels.jsonl` | NOTA test answers | `{"id", "condition", "bin", "has_presenting_evidence", "plan", "source_condition"}` |
+| `dev_nota_labels.jsonl` | NOTA dev answers | `{"id", "condition", "bin", "has_presenting_evidence", "plan", "source_condition"}` |
+
+**Source conditions** (3 non-target acute conditions):
+
+| Condition | SNOMED | test | dev | corpus | presenting |
+|-----------|--------|------|-----|--------|------------|
+| acute_bronchitis | 10509002 | 200 | 83 | 842 | 100% |
+| viral_sinusitis  | 444814009 | 200 | 83 | 1326 | 99% |
+| otitis_media     | 65363002  | 200 | 83 | 164 | 0% |
+| **Total**        | | **600** | **249** | **2332** | |
+
+`condition` is always `"none_of_the_above"`. `bin` is always `"none"`.
+`source_condition` is in the labels file only — never in the record text.
+
+**ID format**: `nota_{source_condition}_{patient_id}`.
+The source condition name is embedded in the ID. Evaluation code that reads
+IDs directly would leak the source condition; use only the `text` field for
+inference and the `condition` field from labels for evaluation.
+
+**Split assignment**: existing v2 patients keep their split (test→test,
+dev→dev, corpus→corpus_nota). New patients are assigned to test or dev at a
+50:20 ratio (seed 42); none go to corpus. The existing splits are unchanged —
+`test.jsonl` and `test_nota.jsonl` are separate files; combine them for the
+full evaluation set.
+
+**Known NOTA-specific limitations**:
+- **Otitis media has no Synthea symptom module**: 0% of otitis_media records
+  have a PRESENTING COMPLAINT section. All 447 test+dev otitis_media records
+  rely on history alone.
+- **Source condition name appears in historical visit text** (~1.5% of
+  acute_bronchitis records, ~0.7% of viral_sinusitis records): Synthea
+  sometimes records a prior encounter for the same condition before the formal
+  diagnosis date (e.g., a pre-diagnosis urgentcare visit coded with
+  `REASONCODE=10509002`). The condition name then appears in the RECENT VISITS
+  section. Otitis_media is clean (0% leaks).
+- **NOTA TREATMENT empty in ~61% of test/dev records**: acute bronchitis and
+  viral sinusitis have few REASONCODE-matched prescriptions; otitis_media has
+  no Synthea prescription module.
+
+---
+
 ## Known limitations
 
 - **Chief complaints removed**: the CHIEF COMPLAINTS history section was dropped
