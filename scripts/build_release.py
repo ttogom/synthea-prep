@@ -309,47 +309,43 @@ def load_jsonl(path):
 
 # ── Step 4: Build DIAGNOSIS + TREATMENT for corpus ───────────────────────────
 
-def load_treatment_data(corpus_examples):
+def collect_plan_items(examples):
     """
-    For each corpus (patient, condition) example, collects medications, procedures,
-    and care plans whose REASONCODE is one of the target condition's SNOMED codes,
-    started on or before the condition's START date in conditions.csv.
+    Collect plan items for a list of {patient_id, condition} dicts.
 
-    Using the condition START date (not the serialization cutoff) is necessary
-    because some patients have a cutoff pulled earlier by a shared encounter date
-    unrelated to the target condition (a Synthea artifact). Treatment prescribed
-    on the actual diagnosis date would otherwise be excluded.
+    For each example: medications, procedures, and care plans whose REASONCODE
+    is one of the target condition's SNOMED codes, started on or before the
+    condition's earliest START date in conditions.csv.  Uses condition START
+    rather than the serialization cutoff because some patients have their cutoff
+    pulled earlier by a shared encounter date (Synthea artifact).
 
-    corpus_examples: list of {patient_id, condition, cutoff_date}
-    Returns {(pid, cond_name): {"diagnosis": str, "treatment": [str]}}
+    Returns {(pid, cond_name): [description, ...]} — deduplicated.
+    Empty lists are returned as ["none recorded"] by callers.
     """
     cond_by_name = {c["name"]: c for c in CONDITIONS}
 
-    pid_cond_cutoff = defaultdict(dict)
-    for ex in corpus_examples:
-        pid_cond_cutoff[ex["patient_id"]][ex["condition"]] = ex["cutoff_date"]
-    all_pids = set(pid_cond_cutoff)
+    all_pids = {ex["patient_id"] for ex in examples}
+    pid_conds = defaultdict(set)
+    for ex in examples:
+        pid_conds[ex["patient_id"]].add(ex["condition"])
 
-    # Find condition START date per (pid, cond_name) from conditions.csv.
-    # Use the earliest occurrence (same as extract_labels).
-    cond_start = {}  # (pid, cond_name) -> YYYY-MM-DD
+    # Earliest condition START date per (pid, cond_name)
+    cond_start = {}
     with open(SRC_DIR / "csv" / "conditions.csv", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             pid = row["PATIENT"]
             if pid not in all_pids:
                 continue
-            code = row["CODE"]
-            start = (row.get("START", "") or "")[:10]
+            start = (row.get("START") or "")[:10]
             if not start:
                 continue
-            for cond_name in pid_cond_cutoff[pid]:
-                if code in cond_by_name[cond_name]["codes"]:
+            for cond_name in pid_conds[pid]:
+                if row["CODE"] in cond_by_name[cond_name]["codes"]:
                     key = (pid, cond_name)
                     if key not in cond_start or start < cond_start[key]:
                         cond_start[key] = start
 
-    # Collect items per (pid, cond_name) where REASONCODE is a target code,
-    # started on or before the condition START date.
+    # Items with REASONCODE = target code, started on or before cond_start
     items_by_key = defaultdict(list)
     for stem in ("medications", "procedures", "careplans"):
         path = SRC_DIR / "csv" / f"{stem}.csv"
@@ -364,8 +360,8 @@ def load_treatment_data(corpus_examples):
                 desc = row.get("DESCRIPTION", "").strip()
                 if not desc:
                     continue
-                item_start = (row.get("START", "") or "")[:10]
-                for cond_name in pid_cond_cutoff[pid]:
+                item_start = (row.get("START") or "")[:10]
+                for cond_name in pid_conds[pid]:
                     if rc not in cond_by_name[cond_name]["codes"]:
                         continue
                     cutoff = cond_start.get((pid, cond_name), "")
@@ -373,7 +369,25 @@ def load_treatment_data(corpus_examples):
                         continue
                     items_by_key[(pid, cond_name)].append(desc)
 
-    # Diagnosis descriptions
+    result = {}
+    for ex in examples:
+        pid, cond_name = ex["patient_id"], ex["condition"]
+        seen, items = set(), []
+        for desc in items_by_key.get((pid, cond_name), []):
+            if desc not in seen:
+                items.append(desc)
+                seen.add(desc)
+        result[(pid, cond_name)] = items
+    return result
+
+
+def load_treatment_data(corpus_examples):
+    """
+    For each corpus example, return {"diagnosis": str, "treatment": [str]}.
+    Wraps collect_plan_items; see that function for the REASONCODE logic.
+    """
+    items_by_key = collect_plan_items(corpus_examples)
+
     cond_descriptions = {}
     for c in CONDITIONS:
         for pid, info in json.loads(labels_path(c).read_text()).items():
@@ -381,16 +395,10 @@ def load_treatment_data(corpus_examples):
 
     result = {}
     for ex in corpus_examples:
-        pid = ex["patient_id"]
-        cond_name = ex["condition"]
-        seen, items = set(), []
-        for desc in items_by_key.get((pid, cond_name), []):
-            if desc not in seen:
-                items.append(desc)
-                seen.add(desc)
+        pid, cond_name = ex["patient_id"], ex["condition"]
         result[(pid, cond_name)] = {
             "diagnosis": cond_descriptions.get((pid, cond_name), cond_name),
-            "treatment": items,
+            "treatment": items_by_key.get((pid, cond_name), []),
         }
     return result
 
@@ -408,10 +416,13 @@ def add_corpus_sections(record, treatment_info):
 
 # ── Step 5: Build output JSONL files ─────────────────────────────────────────
 
-def build_output_files(index_rows, split_map, tmp_dir, out_dir, treatment_by_key):
+def build_output_files(index_rows, split_map, tmp_dir, out_dir, treatment_by_key,
+                       plan_by_key):
     """
     Reads per-condition JSONL from tmp_dir, routes each record to the right
     split, and writes test/dev/corpus JSONL + label files.
+
+    plan_by_key: {(pid, cond_name): [plan_items]} for test+dev examples.
 
     Returns counts dict: {split: {condition: n}}.
     """
@@ -451,11 +462,13 @@ def build_output_files(index_rows, split_map, tmp_dir, out_dir, treatment_by_key
             }
 
             if split == "test":
+                plan = plan_by_key.get((pid, c["name"]), []) or ["none recorded"]
                 test_lines.append(text_record)
-                test_label_lines.append(label_record)
+                test_label_lines.append({**label_record, "plan": plan})
             elif split == "dev":
+                plan = plan_by_key.get((pid, c["name"]), []) or ["none recorded"]
                 dev_lines.append(text_record)
-                dev_label_lines.append(label_record)
+                dev_label_lines.append({**label_record, "plan": plan})
             elif split == "corpus":
                 t_info = treatment_by_key.get((pid, c["name"]), {})
                 corpus_text = add_corpus_sections(rec, t_info)
@@ -785,14 +798,20 @@ def main():
     else:
         print("  (skipped — reusing existing _tmp/*.jsonl)")
 
-    print("\n[4] Building corpus treatment data ...")
+    print("\n[4] Building plan / treatment data ...")
     corpus_examples = [r for r in index_rows
                        if not r["ineligible"] and split_map.get(r["patient_id"]) == "corpus"]
+    test_dev_examples = [r for r in index_rows
+                         if not r["ineligible"] and split_map.get(r["patient_id"]) in ("test", "dev")]
     treatment_by_key = load_treatment_data(corpus_examples)
-    print(f"  Treatment found for {len(treatment_by_key)} corpus examples")
+    plan_by_key      = collect_plan_items(test_dev_examples)
+    n_with_plan = sum(1 for v in plan_by_key.values() if v)
+    print(f"  Corpus treatment: {len(treatment_by_key)} examples")
+    print(f"  Test/dev plans: {n_with_plan}/{len(plan_by_key)} have at least one item")
 
     print("\n[5] Writing output JSONL files ...")
-    counts = build_output_files(index_rows, split_map, tmp_dir, out_dir, treatment_by_key)
+    counts = build_output_files(index_rows, split_map, tmp_dir, out_dir,
+                                treatment_by_key, plan_by_key)
 
     print("\n[6] Running text leak checks ...")
     (out_dir / "leak_reports").mkdir(exist_ok=True)
