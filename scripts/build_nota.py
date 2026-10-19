@@ -13,7 +13,7 @@ Serializes records for three non-target conditions and writes:
 Source conditions:
   - acute_bronchitis  (SNOMED 10509002)
   - viral_sinusitis   (SNOMED 444814009) — hard case: resembles bacterial sinusitis
-  - otitis_media      (SNOMED 65363002)
+  - covid19           (SNOMED 840544004) — replaces otitis_media (0% presenting evidence)
 
 Pipeline (avoids scrub.py / extract_labels.py to skip memory-intensive full-run scrub):
   1. Compute cutoffs inline from source conditions.csv
@@ -27,7 +27,7 @@ Split assignment:
   - Existing v2 corpus patients   → corpus_nota
   - New patients (not in v2)      → test/dev only, 50:20 ratio, seed-fixed
 
-Caps: N_TEST_PER_COND=200, N_DEV_PER_COND=83.  Corpus: uncapped.
+Caps: N_TEST_PER_COND=200, N_DEV_PER_COND=83, N_CORPUS_PER_COND=133.
 
 IDs: nota_{source_condition}_{patient_id}
 NOTE: source condition name is visible in the ID — see DATASET_SPLITS.md.
@@ -58,8 +58,9 @@ TIME_FROM = "last-record"
 MIN_ENC   = 5
 SEED      = 42
 
-N_TEST_PER_COND = 200
-N_DEV_PER_COND  = 83
+N_TEST_PER_COND   = 200
+N_DEV_PER_COND    = 83
+N_CORPUS_PER_COND = 133
 
 TARGET_CODES = frozenset({
     "87433001", "185086009",  # copd
@@ -89,9 +90,9 @@ NOTA_CONDITIONS = [
         "description": "Viral sinusitis (disorder)",
     },
     {
-        "name": "otitis_media",
-        "codes": ["65363002"],
-        "description": "Otitis media (disorder)",
+        "name": "covid19",
+        "codes": ["840544004"],
+        "description": "Suspected disease caused by Severe acute respiratory coronavirus 2 (situation)",
     },
 ]
 
@@ -391,7 +392,8 @@ def assign_splits(all_serialized, cutoffs_by_cond, existing_split_map,
         cname = c["name"]
 
         corpus_pids = sorted(by_group.get((cname, "corpus"), []))
-        for pid in corpus_pids:
+        rng.shuffle(corpus_pids)
+        for pid in corpus_pids[:N_CORPUS_PER_COND]:
             result[(pid, cname)] = "corpus"
 
         existing_test = sorted(by_group.get((cname, "test"), []))
@@ -472,9 +474,14 @@ def add_corpus_sections(text, cond_description, plan_items):
 
 # ── Text scan ────────────────────────────────────────────────────────────────
 
+def leak_phrase(cond):
+    return (cond["description"].lower()
+            .replace(" (disorder)", "")
+            .replace(" (situation)", ""))
+
+
 def scan_text_for_leak(records, cond):
-    # Check for the core noun phrase (strip "(disorder)" suffix)
-    phrase = cond["description"].lower().replace(" (disorder)", "")
+    phrase = leak_phrase(cond)
     hits = []
     for rec in records:
         # For corpus, check only the part before DIAGNOSIS section
@@ -483,6 +490,10 @@ def scan_text_for_leak(records, cond):
             idx = text.index(phrase)
             hits.append((rec["id"], text[max(0, idx - 30):idx + 60]))
     return hits
+
+
+def has_leak(text, cond):
+    return leak_phrase(cond) in text.lower()
 
 
 # ── Verification ──────────────────────────────────────────────────────────────
@@ -589,6 +600,8 @@ def main():
             corpus_records.append({"id": ex_id, "text": corpus_text})
 
         elif split == "test":
+            if has_leak(raw_rec["text"], c):
+                continue  # drop: source condition name visible in pre-cutoff text
             plan = plan_map.get((pid, cname), ["none recorded"])
             test_records.append({"id": ex_id, "text": raw_rec["text"]})
             test_labels.append({
@@ -601,6 +614,8 @@ def main():
             })
 
         elif split == "dev":
+            if has_leak(raw_rec["text"], c):
+                continue  # drop: source condition name visible in pre-cutoff text
             plan = plan_map.get((pid, cname), ["none recorded"])
             dev_records.append({"id": ex_id, "text": raw_rec["text"]})
             dev_labels.append({
