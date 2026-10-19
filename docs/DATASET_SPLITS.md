@@ -122,10 +122,10 @@ examples for the "none of the above" class:
 
 | Condition | SNOMED | test | dev | corpus | presenting |
 |-----------|--------|------|-----|--------|------------|
-| acute_bronchitis | 10509002 | 200 | 83 | 842 | 100% |
-| viral_sinusitis  | 444814009 | 200 | 83 | 1326 | 99% |
-| otitis_media     | 65363002  | 200 | 83 | 164 | 0% |
-| **Total**        | | **600** | **249** | **2332** | |
+| acute_bronchitis | 10509002 | 194 | 80 | 133 | 100% |
+| viral_sinusitis  | 444814009 | 198 | 82 | 133 | 99% |
+| covid19          | 840544004 | 200 | 83 | 133 | ~82% |
+| **Total**        | | **592** | **245** | **399** | |
 
 `condition` is always `"none_of_the_above"`. `bin` is always `"none"`.
 `source_condition` is in the labels file only — never in the record text.
@@ -137,23 +137,21 @@ inference and the `condition` field from labels for evaluation.
 
 **Split assignment**: existing v2 patients keep their split (test→test,
 dev→dev, corpus→corpus_nota). New patients are assigned to test or dev at a
-50:20 ratio (seed 42); none go to corpus. The existing splits are unchanged —
+50:20 ratio (seed 42); none go to corpus. Corpus is capped at 133 records per
+condition (seed 42). The existing splits are unchanged —
 `test.jsonl` and `test_nota.jsonl` are separate files; combine them for the
 full evaluation set.
 
 **Known NOTA-specific limitations**:
-- **Otitis media has no Synthea symptom module**: 0% of otitis_media records
-  have a PRESENTING COMPLAINT section. All 447 test+dev otitis_media records
-  rely on history alone.
-- **Source condition name appears in historical visit text** (~1.5% of
-  acute_bronchitis records, ~0.7% of viral_sinusitis records): Synthea
+- **Source condition name appears in ~0.2% of corpus records**: Synthea
   sometimes records a prior encounter for the same condition before the formal
-  diagnosis date (e.g., a pre-diagnosis urgentcare visit coded with
-  `REASONCODE=10509002`). The condition name then appears in the RECENT VISITS
-  section. Otitis_media is clean (0% leaks).
-- **NOTA TREATMENT empty in ~61% of test/dev records**: acute bronchitis and
-  viral sinusitis have few REASONCODE-matched prescriptions; otitis_media has
-  no Synthea prescription module.
+  diagnosis date (e.g., a pre-diagnosis urgentcare visit coded with the condition
+  REASONCODE). The condition name then appears in the RECENT VISITS or PAST
+  MEDICATIONS section. Test/dev records with such leaks are dropped before output
+  (hence test/dev counts differ by condition); covid19 is clean (0% leaks).
+- **NOTA TREATMENT empty in ~61% of test/dev records**: viral sinusitis (~82%)
+  and covid19 (~99%) have few REASONCODE-matched prescriptions. Acute bronchitis
+  has 100% plan coverage.
 
 ---
 
