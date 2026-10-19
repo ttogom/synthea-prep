@@ -25,7 +25,7 @@
 3\. **The final generation backbone differs.** Our final call uses **GPT-4o-mini**. The paper evaluates **DeepSeek-Chat, GPT-4.1-mini, and Gemini 2.5**. Our prompt additionally requests Markdown Assessment and Plan sections because the prediction task changed.  
 *Verified:* runner model selection and final call; project prompt; paper Table 1.
 
-4\. **The study’s evaluation and ablations are not implemented in this runner.** It processes only the **first record of the supplied 100-record JSONL**. It does not run the paper’s 1,000-note evaluation, MedQA/MMLU experiments, generation metrics, QA accuracy, multiple backbones, standard-RAG baseline, or evidence-source ablations. Evaluation utilities exist upstream but are not invoked.  
+4\. **The study’s evaluation and ablations are not implemented in this runner.** It processes every record of the supplied 100-record JSONL sequentially. It does not run the paper’s 1,000-note evaluation, MedQA/MMLU experiments, generation metrics, QA accuracy, multiple backbones, standard-RAG baseline, or evidence-source ablations. Evaluation utilities exist upstream but are not invoked.  
 *Verified:* complete runner flow, input count, upstream evaluation utilities, and paper §§4.1–4.4.
 
 5\. **Interactive evidence inspection is absent.** This is a fixed script rather than the paper’s interactive system with evidence toggles, source inspection, colored saliency, and follow-up conversation. Saliency calculations still run and appear as text; their interactive presentation is absent. Selected reference output also omits its available patient/admission/note identifiers.  
