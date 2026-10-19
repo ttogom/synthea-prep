@@ -238,6 +238,24 @@ def main():
     test_out = attach(test_labels)
     dev_out  = attach(dev_labels)
 
+    # Plans that cannot be trusted due to cutoff mismatch between source run and v2
+    # are set to null so downstream code doesn't silently use a plan from the wrong
+    # episode.
+    PLAN_NULLED = [
+        {
+            "id": "viral_pharyngitis_bd529361-c87c-b80f-2847-0050f73f3da4",
+            "reason": "cutoff mismatch: source run mine=2018-02-01, v2=2016-09-26",
+        },
+    ]
+    plan_nulled_ids = {r["id"] for r in PLAN_NULLED}
+    nulled_count = 0
+    for row in test_out + dev_out:
+        if row["id"] in plan_nulled_ids:
+            row["plan"] = None
+            nulled_count += 1
+    if nulled_count:
+        print(f"  Set plan=null for {nulled_count} record(s) with cutoff mismatch.")
+
     # ── Write output ──────────────────────────────────────────────────────────
     print(f"\n[3] Writing {OUT_DIR} ...")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -279,6 +297,7 @@ def main():
             "received plans derived from the source run patient with the same ID."
         ),
         "mismatches_v2_vs_source_run": len(mismatches),
+        "plan_nulled": PLAN_NULLED,
         "built": datetime.date.today().isoformat(),
     }
     (OUT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
