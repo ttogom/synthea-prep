@@ -105,6 +105,56 @@ The same command on the same commit produces byte-identical output.
 
 ---
 
+## "None of the above" (NOTA) examples — release-v2.1
+
+Five additional files in `data/release-v2.1/` extend the dataset with negative
+examples for the "none of the above" class:
+
+| File | Purpose | Format |
+|------|---------|--------|
+| `test_nota.jsonl` | NOTA test records — text only | `{"id", "text"}` |
+| `dev_nota.jsonl` | NOTA dev records | `{"id", "text"}` |
+| `corpus_nota.jsonl` | NOTA corpus records — text + DIAGNOSIS + TREATMENT | `{"id", "text"}` |
+| `test_nota_labels.jsonl` | NOTA test answers | `{"id", "condition", "bin", "has_presenting_evidence", "plan", "source_condition"}` |
+| `dev_nota_labels.jsonl` | NOTA dev answers | `{"id", "condition", "bin", "has_presenting_evidence", "plan", "source_condition"}` |
+
+**Source conditions** (3 non-target acute conditions):
+
+| Condition | SNOMED | test | dev | corpus | presenting |
+|-----------|--------|------|-----|--------|------------|
+| acute_bronchitis | 10509002 | 194 | 80 | 133 | 100% |
+| viral_sinusitis  | 444814009 | 198 | 82 | 133 | 99% |
+| covid19          | 840544004 | 200 | 83 | 133 | ~82% |
+| **Total**        | | **592** | **245** | **399** | |
+
+`condition` is always `"none_of_the_above"`. `bin` is always `"none"`.
+`source_condition` is in the labels file only — never in the record text.
+
+**ID format**: `nota_{source_condition}_{patient_id}`.
+The source condition name is embedded in the ID. Evaluation code that reads
+IDs directly would leak the source condition; use only the `text` field for
+inference and the `condition` field from labels for evaluation.
+
+**Split assignment**: existing v2 patients keep their split (test→test,
+dev→dev, corpus→corpus_nota). New patients are assigned to test or dev at a
+50:20 ratio (seed 42); none go to corpus. Corpus is capped at 133 records per
+condition (seed 42). The existing splits are unchanged —
+`test.jsonl` and `test_nota.jsonl` are separate files; combine them for the
+full evaluation set.
+
+**Known NOTA-specific limitations**:
+- **Source condition name appears in ~0.2% of corpus records**: Synthea
+  sometimes records a prior encounter for the same condition before the formal
+  diagnosis date (e.g., a pre-diagnosis urgentcare visit coded with the condition
+  REASONCODE). The condition name then appears in the RECENT VISITS or PAST
+  MEDICATIONS section. Test/dev records with such leaks are dropped before output
+  (hence test/dev counts differ by condition); covid19 is clean (0% leaks).
+- **NOTA TREATMENT empty in ~61% of test/dev records**: viral sinusitis (~82%)
+  and covid19 (~99%) have few REASONCODE-matched prescriptions. Acute bronchitis
+  has 100% plan coverage.
+
+---
+
 ## Known limitations
 
 - **Chief complaints removed**: the CHIEF COMPLAINTS history section was dropped
