@@ -15,6 +15,8 @@ Usage:
   python3 soap.py check [--dir soap]    # verify outputs against inputs -> <dir>/check_report.md
 
   --split corpus|dev|test [...]         # any command: limit to those splits, e.g. --split dev test (default: all)
+          corpus_nota|dev_nota|test_nota  # opt-in: reads <split>.jsonl, writes <split>-soap.jsonl with the
+                                        # base split's prompt/fields, e.g. --split dev_nota test_nota corpus_nota
   --data DIR                            # any command: release folder to read/write (default: data/release-v2)
 
 Unattended: runs N calls at once, skips records already done, and on a usage
@@ -31,6 +33,8 @@ ROOT = os.path.join(REPO_ROOT, "data", "release-v2")  # inputs + outputs; overri
 MODEL = "claude-sonnet-4-6"  # pinned per SOAP_CONVERSION.md
 EFFORT = "low"
 SPLITS = ["dev", "test", "corpus"]  # dev/test first: needed soonest
+NOTA_SPLITS = [f"{s}_nota" for s in SPLITS]  # opt-in via --split; same prompt/fields as their base split
+ALL_SPLITS = SPLITS + NOTA_SPLITS
 KEYS = {"corpus": ["subjective", "objective", "assessment", "plan"],
         "dev": ["subjective", "objective"], "test": ["subjective", "objective"]}
 
@@ -100,8 +104,17 @@ def out_path(out_dir, split):
     return os.path.join(out_dir, f"{split}-soap.jsonl")
 
 
+def base(split):
+    """dev_nota -> dev: *_nota splits reuse their base split's prompt and fields."""
+    return split.removesuffix("_nota")
+
+
+def split_keys(split):
+    return KEYS[base(split)]
+
+
 def read_prompt(split):
-    return PROMPTS[split]
+    return PROMPTS[base(split)]
 
 
 def parse_reply(text, keys):
@@ -298,7 +311,7 @@ def process(st, rec, split, prompt):
         if err is None:
             st.add_usage(d.get("usage"))
             try:
-                fields = parse_reply(d.get("result"), KEYS[split])
+                fields = parse_reply(d.get("result"), split_keys(split))
                 check_model(d)
             except Exception as e:
                 text = str(d.get("result", ""))
@@ -379,7 +392,7 @@ def repair_outputs(st, valid_ids):
             try:
                 row = json.loads(line)
                 ok = (isinstance(row, dict) and row.get("id") in valid_ids[split]
-                      and row["id"] not in ids and sorted(row) == sorted(["id"] + KEYS[split]))
+                      and row["id"] not in ids and sorted(row) == sorted(["id"] + split_keys(split)))
             except Exception:
                 ok = False
             if ok:
@@ -445,7 +458,7 @@ def pilot_sample(splits=SPLITS):
     """2 per condition per split, plus the 3 longest and 1 shortest per split."""
     rng = random.Random(0)
     picks = {}
-    for split in SPLITS:
+    for split in SPLITS + [s for s in splits if s not in SPLITS]:  # base splits first keeps their picks stable
         recs = load(split)
         by_cond = {}
         for r in recs:
@@ -466,7 +479,7 @@ def run(out_dir, records_by_split, workers):
     lock_fd = acquire_lock(out_dir)
     st = Run(out_dir)
     check_manifest(st, records_by_split)
-    splits = [s for s in SPLITS if s in records_by_split]
+    splits = [s for s in ALL_SPLITS if s in records_by_split]
     done = repair_outputs(st, {s: {r["id"] for r in records_by_split[s]} for s in splits})
     if os.path.exists(st.fail_path):  # previous failures of these splits get another try
         with open(st.fail_path) as f:
@@ -578,9 +591,9 @@ def check(out_dir, splits=SPLITS):
         order = [pos[r["id"]] for r in rows if r["id"] in pos]
         in_order = order == sorted(order)
         missing = set(src) - seen
-        bad_keys = [r["id"] for r in rows if sorted(r) != sorted(["id"] + KEYS[split])]
+        bad_keys = [r["id"] for r in rows if sorted(r) != sorted(["id"] + split_keys(split))]
         empty = [r["id"] for r in rows if any(not field_text(r.get(k, "")).strip()
-                                              for k in KEYS[split] if k != "plan")]
+                                              for k in split_keys(split) if k != "plan")]
 
         added, wrong_assess, unsupported_nums, not_verbatim, plan_diff = [], [], [], [], []
         none_forms = Counter()
@@ -593,7 +606,7 @@ def check(out_dir, splits=SPLITS):
                           for m in re.finditer(pat, so) if m.group(0) not in s_low})
             if new:
                 added.append((r["id"], new))
-            if split == "corpus":
+            if base(split) == "corpus":
                 c = cond.get(r["id"])
                 if c and not re.search(COND_TERMS[c], r["assessment"].lower()):
                     wrong_assess.append((r["id"], c, r["assessment"][:120]))
@@ -604,7 +617,7 @@ def check(out_dir, splits=SPLITS):
                 none_forms[json.dumps(r["plan"])] += treat == ["none recorded"]
                 if [x.strip() for x in r["plan"]] != treat and not (treat == ["none recorded"] and r["plan"] == []):
                     plan_diff.append((r["id"], r["plan"], treat))
-            out_text = " ".join(field_text(r[k]) for k in KEYS[split])
+            out_text = " ".join(field_text(r[k]) for k in split_keys(split))
             nums = sorted({x for x in NUM_RE.findall(out_text) if x not in src[r["id"]]})
             if nums:
                 unsupported_nums.append((r["id"], nums[:8]))
@@ -621,7 +634,7 @@ def check(out_dir, splits=SPLITS):
                      f"- plan not exactly the TREATMENT items: {len(plan_diff)}",
                      "- plan for TREATMENT 'none recorded': "
                      + (", ".join(f"`{k}` ×{v}" for k, v in none_forms.items() if v) or "n/a")]
-                    if split == "corpus" else []),
+                    if base(split) == "corpus" else []),
                   f"- records with numbers not found in source: {len(unsupported_nums)}", ""]
         for label, items in [("Missing ids", sorted(missing)), ("Duplicate ids", sorted(dups)),
                              ("Unknown ids", sorted(unknown)), ("Wrong keys", bad_keys), ("Empty fields", empty)]:
@@ -672,11 +685,12 @@ if __name__ == "__main__":
     ap.add_argument("cmd", choices=["pilot", "run", "status", "check"])
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--dir", default="soap", help="output folder for status/check")
-    ap.add_argument("--split", nargs="+", choices=SPLITS, help="limit to these splits (default: all)")
+    ap.add_argument("--split", nargs="+", choices=ALL_SPLITS,
+                    help="limit to these splits (default: corpus dev test; *_nota splits only when named)")
     ap.add_argument("--data", default=ROOT, help="release folder with <split>.jsonl, index.csv (default: data/release-v2)")
     a = ap.parse_args()
     ROOT = os.path.abspath(a.data)
-    splits = [s for s in SPLITS if s in a.split] if a.split else SPLITS
+    splits = [s for s in ALL_SPLITS if s in a.split] if a.split else SPLITS
     if a.cmd == "pilot":
         sys.exit(run(os.path.join(ROOT, "soap_pilot"), pilot_sample(splits), a.workers))
     elif a.cmd == "run":
