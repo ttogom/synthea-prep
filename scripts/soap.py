@@ -109,7 +109,7 @@ def base(split):
     return split.removesuffix("_nota")
 
 
-def fields(split):
+def split_keys(split):
     return KEYS[base(split)]
 
 
@@ -311,7 +311,7 @@ def process(st, rec, split, prompt):
         if err is None:
             st.add_usage(d.get("usage"))
             try:
-                fields = parse_reply(d.get("result"), fields(split))
+                fields = parse_reply(d.get("result"), split_keys(split))
                 check_model(d)
             except Exception as e:
                 text = str(d.get("result", ""))
@@ -392,7 +392,7 @@ def repair_outputs(st, valid_ids):
             try:
                 row = json.loads(line)
                 ok = (isinstance(row, dict) and row.get("id") in valid_ids[split]
-                      and row["id"] not in ids and sorted(row) == sorted(["id"] + fields(split)))
+                      and row["id"] not in ids and sorted(row) == sorted(["id"] + split_keys(split)))
             except Exception:
                 ok = False
             if ok:
@@ -591,9 +591,9 @@ def check(out_dir, splits=SPLITS):
         order = [pos[r["id"]] for r in rows if r["id"] in pos]
         in_order = order == sorted(order)
         missing = set(src) - seen
-        bad_keys = [r["id"] for r in rows if sorted(r) != sorted(["id"] + fields(split))]
+        bad_keys = [r["id"] for r in rows if sorted(r) != sorted(["id"] + split_keys(split))]
         empty = [r["id"] for r in rows if any(not field_text(r.get(k, "")).strip()
-                                              for k in fields(split) if k != "plan")]
+                                              for k in split_keys(split) if k != "plan")]
 
         added, wrong_assess, unsupported_nums, not_verbatim, plan_diff = [], [], [], [], []
         none_forms = Counter()
@@ -617,7 +617,7 @@ def check(out_dir, splits=SPLITS):
                 none_forms[json.dumps(r["plan"])] += treat == ["none recorded"]
                 if [x.strip() for x in r["plan"]] != treat and not (treat == ["none recorded"] and r["plan"] == []):
                     plan_diff.append((r["id"], r["plan"], treat))
-            out_text = " ".join(field_text(r[k]) for k in fields(split))
+            out_text = " ".join(field_text(r[k]) for k in split_keys(split))
             nums = sorted({x for x in NUM_RE.findall(out_text) if x not in src[r["id"]]})
             if nums:
                 unsupported_nums.append((r["id"], nums[:8]))
