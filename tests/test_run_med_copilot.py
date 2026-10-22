@@ -46,8 +46,8 @@ INPUT_NAME = "patient_records_so.jsonl"
 BRANCH = "feature/issue-9"
 SAFE_BRANCH = "feature-issue-9"
 RESULT_FIELDS = [
-    "id", "status", "assessment_plan", "selected_reference_patient", "guideline_questions",
-    "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
@@ -230,6 +230,7 @@ class PipelineFixture:
         self.questions = '{"Key Questions": ["Question one?", "Question two?"]}'
         self.guideline_text = "GUIDELINE_RESPONSE_ONLY\nGuideline evidence with café."
         self.final_output = "## Assessment\nMOCK_DIAGNOSIS\n\n## Plan\n1. MOCK_FINAL_PLAN"
+        self.final_sections = {"assessment": "MOCK_DIAGNOSIS", "plan": "1. MOCK_FINAL_PLAN"}
         self.candidates = [{"idx": 0, "id": "candidate-one"}, {"idx": 1, "id": "candidate-two"}]
         # The reranker moves the second candidate (corpus row 1) to the top.
         self.rerank_scores = [0.2, 0.9]
@@ -486,7 +487,8 @@ class RunMedCopilotTests(unittest.TestCase):
         return {
             "id": fixture.patient_id,
             "status": "completed",
-            "assessment_plan": fixture.final_output,
+            **fixture.final_sections,
+            "assessment_plan_raw": fixture.final_output,
             "selected_reference_patient": fixture.reference if reference == "default" else reference,
             "guideline_questions": (json.loads(fixture.questions)["Key Questions"]
                                     if questions == "default" else questions),
@@ -1084,8 +1086,9 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 1)
         run_dir, run, results = self.read_run()
         self.assertEqual(results, [{
-            **self.expected_result(), "status": "failed_incomplete", "assessment_plan": None,
-            "guideline_evidence": None, "graphrag_context": None, "assessment_plan_prompts": None,
+            **self.expected_result(), "status": "failed_incomplete", "assessment": None,
+            "plan": None, "assessment_plan_raw": None, "guideline_evidence": None,
+            "graphrag_context": None, "assessment_plan_prompts": None,
         }])
         self.assert_run_metadata(run_dir, run, "completed_with_errors")
         self.assertIn("mock stage failure", fixture.stderr.getvalue())
@@ -1235,7 +1238,8 @@ class RunMedCopilotTests(unittest.TestCase):
         run_dir, run, results = self.read_run()
         self.assertEqual(results, [{
             **self.expected_result(reference_text="No reference patient available.", reference=None),
-            "status": "failed_incomplete", "assessment_plan": None,
+            "status": "failed_incomplete", "assessment": None, "plan": None,
+            "assessment_plan_raw": None,
         }])
         self.assertIn("No reference patient available.",
                       results[0]["assessment_plan_prompts"]["user"])
@@ -1245,18 +1249,45 @@ class RunMedCopilotTests(unittest.TestCase):
         ])
         self.assert_run_metadata(run_dir, run, "completed_with_errors")
 
-    def test_assessment_plan_response_is_saved_verbatim_without_validation(self):
-        # Response validation is out of scope: the unchecked value is preserved as returned.
+    def test_unusable_assessment_plan_sections_are_null_and_the_raw_reply_is_kept(self):
+        # Format validation is out of scope: a reply that cannot be split still completes,
+        # and expected_result() requires assessment_plan_raw to equal the reply exactly.
         fixture_root = self.fixture.root
-        for name, content in [("empty", ""), ("whitespace", " \n\t"), ("no_content", None)]:
+        for name, content, sections in [
+            ("empty", "", (None, None)),
+            ("whitespace", " \n\t", (None, None)),
+            ("no_content", None, (None, None)),
+            ("unrecognized_labels", "Impression:\nDx\nRecommendations:\nRx", (None, None)),
+            ("combined_heading", "## Assessment and Plan\nDx; Rx", (None, None)),
+            ("plain_labels", "Assessment:\nDx\n\nPlan:\nRx", ("Dx", "Rx")),
+            ("assessment_only", "## Assessment\nDx café", ("Dx café", None)),
+            ("empty_plan", "## Assessment\nDx\n## Plan\n \n", ("Dx", None)),
+            ("repeated_assessment", "## Assessment\nA\n## Plan\nRx\n## Assessment\nB",
+             (None, "Rx")),
+        ]:
             with self.subTest(case=name):
                 self.fixture = PipelineFixture(fixture_root / name)
                 fixture = self.fixture
                 fixture.final_output = content
+                fixture.final_sections = dict(zip(("assessment", "plan"), sections))
                 runner = self.load_runner()
                 with fixture.runtime():
                     self.assertEqual(runner["main"](), "completed")
                 self.assert_outputs()
+
+    def test_raw_reply_is_saved_exactly_alongside_its_sections(self):
+        fixture = self.fixture
+        fixture.final_output = ("Here is the note.\r\n\r\n**Assessment (A):**\r\n  Viral URI caf\u00e9\u2028"
+                                "likely  \r\n\r\nPlan:\r\n1. Rest\t\r\n\r\n")
+        fixture.final_sections = {"assessment": "Viral URI caf\u00e9\u2028likely",
+                                  "plan": "1. Rest"}
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        self.assert_outputs()
+        [run_dir] = self.run_dirs()
+        raw_line = (run_dir / "results.jsonl").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(raw_line)["assessment_plan_raw"], fixture.final_output)
 
     def test_empty_keyword_arrays_continue_through_full_pipeline(self):
         fixture = self.fixture
@@ -1308,11 +1339,11 @@ class RunMedCopilotTests(unittest.TestCase):
         unavailable = {
             "retrieval": RESULT_FIELDS[2:], "keywords": RESULT_FIELDS[2:],
             "reranking": RESULT_FIELDS[2:],
-            "questions": ["assessment_plan", "guideline_questions", "guideline_evidence",
-                          "graphrag_context", "assessment_plan_prompts"],
-            "graphrag": ["assessment_plan", "guideline_evidence", "graphrag_context",
-                         "assessment_plan_prompts"],
-            "final": ["assessment_plan"],
+            "questions": ["assessment", "plan", "assessment_plan_raw", "guideline_questions",
+                          "guideline_evidence", "graphrag_context", "assessment_plan_prompts"],
+            "graphrag": ["assessment", "plan", "assessment_plan_raw", "guideline_evidence",
+                         "graphrag_context", "assessment_plan_prompts"],
+            "final": ["assessment", "plan", "assessment_plan_raw"],
         }
         for stage, expected_calls in [("retrieval", 0), ("keywords", 0), ("reranking", 0),
                                       ("questions", 1), ("graphrag", 1), ("final", 2)]:
@@ -1439,7 +1470,9 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(result, {
                 "id": record["id"],
                 "status": "completed",
-                "assessment_plan": f"## Assessment\n{marker} diagnosis café\n\n## Plan\n{marker} plan end",
+                "assessment": f"{marker} diagnosis café",
+                "plan": f"{marker} plan end",
+                "assessment_plan_raw": f"## Assessment\n{marker} diagnosis café\n\n## Plan\n{marker} plan end",
                 "selected_reference_patient": fixture.reference,
                 "guideline_questions": [f"{marker} question?"],
                 "guideline_evidence": evidence,
@@ -1477,9 +1510,10 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(failed["guideline_questions"], ["MARKER_BRAVO question?"])
         self.assertEqual(failed["selected_reference_patient"], fixture.reference)
         for field in ("guideline_evidence", "graphrag_context", "assessment_plan_prompts",
-                      "assessment_plan"):
+                      "assessment", "plan", "assessment_plan_raw"):
             self.assertIsNone(failed[field])
-        self.assertIn("MARKER_CHARLIE", results[2]["assessment_plan"])
+        self.assertIn("MARKER_CHARLIE", results[2]["assessment"])
+        self.assertIn("MARKER_CHARLIE", results[2]["plan"])
         self.assertIn(f"Patient {records[1]['id']} failed", fixture.stderr.getvalue())
 
     def test_all_patients_failing_still_finishes_the_batch(self):
@@ -1523,7 +1557,7 @@ class RunMedCopilotTests(unittest.TestCase):
             (records[0]["id"], "completed"), (records[1]["id"], "failed_incomplete"),
             (records[2]["id"], "not_processed"),
         ], reference_data=self.expected_reference_data())
-        self.assertIsNone(results[1]["assessment_plan"])
+        self.assertEqual([results[1][field] for field in RESULT_FIELDS[2:5]], [None] * 3)
         self.assertIn("MARKER_BRAVO", results[1]["assessment_plan_prompts"]["user"])
         self.assertEqual(results[2], {"id": records[2]["id"], "status": "not_processed",
                                       **dict.fromkeys(RESULT_FIELDS[2:])})
@@ -1553,7 +1587,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 4)
         results = self.assert_stopped_run([(records[0]["id"], "completed")],
                                           reference_data=self.expected_reference_data())
-        self.assertIn("MARKER_ALPHA", results[0]["assessment_plan"])
+        self.assertIn("MARKER_ALPHA", results[0]["assessment"])
 
     def test_run_json_is_running_until_the_batch_finishes(self):
         fixture = self.fixture

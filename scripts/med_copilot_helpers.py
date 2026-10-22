@@ -23,8 +23,18 @@ OPTIONAL_GUIDELINE_TABLES = ("covariates",)
 GUIDELINE_VECTOR_EMBEDDING = "entity-description"
 PATIENT_STATUSES = ("completed", "failed_incomplete", "not_processed")
 PATIENT_RESULT_FIELDS = (
-    "assessment_plan", "selected_reference_patient", "guideline_questions",
-    "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+)
+# A line naming one generated section: the Markdown heading the final prompt
+# requests ("## Assessment", "## Plan") or a standalone label ("Assessment:",
+# "**Plan**") like the reference patient's. Heading level, case, bold, an
+# "(A)"/"(P)" suffix, a colon, and closing hashes are tolerated; a label without
+# "#" needs a colon or bold, and nothing else may share the line.
+SECTION_HEADING = re.compile(
+    r" {0,3}(?=#|\*\*|__|.*:)(?:#{1,6}[ \t]+)?(?:\*\*|__)?(assessment|plan)"
+    r"(?:[ \t]*\([ap]\))?:?(?:\*\*|__)?:?(?:[ \t]+#+)?[ \t\r]*",
+    re.IGNORECASE,
 )
 
 
@@ -290,6 +300,28 @@ def parse_guideline_questions(response):
     if not isinstance(questions, list) or not all(isinstance(q, str) for q in questions):
         return None
     return questions
+
+
+def split_assessment_plan(response):
+    """Split the final reply into its Assessment and Plan section texts.
+
+    Each section runs from its SECTION_HEADING line to the next one and is
+    kept verbatim apart from surrounding whitespace. A section that is missing,
+    empty, or headed more than once is None; text before the first heading
+    belongs to neither section.
+    """
+    sections = {"assessment": [], "plan": []}
+    current = None
+    if isinstance(response, str):
+        for line in response.split("\n"):
+            heading = SECTION_HEADING.fullmatch(line)
+            if heading:
+                current = sections[heading.group(1).lower()]
+                current.append([])
+            elif current is not None:
+                current[-1].append(line)
+    return {name: ("\n".join(bodies[0]).strip() or None) if len(bodies) == 1 else None
+            for name, bodies in sections.items()}
 
 
 def graphrag_context_json(context):

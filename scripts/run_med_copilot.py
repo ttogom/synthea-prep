@@ -49,6 +49,7 @@ from scripts.med_copilot_helpers import (
     parse_guideline_questions,
     reference_data_metadata,
     selected_reference_patient,
+    split_assessment_plan,
     validate_guideline_tables,
 )
 
@@ -171,7 +172,9 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
     )
 
     generated_plan = final_response.choices[0].message.content
-    result["assessment_plan"] = generated_plan
+    result["assessment_plan_raw"] = generated_plan
+    # Missing, empty, or repeated sections are saved as null; the raw reply keeps them.
+    result.update(split_assessment_plan(generated_plan))
 
     print("\n========== ASSESSMENT AND PLAN ==========\n")
     print(generated_plan)

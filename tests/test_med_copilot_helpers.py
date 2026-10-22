@@ -30,8 +30,8 @@ HELPERS = ROOT / "scripts/med_copilot_helpers.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot/upstream/create_embeddings.py"
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
 RESULT_FIELDS = [
-    "id", "status", "assessment_plan", "selected_reference_patient", "guideline_questions",
-    "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
@@ -380,7 +380,8 @@ class HelperImportTests(unittest.TestCase):
             "make_run_name", "new_patient_result", "pacific_now", "pacific_time",
             "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
-            "sha256_file", "validate_guideline_tables", "write_run_json",
+            "sha256_file", "split_assessment_plan", "validate_guideline_tables",
+            "write_run_json",
         ]), "Add direct tests when adding a public helper")
 
     def test_all_helper_imports_are_in_the_module_header(self):
@@ -887,6 +888,83 @@ class PatientOutputHelperTests(unittest.TestCase):
             with self.subTest(response=response):
                 self.assertIsNone(H["parse_guideline_questions"](response))
 
+    def test_split_assessment_plan_keeps_each_section_verbatim(self):
+        response = ("## Assessment\n1. **Most likely:** café\u2028pneumonia\n\n"
+                    "### Differential\n- Bronchitis\n  - less likely\n\n"
+                    "## Plan\n1. Chest X-ray\n   - PA/lateral\n\n2. Follow-up in 48 h\n")
+        self.assertEqual(H["split_assessment_plan"](response), {
+            "assessment": ("1. **Most likely:** café\u2028pneumonia\n\n"
+                           "### Differential\n- Bronchitis\n  - less likely"),
+            "plan": "1. Chest X-ray\n   - PA/lateral\n\n2. Follow-up in 48 h",
+        })
+
+    def test_split_assessment_plan_splits_plain_labels_like_the_reference_patient(self):
+        response = "Assessment:\nLikely viral URI café\n- low risk\n\nPlan:\n1. Fluids\n2. Return if worse"
+        self.assertEqual(H["split_assessment_plan"](response), {
+            "assessment": "Likely viral URI café\n- low risk",
+            "plan": "1. Fluids\n2. Return if worse",
+        })
+
+    def test_split_assessment_plan_tolerates_heading_variants_and_order(self):
+        for response in [
+            "# Assessment\nA\n# Plan\nP",
+            "### ASSESSMENT\nA\n###### plan\nP",
+            "## Assessment (A):\nA\n## Plan (P)\nP",
+            "## **Assessment**\nA\n## __Plan:__\nP",
+            "   ## Assessment ##\nA\n## Plan\t\nP",
+            "## Assessment\r\nA\r\n## Plan\r\nP\r\n",
+            "## Plan\nP\n\n## Assessment\nA",
+            "Here is the note.\n\n## Assessment\nA\n## Plan\nP",
+            "assessment:\nA\nPLAN:\nP",
+            "Assessment (A):\nA\nPlan (P):\nP",
+            "**Assessment**\nA\n**Plan:**\nP",
+            "__Assessment (A)__:\nA\n**plan**\nP",
+            "## Assessment\nA\nPlan:\nP",
+            "Plan:\r\nP\r\n  Assessment:  \r\nA",
+        ]:
+            with self.subTest(response=response):
+                self.assertEqual(H["split_assessment_plan"](response),
+                                 {"assessment": "A", "plan": "P"})
+
+    def test_split_assessment_plan_ignores_text_that_is_not_a_section_heading(self):
+        for response in [
+            "Assessment\nA\nPlan\nP",
+            "Assessment: pneumonia\nPlan: antibiotics",
+            "The assessment: pneumonia.\nOur plan: rest.",
+            "- Assessment:\nA\n1. Plan:\nP",
+            "Assessment and Plan:\nA\nP",
+            "**Assessment and Plan**\nA\nP",
+            "    Assessment:\nA\n    Plan:\nP",
+            "##Assessment\nA\n##Plan\nP",
+            "    ## Assessment\nA\n    ## Plan\nP",
+            "## Assessment and Plan\nA\nP",
+            "## Assessment: pneumonia\n## Plan: antibiotics",
+        ]:
+            with self.subTest(response=response):
+                self.assertEqual(H["split_assessment_plan"](response),
+                                 {"assessment": None, "plan": None})
+        self.assertEqual(H["split_assessment_plan"]("## Assessment\nA\nPlan: rest\n#### Plan details\nx"),
+                         {"assessment": "A\nPlan: rest\n#### Plan details\nx", "plan": None})
+
+    def test_split_assessment_plan_keeps_an_available_section_when_the_other_is_unusable(self):
+        for response, expected in [
+            ("## Assessment\nA", {"assessment": "A", "plan": None}),
+            ("## Plan\nP", {"assessment": None, "plan": "P"}),
+            ("Assessment:\nA\nPlan:", {"assessment": "A", "plan": None}),
+            ("## Assessment\n \n\t\n## Plan\nP", {"assessment": None, "plan": "P"}),
+            ("## Assessment\nA\n## Plan\n", {"assessment": "A", "plan": None}),
+            ("## Assessment\nA1\n## Plan\nP\n## Assessment\nA2", {"assessment": None, "plan": "P"}),
+            ("## Assessment\nA\n## Plan\nP1\n## Plan\nP2", {"assessment": "A", "plan": None}),
+        ]:
+            with self.subTest(response=response):
+                self.assertEqual(H["split_assessment_plan"](response), expected)
+
+    def test_split_assessment_plan_is_null_without_text(self):
+        for response in [None, "", " \n\t", 3, ["## Assessment\nA"]]:
+            with self.subTest(response=response):
+                self.assertEqual(H["split_assessment_plan"](response),
+                                 {"assessment": None, "plan": None})
+
     def test_graphrag_context_json_converts_every_table_with_split_orientation(self):
         class Table:
             def __init__(self, split):
@@ -1004,7 +1082,7 @@ class ExperimentRunTests(TemporaryRootTestCase):
 
     def test_save_result_appends_one_physical_line_per_patient(self):
         run = self.start(["a", "b"])
-        first = self.result("a", assessment_plan="## Assessment\nline café x\n\n## Plan\n- y")
+        first = self.result("a", assessment="line café x", plan="- y")
         run.save_result(first)
         _, results, text = self.read(run)
         self.assertEqual(results, [first])
@@ -1033,7 +1111,7 @@ class ExperimentRunTests(TemporaryRootTestCase):
     def test_unserializable_result_is_not_written_and_writing_continues(self):
         run = self.start(["a", "b"])
         with self.assertRaises(ValueError):
-            run.save_result(self.result("a", assessment_plan=float("nan")))
+            run.save_result(self.result("a", assessment=float("nan")))
         self.assertTrue(run.results_writable)
         run.save_result(self.result("a"))
         self.assertEqual([record["id"] for record in self.read(run)[1]], ["a"])
@@ -1072,12 +1150,12 @@ class ExperimentRunTests(TemporaryRootTestCase):
     def test_stop_marks_current_failed_keeps_partial_outputs_and_rest_not_processed(self):
         run = self.start(["a", "b", "c"])
         run.save_result(self.result("a"))
-        current = self.result("b", None, guideline_questions=["Q?"])
+        current = self.result("b", None, guideline_questions=["Q?"], assessment="A only")
         run.stop(self.finished, current)
         metadata, results, _ = self.read(run)
         self.assertEqual(results, [
             self.result("a"),
-            self.result("b", "failed_incomplete", guideline_questions=["Q?"]),
+            self.result("b", "failed_incomplete", guideline_questions=["Q?"], assessment="A only"),
             self.result("c", "not_processed"),
         ])
         self.assertEqual((metadata["status"], metadata["finished_at"]),

@@ -43,7 +43,7 @@ Each execution writes a new directory, never overwriting an existing one:
 ```text
 experiments/output/<Pacific timestamp>__<input stem>__<branch>/   # e.g. 2026-10-17_153045PDT__patient_records_so__integrate-medcopilot
 ├── run.json        # run status, times, branch, commit, input and reference-resource fingerprints
-└── results.jsonl   # one line per patient: id, status, Assessment/Plan, reference, guideline evidence, exact prompts
+└── results.jsonl   # one line per patient: id, status, assessment, plan, raw reply, reference, guideline evidence, exact prompts
 ```
 
-Run statuses are `running`, `completed`, `completed_with_errors`, and `failed_incomplete`; patient statuses are `completed`, `failed_incomplete`, and `not_processed`. A failing patient does not stop the batch, and the command exits nonzero unless the run is `completed`. `experiments/output/` is gitignored. The tests mock external APIs; running the pipeline uses the configured OpenAI models. The runner locates guideline artifacts under `med_copilot/data/guidelines/` independently of the launch directory.
+Run statuses are `running`, `completed`, `completed_with_errors`, and `failed_incomplete`; patient statuses are `completed`, `failed_incomplete`, and `not_processed`. The generated reply is saved exactly as returned in `assessment_plan_raw` and split at its Assessment and Plan headings (`## Assessment` or a standalone `Assessment:` label) into the `assessment` and `plan` fields; a section that is missing, empty, or repeated is saved as `null`. All three fields are `null` when no reply was generated. A failing patient does not stop the batch, and the command exits nonzero unless the run is `completed`. `experiments/output/` is gitignored. The tests mock external APIs; running the pipeline uses the configured OpenAI models. The runner locates guideline artifacts under `med_copilot/data/guidelines/` independently of the launch directory.

@@ -42,7 +42,7 @@ Its current Assessment-and-Plan workflow is:
     - The GraphRAG return-value issue is fixed: the runner unpacks the response as `key_info, graphrag_context`, saves response text as `guideline_evidence` and the complete context separately as `graphrag_context`, and passes only response text into the final prompt.
 8. LLM Assessment-and-Plan generation
     - The project runner calls `gpt-4o-mini`. Its prompt requests Markdown headings `## Assessment` and `## Plan`, with the most likely diagnosis in Assessment and investigations, treatment, and follow-up in Plan.
-    - The runner saves the returned text verbatim as `assessment_plan`, and the exact system and user prompts as `assessment_plan_prompts`, without checking that either section exists or contains content. Output-format validation is planned as a separate post-hoc script.
+    - The runner saves the complete reply exactly as returned as `assessment_plan_raw`. `split_assessment_plan` in `scripts/med_copilot_helpers.py` splits it at its Assessment and Plan headings, and the runner saves each section's text, unchanged apart from surrounding whitespace, as `assessment` and `plan`. A heading is either a Markdown heading (`#` to `######`, as the prompt requests) or a standalone label like the reference patient's (`Assessment:`, `**Plan**`); a label without `#` needs a colon or bold. Case, bold, an `(A)`/`(P)` suffix, and a trailing colon are tolerated, but nothing else may share the line: `Assessment: pneumonia`, a bare `Plan`, list items, and combined headings such as `Assessment and Plan:` are not section headings. A section runs to the next Assessment or Plan heading, so subheadings stay inside it, and text before the first heading appears only in the raw reply. A section that is missing, empty, or headed more than once is `null` while the other section and the raw reply are still saved; the patient remains `completed`. When no reply was generated, all three fields are `null`. The exact system and user prompts are saved as `assessment_plan_prompts`. Further output-format validation is planned as a separate post-hoc script.
 
 ## Saved Run Outputs
 
@@ -51,7 +51,7 @@ Each execution creates `experiments/output/<Pacific timestamp>__<input stem>__<b
 | File | Contents |
 |---|---|
 | `run.json` | Run name, Pacific start/finish times, run status (`running`, `completed`, `completed_with_errors`, `failed_incomplete`), exact branch, input path and SHA-256, Git commit, and the reference-patient and guideline resources used with their fingerprints |
-| `results.jsonl` | One line per input patient: `id`, `status` (`completed`, `failed_incomplete`, `not_processed`), `assessment_plan`, `selected_reference_patient`, `guideline_questions`, `guideline_evidence`, `graphrag_context`, `assessment_plan_prompts` |
+| `results.jsonl` | One line per input patient: `id`, `status` (`completed`, `failed_incomplete`, `not_processed`), `assessment`, `plan`, `assessment_plan_raw`, `selected_reference_patient`, `guideline_questions`, `guideline_evidence`, `graphrag_context`, `assessment_plan_prompts` |
 
 Patient results are appended as each patient finishes, so an interruption keeps earlier results. Unavailable fields are `null`; a failed patient keeps the outputs of its completed stages. The command exits nonzero unless the run status is `completed`. `experiments/output/` is gitignored.
 
