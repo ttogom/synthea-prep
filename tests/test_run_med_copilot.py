@@ -32,10 +32,13 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
+from test_med_copilot_retrieval import FakeEncoder, load_retrieval_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_med_copilot.py"
 HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
+RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
 UPSTREAM_GRAPH_QUERY = ROOT / "med_copilot/upstream/graphrag/cli/query.py"
 UPSTREAM_GRAPH_STORAGE = ROOT / "med_copilot/upstream/graphrag/utils/storage.py"
@@ -187,24 +190,30 @@ class PipelineFixture:
         self.branch = branch
         self.safe_branch = SAFE_BRANCH if branch == BRANCH else branch
         self.upstream = root / "med_copilot/upstream"
+        self.artifacts = root / "med_copilot/data/patient_retrieval_so"
         self.guidelines = root / "med_copilot/data/guidelines"
         self.output = root / "experiments/output"
         self.caller = root / "caller"
         self.script = root / "scripts/run_med_copilot.py"
-        for directory in [self.upstream, self.guidelines / "output", self.caller,
+        for directory in [self.upstream, self.artifacts, self.guidelines / "output", self.caller,
                           self.script.parent, root / "experiments/input"]:
             directory.mkdir(parents=True)
         for name in GUIDELINE_TABLES:
             (self.guidelines / "output" / f"{name}.parquet").write_text("MOCK_TABLE")
         self.write_guideline_settings(self.guidelines)
         for name, content in {"embeddings.npy": b"MOCK_EMBEDDINGS",
-                              "index.faiss": b"MOCK_INDEX"}.items():
-            (self.upstream / name).write_bytes(content)
+                              "index.faiss": b"MOCK_INDEX", "matching.json": b"MOCK_SO_METADATA"}.items():
+            (self.artifacts / name).write_bytes(content)
+        # Legacy files must remain untouched and must not enter run fingerprints.
+        for name in ("embeddings.npy", "index.faiss"):
+            (self.upstream / name).write_bytes(b"LEGACY_SOA")
         self.regenerated_artifacts = None
         # An unchanged copy lets runpy exercise the actual __main__ guard.
         self.script.write_text(RUNNER.read_text())
         self.helper_module = self.script.parent / "med_copilot_helpers.py"
         self.helper_module.write_text(HELPERS.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.script.parent / "med_copilot_retrieval.py").write_text(
+            RETRIEVAL.read_text(encoding="utf-8"), encoding="utf-8")
         self.prompt_module = root / "med_copilot/prompts/diagnosis_plan.py"
         self.prompt_module.parent.mkdir(parents=True)
         self.prompt_module.write_text(PROJECT_PROMPTS.read_text(encoding="utf-8"), encoding="utf-8")
@@ -346,14 +355,15 @@ class PipelineFixture:
             )])
 
         class HybridRetriever:
-            def __init__(self, df, alpha):
+            def __init__(self, df, alpha, encoder):
                 fixture.retrieval_calls.append(("init", df.copy(), alpha, Path.cwd()))
                 fixture.fail_at("retriever_init")
                 if fixture.regenerated_artifacts is not None:
                     # Like EmbeddingRetriever, rebuild artifacts relative to the cwd.
                     for name, content in fixture.regenerated_artifacts.items():
                         Path(name).write_bytes(content)
-                self.embedder = SimpleNamespace(emb_path="embeddings.npy", index_path="index.faiss")
+                self.embedder = SimpleNamespace(emb_path="embeddings.npy", index_path="index.faiss",
+                                               metadata_path="matching.json")
                 self.keyword_extractor = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
                 self.keyword_extractor.model = "retrieval-keyword-model"
                 self.keyword_extractor.client = SimpleNamespace(chat=SimpleNamespace(
@@ -388,7 +398,7 @@ class PipelineFixture:
             return fixture.guideline_text, fixture.context
 
         modules = {name: ModuleType(name) for name in [
-            "sentence_transformers", "openai", "create_embeddings", "graphrag",
+            "sentence_transformers", "openai", "create_embeddings", "scripts.med_copilot_retrieval", "graphrag",
             "graphrag.cli", "graphrag.cli.query", "templates", "templates.SOA_P_TEMPLATE",
         ]}
         for name in ["graphrag", "graphrag.cli", "templates"]:
@@ -397,6 +407,14 @@ class PipelineFixture:
         modules["openai"].OpenAI = client
         modules["create_embeddings"].HybridRetriever = HybridRetriever
         modules["create_embeddings"].CrossEncoderReranker = CrossEncoderReranker
+        modules["scripts.med_copilot_retrieval"].HybridRetriever = HybridRetriever
+        modules["scripts.med_copilot_retrieval"].CrossEncoderReranker = CrossEncoderReranker
+        # Exercise the real, dependency-free S/O formatter even in orchestration tests.
+        tree = ast.parse(RETRIEVAL.read_text(encoding="utf-8"))
+        formatter = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef) and node.name == "matching_text")
+        exec(compile(ast.Module(body=[formatter], type_ignores=[]), str(RETRIEVAL), "exec"),
+             modules["scripts.med_copilot_retrieval"].__dict__)
         modules["graphrag.cli.query"].run_local_search = graph_search
         modules["templates.SOA_P_TEMPLATE"].__dict__.update(PROMPTS)
         return modules
@@ -406,7 +424,7 @@ class PipelineFixture:
         original_import = builtins.__import__
 
         def tracked_import(name, *args, **kwargs):
-            if name == "create_embeddings":
+            if name == "scripts.med_copilot_retrieval":
                 self.events.append(("import", name))
                 self.fail_at("upstream_import")
             return original_import(name, *args, **kwargs)
@@ -510,12 +528,13 @@ class RunMedCopilotTests(unittest.TestCase):
         # Enumerate the expected files independently of the helper's resolver.
         fixture = self.fixture
         corpus = fixture.upstream / "soap_with_metadata.json" if corpus is None else corpus
-        artifacts = fixture.upstream if artifacts is None else artifacts
+        artifacts = fixture.artifacts if artifacts is None else artifacts
         guidelines = fixture.guidelines if guidelines is None else guidelines
         retrieval_entries = [("corpus", corpus)]
         if retrieval_initialized:
             retrieval_entries += [("embeddings.npy", artifacts / "embeddings.npy"),
-                                  ("index.faiss", artifacts / "index.faiss")]
+                                  ("index.faiss", artifacts / "index.faiss"),
+                                  ("matching.json", artifacts / "matching.json")]
         guideline_entries = [
             ("settings", guidelines / "settings.yaml"),
             ("local_search_prompt", guidelines / "prompts/local_search_system_prompt.txt"),
@@ -614,12 +633,12 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertTrue(callable(runner["main"]))
         self.assertEqual(runner["PATIENT_CORPUS"],
                          fixture.upstream / "soap_with_metadata.json")
-        self.assertEqual(runner["PATIENT_RETRIEVAL_ARTIFACTS_DIR"], fixture.upstream)
+        self.assertEqual(runner["PATIENT_RETRIEVAL_ARTIFACTS_DIR"], fixture.artifacts)
         self.assertEqual(runner["PATIENT_INPUT"], fixture.input_path)
         self.assertEqual(runner["EXPERIMENT_OUTPUT"], fixture.output)
         self.assertNotIn("OUTPUT", runner)
         self.assertEqual(fixture.events, [
-            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "create_embeddings"),
+            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "scripts.med_copilot_retrieval"),
             ("client", "test-key"),
         ])
         self.assertEqual(fixture.calls, [])
@@ -634,7 +653,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_no_legacy_outputs()
 
     def test_all_imports_are_in_the_header_before_function_or_class_definitions(self):
-        for source in (RUNNER, HELPERS):
+        for source in (RUNNER, HELPERS, RETRIEVAL):
             with self.subTest(file=source.name):
                 tree = ast.parse(source.read_text(encoding="utf-8"))
                 imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
@@ -697,7 +716,7 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "completed")
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assertEqual(fixture.events[:2], [
-            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "create_embeddings"),
+            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "scripts.med_copilot_retrieval"),
         ])
         self.assertEqual(sum(event[0] == "preload" for event in fixture.events), 1)
         self.assertEqual(sum(event[0] == "import" for event in fixture.events), 1)
@@ -720,11 +739,11 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertNotIn("response_format", fixture.calls[1])
         init, search = fixture.retrieval_calls
         self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
-        self.assertEqual(init[2:], (0.5, fixture.upstream))
-        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.upstream))
-        self.assertEqual(fixture.rerank_calls[0], ("init", fixture.upstream))
+        self.assertEqual(init[2:], (0.5, fixture.artifacts))
+        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.artifacts))
+        self.assertEqual(fixture.rerank_calls[0], ("init", fixture.artifacts))
         self.assertEqual(fixture.rerank_calls[1],
-                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
         self.assertEqual(fixture.graph_calls, [({
             "config_filepath": fixture.guidelines / "settings.yaml",
             "data_dir": fixture.guidelines / "output", "root_dir": fixture.guidelines,
@@ -878,7 +897,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(baseline, self.expected_reference_data())
         self.assertEqual(baseline["patient_retrieval"]["corpus_file"],
                          "med_copilot/upstream/soap_with_metadata.json")
-        self.assertEqual(baseline["patient_retrieval"]["artifacts_directory"], "med_copilot/upstream")
+        self.assertEqual(baseline["patient_retrieval"]["artifacts_directory"], "med_copilot/data/patient_retrieval_so")
         self.assertEqual(baseline["guidelines"]["directory"], "med_copilot/data/guidelines")
 
         (fixture.guidelines / "prompts/extract_graph.txt").write_text("CHANGED_UNUSED_PROMPT")
@@ -909,11 +928,11 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(current[other], previous[other])
                 previous = current
         # Fingerprints describe the regenerated artifacts actually loaded.
-        self.assertEqual((fixture.upstream / "index.faiss").read_bytes(), b"REBUILT_INDEX")
+        self.assertEqual((fixture.artifacts / "index.faiss").read_bytes(), b"REBUILT_INDEX")
 
         alternate = fixture.root / "alternate artifacts"
         alternate.mkdir()
-        for name in ("embeddings.npy", "index.faiss"):
+        for name in ("embeddings.npy", "index.faiss", "matching.json"):
             (alternate / name).write_bytes(b"ALTERNATE_" + name.encode())
         fixture.regenerated_artifacts = None
         fixture.retrieval_calls.clear()
@@ -1121,6 +1140,123 @@ class RunMedCopilotTests(unittest.TestCase):
     # Reference patients and per-patient stage outcomes
     # ----------------------------------------------------------------
 
+    def real_so_retrieval(self):
+        """Use production matching/cache code, mocking only external dependencies."""
+        fixture = self.fixture
+        adapter = fixture.modules["scripts.med_copilot_retrieval"]
+        stub = adapter.HybridRetriever(pd.DataFrame(fixture.corpus), alpha=0.5, encoder=None)
+        fixture.retrieval_calls.clear()
+        module = load_retrieval_module(keyword_client=stub.keyword_extractor.client)
+        encoder = FakeEncoder()
+        fixture.modules["sentence_transformers"].SentenceTransformer = lambda name: encoder
+        # NLP attribution is downstream display data, not matching or selection.
+        module.HybridRetriever.compute_case_phrase_contributions = Mock(return_value=([], []))
+        fixture.modules["scripts.med_copilot_retrieval"] = module
+        instances, rankers = [], []
+        retriever_class, reranker_class = module.HybridRetriever, module.CrossEncoderReranker
+
+        def retriever(*args, **kwargs):
+            instance = retriever_class(*args, **kwargs)
+            instance.search = Mock(wraps=instance.search)
+            instances.append(instance)
+            return instance
+
+        def reranker():
+            instance = reranker_class()
+            instance.rerank = Mock(wraps=instance.rerank)
+            rankers.append(instance)
+            return instance
+
+        module.HybridRetriever = retriever
+        module.CrossEncoderReranker = reranker
+        return SimpleNamespace(module=module, encoder=encoder, retrievers=instances, rankers=rankers)
+
+    def test_real_so_matching_excludes_reference_ap_and_keeps_full_soap_in_final_request_and_outputs(self):
+        fixture = self.fixture
+        fixture.corpus = [
+            {"note_id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
+             "assessment": "cough ONLY_IN_REFERENCE_A", "plan": "cough ONLY_IN_REFERENCE_P"},
+            {"note_id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
+             "assessment": "MATCH_ASSESSMENT", "plan": "MATCH_PLAN\nfollow-up"},
+        ]
+        fixture.write_corpus()
+        state = self.real_so_retrieval()
+        runner = self.load_runner()
+        clock = sequential_clock()
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
+            self.assertEqual(runner["main"](), "completed")
+        first_dir, first_run, first_results = self.read_run()
+        self.assertEqual(first_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        first_pairs = state.rankers[0].model.calls[0]
+        self.assertEqual(first_pairs, [(fixture.conditions, runner["matching_text"](record))
+                                      for record in reversed(fixture.corpus)])
+        self.assertEqual(state.encoder.calls[0], [runner["matching_text"](record)
+                                                for record in fixture.corpus])
+        for field in ("subjective", "objective", "assessment", "plan"):
+            self.assertIn(fixture.corpus[1][field], fixture.calls[-1]["messages"][-1]["content"])
+        self.assertEqual(first_results[0]["assessment_plan_raw"], fixture.final_output)
+        self.assertEqual(first_results[0]["assessment_plan_prompts"], {
+            "system": fixture.calls[-1]["messages"][0]["content"],
+            "user": fixture.calls[-1]["messages"][1]["content"],
+        })
+        self.assert_run_metadata(first_dir, first_run, "completed")
+        cache_before = {path.name: path.read_bytes() for path in fixture.artifacts.iterdir()}
+        # Read actual candidate scores from the downstream rerank input, captured
+        # without replacing the production matching or reranking implementation.
+        candidates_before = state.rankers[0].rerank.call_args.args[1]
+        first_scores = [{name: item[name] for name in
+                         ("idx", "embedding_score", "keyword_score", "hybrid_score", "rerank_score")}
+                        for item in candidates_before]
+        embedding_calls_before = len(state.encoder.calls)
+        for number, record in enumerate(fixture.corpus):
+            record.update(assessment=f"CHANGED_A_{number}", plan=f"CHANGED_P_{number}")
+        fixture.write_corpus()
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
+            self.assertEqual(runner["main"](), "completed")
+            self.assertEqual(Path.cwd(), fixture.caller)
+        second_dir = self.run_dirs()[-1]
+        _, second_run, second_results = self.read_run(second_dir)
+        self.assertEqual(second_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        self.assertEqual(state.rankers[1].model.calls[0], first_pairs)
+        self.assertEqual(cache_before, {path.name: path.read_bytes() for path in fixture.artifacts.iterdir()})
+        self.assertEqual(len(state.encoder.calls), embedding_calls_before + 1)  # query only, cache reused
+        self.assertIn("CHANGED_A_1", second_results[0]["assessment_plan_prompts"]["user"])
+        self.assertIn("CHANGED_P_1", second_results[0]["assessment_plan_prompts"]["user"])
+        candidates_after = state.rankers[1].rerank.call_args.args[1]
+        self.assertEqual(first_scores, [{name: item[name] for name in first_scores[0]}
+                                        for item in candidates_after])
+        self.assertNotEqual(first_run["reference_data"]["patient_retrieval"]["sha256"],
+                            second_run["reference_data"]["patient_retrieval"]["sha256"])
+        self.assertEqual((fixture.upstream / "index.faiss").read_bytes(), b"LEGACY_SOA")
+        self.assertEqual((fixture.upstream / "embeddings.npy").read_bytes(), b"LEGACY_SOA")
+
+    def test_real_so_cache_write_failure_stops_before_patients_and_reranker_failure_is_isolated(self):
+        fixture_root = self.fixture.root
+        for stage in ("cache_write", "reranking"):
+            with self.subTest(stage=stage):
+                self.fixture = PipelineFixture(fixture_root / stage)
+                fixture = self.fixture
+                state = self.real_so_retrieval()
+                runner = self.load_runner()
+                if stage == "cache_write":
+                    with fixture.runtime(), patch.object(state.module.faiss, "write_index",
+                                                         side_effect=OSError("cache write failed")):
+                        with self.assertRaisesRegex(OSError, "cache write failed"):
+                            runner["main"]()
+                    self.assert_stopped_run([(fixture.patient_id, "not_processed")])
+                    self.assertEqual(fixture.calls, [])
+                else:
+                    ranker = runner["CrossEncoderReranker"]()
+                    ranker.model.predict = Mock(side_effect=RuntimeError("reranking failed"))
+                    with fixture.runtime(), patch.dict(runner["main"].__globals__, {
+                        "CrossEncoderReranker": lambda: ranker,
+                    }):
+                        self.assertEqual(runner["main"](), "completed_with_errors")
+                    _, _, results = self.read_run()
+                    self.assertEqual(results[0]["status"], "failed_incomplete")
+                    self.assertIsNone(results[0]["assessment_plan_raw"])
+                    self.assertEqual(fixture.calls, [])
+
     def test_empty_reference_stages_continue_through_guidelines_and_final_generation(self):
         fixture_root = self.fixture.root
         for stage in ["corpus", "retrieval", "reranking"]:
@@ -1145,11 +1281,11 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertEqual(fixture.rerank_calls, [])
                 else:
                     self.assertEqual(fixture.retrieval_calls[1],
-                                     ("search", fixture.conditions, 20, fixture.upstream))
-                    self.assertEqual(fixture.rerank_calls[0], ("init", fixture.upstream))
+                                     ("search", fixture.conditions, 20, fixture.artifacts))
+                    self.assertEqual(fixture.rerank_calls[0], ("init", fixture.artifacts))
                 if stage == "reranking":
                     self.assertEqual(fixture.rerank_calls[1],
-                                     ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                                     ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
                 else:
                     self.assertEqual([call for call in fixture.rerank_calls if call[0] == "rerank"], [])
                 self.assertEqual(len(fixture.calls), 2)
@@ -1191,7 +1327,7 @@ class RunMedCopilotTests(unittest.TestCase):
         # Rows 1 and 2 tie; the upstream stable sort keeps retrieval order.
         scores = [0.5, 0.9, 0.9]
         reranker_class = frozen_reranker_class(scores)
-        fixture.modules["create_embeddings"].CrossEncoderReranker = reranker_class
+        fixture.modules["scripts.med_copilot_retrieval"].CrossEncoderReranker = reranker_class
         reference_text = reranker_class().rerank(
             "query", [dict(candidate) for candidate in fixture.candidates], topk=5)[0]
         self.assertIn("Reference P1", reference_text)
@@ -1989,10 +2125,10 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), fixture.caller)
         init, search = fixture.retrieval_calls
         self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
-        self.assertEqual(init[2:], (0.5, fixture.upstream))
-        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.upstream))
+        self.assertEqual(init[2:], (0.5, fixture.artifacts))
+        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.artifacts))
         self.assertEqual(fixture.rerank_calls[1],
-                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
         self.assertEqual(len(fixture.calls), 2)
         self.assertEqual(fixture.graph_calls[0][1], fixture.guidelines / "output")
         run_dir, run, results = self.read_run()

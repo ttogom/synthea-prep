@@ -30,6 +30,7 @@ export OPENAI_API_KEY="your-key"
 export GRAPHRAG_API_KEY="$OPENAI_API_KEY"
 
 python tests/test_med_copilot_helpers.py
+python tests/test_med_copilot_retrieval.py
 python tests/test_run_med_copilot.py
 python scripts/run_med_copilot.py
 ```
@@ -37,6 +38,8 @@ python scripts/run_med_copilot.py
 [requirements.txt](requirements.txt) contains the Python dependencies and the `en_core_sci_md` model. Keep it updated as the pipeline changes. BioClinicalBERT and the cross-encoder download from Hugging Face on the first run, so initial setup requires internet access.
 
 The runner processes every record in `experiments/input/patient_records_so.jsonl`, configured by `PATIENT_INPUT` in [scripts/run_med_copilot.py](scripts/run_med_copilot.py). Each line is a JSON object with a nonempty, unique string `id` and prepared `subjective` and `objective` strings, used directly without an LLM normalization call. Optional evaluation labels belong in `experiments/input/patient_records_so_labels.jsonl`, joined by `id`; the runner does not read them.
+
+Reference matching uses S/O only for embeddings, keyword overlap, and cross-encoder reranking, through [scripts/med_copilot_retrieval.py](scripts/med_copilot_retrieval.py). The selected reference's complete SOAP is still supplied to final generation. S/O embeddings and the FAISS index are built on first use under `med_copilot/data/patient_retrieval_so/`, separate from the upstream S/O/A artifacts. A `matching.json` manifest binds the cache to the ordered S/O texts and encoder identity and checks artifact hashes; missing, stale, or corrupt caches are rebuilt. Upstream source and artifacts are left intact.
 
 Each execution writes a new directory, never overwriting an existing one:
 

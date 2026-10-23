@@ -59,8 +59,8 @@ Define machine-readable run metadata and per-patient results that record:
 
 ## Needs further investigation
 
-1\. **Patient matching is asymmetric.** Our target query contains S/O, while reference embeddings, keyword scoring, and cross-encoder reranking still use **reference S/O/A**. The reference’s full SOAP becomes the generation example. Proposed reference-S/O-only matching remains unimplemented.  
-*Verified:* actual imported classes in `upstream/create_embeddings.py`, runner calls, and `reference_corpus_integration.md`.
+1\. **Patient matching is asymmetric.** **Resolved in the project runner:** `scripts/med_copilot_retrieval.py` now uses reference S/O for embeddings, keyword scoring, and cross-encoder reranking, with a separate validated S/O cache. The selected reference’s full SOAP remains the generation example. Upstream retains its original S/O/A implementation unchanged. Full-corpus integration and passage handling remain separate work.
+*Verified:* project-owned adapter, runner wiring, direct matching/cache tests, and full-pipeline regression tests confirming A/P-independent selection and full-SOAP generation evidence.
 
 2\. **Clinical keyword matching is a simpler implementation than the paper’s description establishes.** The used code averages extracted keyword embeddings and combines dense similarity with an **equally weighted substring-hit fraction**. There are no explicit clinical-importance weights or eligibility-constraint checks. This behavior is inherited from the release; the paper underspecifies its detailed scoring formula.  
 *Verified:* paper §§1, 3.3; keyword extraction, embedding, and scoring implementations.

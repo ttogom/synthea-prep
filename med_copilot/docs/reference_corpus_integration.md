@@ -2,7 +2,7 @@
 
 Integrate the reference patient corpus into `scripts/run_med_copilot.py` so retrieval and reranking compare the target patient's Subjective and Objective (S/O) against reference S/O. Keep each reference patient's Assessment and Plan (A/P) available for final generation. The target supplies S/O, and the final model generates A/P.
 
-The current runner imports `HybridRetriever` and `CrossEncoderReranker` from [upstream/create_embeddings.py](../upstream/create_embeddings.py). Those classes embed, score, and rerank reference S/O/A, and load relative cache files under `med_copilot/upstream/`. Generating S/O vectors alone does not change those behaviors. Implement the adaptations below in project-owned files; preserve upstream source.
+**Current status:** The runner now imports project-owned subclasses from `scripts/med_copilot_retrieval.py`. They match reference S/O for embeddings, keyword scoring, and reranking, retain full reference SOAP for generation, and manage a separate validated cache under `med_copilot/data/patient_retrieval_so/`. The document below remains a proposal for the larger reference corpus, standalone builder, and passage handling; those files and aggregation policies are not yet implemented. Preserve upstream source.
 
 All paths below are relative to the repository root. The builder and adapter are files to create as part of this integration.
 
