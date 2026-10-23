@@ -57,3 +57,7 @@ AGENTS.md
 
 # bytecode pycaches 
 *.pyc
+
+#local debug configs
+.vscode
+
