@@ -10,6 +10,9 @@
 # Generated data
 data/
 
+# MED-COPILOT experiment runs (run.json + results.jsonl per execution)
+/experiments/output/
+
 # MED-COPILOT files required to run the existing pipeline
 !/med_copilot/data/
 /med_copilot/data/*
@@ -54,3 +57,7 @@ AGENTS.md
 
 # bytecode pycaches 
 *.pyc
+
+#local debug configs
+.vscode
+

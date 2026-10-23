@@ -42,16 +42,16 @@ The runner explicitly unpacks:
 key_info, graphrag_context = run_local_search(...)
 ```
 
-It saves `key_info` to `answers_from_guidelines_db.txt` and passes it as
-`Key_info` when formatting the final prompt. It saves `graphrag_context`
-separately to `graphrag_context.json`.
+It saves `key_info` as each patient's `guideline_evidence` in `results.jsonl`
+and passes it as `Key_info` when formatting the final prompt. It saves
+`graphrag_context` separately as that patient's `graphrag_context`.
 
 The frozen upstream source remains unchanged. The explicit response/context
 boundary is implemented in the project-owned runner.
 
 ### Acceptance test
 
-The runner saves `final_prompt.txt`. Existing runner tests verify that final
+The runner saves the final prompt as `assessment_plan_prompts.user`. Existing runner tests verify that final
 generation receives guideline text and that the complete GraphRAG context is
 saved separately, rather than inserting the response/context tuple into the
 prompt.
@@ -106,6 +106,12 @@ source.
 ------------------------------------------------------------------------
 
 ## 3. Add Structured Experiment Output and Provenance
+
+**Status:** Partially addressed by #9. Each run now writes
+`experiments/output/<run name>/run.json` and `results.jsonl`; see the
+[handoff document](MED_COPILOT_diagnosis_plan_handoff.md#saved-run-outputs).
+Listed fields those files do not yet record, such as retrieved candidate
+scores, model and prompt versions, and runtime/errors, remain future work.
 
 ### Problem
 
