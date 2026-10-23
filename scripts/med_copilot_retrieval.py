@@ -155,7 +155,11 @@ class HybridRetriever(_UpstreamRetriever):
         )
 
     def search(self, query, topk=20):
+        self.ranked_candidates = None
         if topk <= 0 or not query.strip():
+            self.ranked_candidates = []
+            if getattr(self, "on_ranking", None) is not None:
+                self.on_ranking([])
             return []
         keywords = self.keyword_extractor.extract(query)
         query_vector = (self.build_query_embedding(keywords) if keywords else
@@ -189,6 +193,9 @@ class HybridRetriever(_UpstreamRetriever):
                 "hybrid_score": self.alpha * float(score) + (1 - self.alpha) * keyword_score,
             })
         candidates = sorted(candidates, key=lambda item: item["hybrid_score"], reverse=True)[:topk]
+        self.ranked_candidates = candidates
+        if getattr(self, "on_ranking", None) is not None:
+            self.on_ranking(candidates)
         # Full-SOAP phrase attribution is display/generation evidence only. It
         # runs after hybrid selection and is never an input to either ranker.
         for candidate in candidates:
@@ -205,7 +212,11 @@ class CrossEncoderReranker(_UpstreamReranker):
     """Score only S/O pairs and format the winning candidates' full SOAP."""
 
     def rerank(self, query, candidates, topk=5):
+        self.ranked_candidates = None
         if topk <= 0 or not candidates or not query.strip():
+            self.ranked_candidates = []
+            if getattr(self, "on_ranking", None) is not None:
+                self.on_ranking([])
             return []
         pairs = [(query, matching_text(candidate)) for candidate in candidates]
         scores = np.asarray(self.model.predict(pairs)).reshape(-1)
@@ -214,6 +225,9 @@ class CrossEncoderReranker(_UpstreamReranker):
         for candidate, score in zip(candidates, scores):
             candidate["rerank_score"] = float(score)
         ranked = sorted(candidates, key=lambda item: item["rerank_score"], reverse=True)[:topk]
+        self.ranked_candidates = ranked
+        if getattr(self, "on_ranking", None) is not None:
+            self.on_ranking(ranked)
         results = []
         for number, record in enumerate(ranked, 1):
             info = f"""

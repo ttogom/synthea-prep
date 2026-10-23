@@ -25,6 +25,12 @@ PATIENT_STATUSES = ("completed", "failed_incomplete", "not_processed")
 PATIENT_RESULT_FIELDS = (
     "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
+    "reranked_patient_ids", "model_responses",
+)
+MODEL_RESPONSE_STAGES = (
+    "keyword_extraction", "guideline_questions", "guideline_query_embedding",
+    "guideline_evidence", "assessment_plan",
 )
 # A line naming one generated section: the Markdown heading the final prompt
 # requests ("## Assessment", "## Plan") or a standalone label ("Assessment:",
@@ -268,8 +274,66 @@ def reference_data_metadata(root, *, corpus_file, artifacts_directory, artifact_
 # ---------------------------------------------------------------------
 
 def new_patient_result(patient_id, status=None):
-    """An in-progress (status None) or final patient record with null outputs."""
-    return {"id": patient_id, "status": status, **dict.fromkeys(PATIENT_RESULT_FIELDS)}
+    """Fresh patient outputs; provider response lists are independent per stage/patient."""
+    return {"id": patient_id, "status": status, **dict.fromkeys(PATIENT_RESULT_FIELDS),
+            "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES}}
+
+
+def model_response_metadata(response):
+    """Copy only provider-reported model, response ID, and token counts."""
+    def value(source, key):
+        return source.get(key) if isinstance(source, dict) else getattr(source, key, None)
+
+    model, response_id, usage = (value(response, key) for key in ("model", "id", "usage"))
+    counts = None
+    if usage is not None:
+        counts = {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            count = value(usage, key)
+            counts[key] = count if isinstance(count, int) and not isinstance(count, bool) else None
+    return {"reported_model": model if isinstance(model, str) else None,
+            "response_id": response_id if isinstance(response_id, str) else None,
+            "token_usage": counts}
+
+
+def reference_patient_identity(corpus_records, row):
+    """Identify one reference case, using its corpus position to disambiguate IDs."""
+    row = int(row)
+    if not 0 <= row < len(corpus_records):
+        raise ValueError(f"Reference corpus row out of range: {row}")
+    note_id = corpus_records[row].get("note_id")
+    if not isinstance(note_id, str) or not note_id.strip():
+        return {"corpus_row": row}
+    if sum(record.get("note_id") == note_id for record in corpus_records) > 1:
+        return {"note_id": note_id, "corpus_row": row}
+    return {"note_id": note_id}
+
+
+def ranked_reference_patients(corpus_records, candidates):
+    """Snapshot case IDs and available unrounded scores in the supplied ranking order."""
+    return [{**reference_patient_identity(corpus_records, candidate["idx"]),
+             **{score: float(candidate[score]) for score in
+                ("embedding_score", "keyword_score", "hybrid_score", "rerank_score")
+                if score in candidate}} for candidate in candidates]
+
+
+def prepare_patient_output_capture(result, corpus_records, retriever, reranker):
+    """Bind shared components to this result and reset their retained rankings.
+
+    Called before any patient stage can fail. Each ranking callback snapshots
+    IDs/scores into its own result field using this patient's reference corpus.
+    Bindings remain attached until the next patient calls this helper.
+    """
+    extractor = getattr(retriever, "keyword_extractor", None)
+    if extractor is not None:
+        extractor.capture_result = result
+    for component, field in ((retriever, "retrieved_patient_ids"),
+                             (reranker, "reranked_patient_ids")):
+        if component is not None:
+            component.ranked_candidates = None
+            def save_ranking(ranking, field=field):
+                result[field] = ranked_reference_patients(corpus_records, ranking)
+            component.on_ranking = save_ranking
 
 
 def selected_reference_patient(corpus_records, candidates, reranked):
@@ -282,13 +346,7 @@ def selected_reference_patient(corpus_records, candidates, reranked):
     if not reranked:
         return None
     top = sorted(candidates, key=lambda candidate: candidate["rerank_score"], reverse=True)[0]
-    row = int(top["idx"])
-    note_id = corpus_records[row].get("note_id")
-    if not isinstance(note_id, str) or not note_id.strip():
-        return {"corpus_row": row}
-    if sum(record.get("note_id") == note_id for record in corpus_records) > 1:
-        return {"note_id": note_id, "corpus_row": row}
-    return {"note_id": note_id}
+    return reference_patient_identity(corpus_records, top["idx"])
 
 
 def parse_guideline_questions(response):
@@ -447,8 +505,13 @@ class JSONKeywordExtractor:
     def __init__(self, client, model):
         self.client = client
         self.model = model
+        self.capture_result = None
 
     def extract(self, text):
+        capture = self.capture_result
+        if capture is not None:
+            capture["keyword_extraction_raw"] = None
+            capture["retrieval_keywords"] = None
         prompt = f"""
 You are a clinical NLP expert.
 From the following clinical note, extract medically meaningful entities.
@@ -472,6 +535,12 @@ Text:
             temperature=0,
             response_format={"type": "json_object"},
         )
+        if capture is not None:
+            capture["model_responses"]["keyword_extraction"].append(model_response_metadata(response))
+            choices = getattr(response, "choices", None)
+            content = getattr(getattr(choices[0], "message", None), "content", None) if choices else None
+            if isinstance(content, str):
+                capture["keyword_extraction_raw"] = content
         if not getattr(response, "choices", None):
             raise ValueError("Keyword extraction returned no choices")
         choice = response.choices[0]
@@ -496,4 +565,7 @@ Text:
             if not isinstance(terms, list) or any(not isinstance(term, str) for term in terms):
                 raise ValueError(f"Keyword extraction {category} must be a list of strings")
             keywords.extend(term.strip() for term in terms)
-        return list(dict.fromkeys(keywords))
+        keywords = list(dict.fromkeys(keywords))
+        if capture is not None:
+            capture["retrieval_keywords"] = list(keywords)
+        return keywords

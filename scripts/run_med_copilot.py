@@ -31,6 +31,7 @@ PATIENT_INPUT = ROOT / "experiments" / "input" / "patient_records_so.jsonl"
 _preloaded_bioclinicalbert = SentenceTransformer("emilyalsentzer/Bio_ClinicalBERT")
 
 from scripts.med_copilot_retrieval import HybridRetriever, CrossEncoderReranker, matching_text
+from scripts.med_copilot_observability import capture_graphrag_responses
 from graphrag.cli.query import run_local_search
 from med_copilot.prompts.diagnosis_plan import (
     KEY_QUESTIONS_TEMPLATE,
@@ -43,9 +44,11 @@ from scripts.med_copilot_helpers import (
     git_commit,
     graphrag_context_json,
     load_patient_records,
+    model_response_metadata,
     new_patient_result,
     pacific_now,
     parse_guideline_questions,
+    prepare_patient_output_capture,
     reference_data_metadata,
     selected_reference_patient,
     split_assessment_plan,
@@ -59,6 +62,7 @@ client = OpenAI(api_key=api_key)
 
 def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output):
     """Run every pipeline stage for one patient, filling `result` as stages finish."""
+    prepare_patient_output_capture(result, corpus_records, retriever, reranker)
     s_o = matching_text(patient)
 # %% ------------------------------------------------------------------
 # Similar-patient retrieval + reranking
@@ -106,6 +110,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
             },
         ],
     )
+    result["model_responses"]["guideline_questions"].append(model_response_metadata(key_response))
 
     key_questions = key_response.choices[0].message.content
     # The raw response remains the GraphRAG query; parsing only records it.
@@ -119,7 +124,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
 # ---------------------------------------------------------------------
 
     # The vendored table loader uses the working directory instead of storage's root.
-    with chdir(guideline_output):
+    with chdir(guideline_output), capture_graphrag_responses(result["model_responses"]):
         key_info, graphrag_context = run_local_search(
             config_filepath=GUIDELINES / "settings.yaml",
             data_dir=guideline_output,
@@ -166,6 +171,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
         model=model,
         messages=final_messages,
     )
+    result["model_responses"]["assessment_plan"].append(model_response_metadata(final_response))
 
     generated_plan = final_response.choices[0].message.content
     result["assessment_plan_raw"] = generated_plan

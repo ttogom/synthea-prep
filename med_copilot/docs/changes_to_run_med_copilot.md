@@ -110,8 +110,7 @@ source.
 **Status:** Partially addressed by #9. Each run now writes
 `experiments/output/<run name>/run.json` and `results.jsonl`; see the
 [handoff document](MED_COPILOT_diagnosis_plan_handoff.md#saved-run-outputs).
-Listed fields those files do not yet record, such as retrieved candidate
-scores, model and prompt versions, and runtime/errors, remain future work.
+Retained candidate IDs/scores and provider-reported model/response/usage metadata are now captured; see the [output schema](output_schema.md). Prompt versions and runtime/error details remain future work.
 
 ### Problem
 

@@ -32,6 +32,8 @@ GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relations
 RESULT_FIELDS = [
     "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
+    "reranked_patient_ids", "model_responses",
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
@@ -381,7 +383,8 @@ class HelperImportTests(unittest.TestCase):
             "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
-            "write_run_json",
+            "write_run_json", "model_response_metadata", "reference_patient_identity",
+            "ranked_reference_patients", "prepare_patient_output_capture",
         ]), "Add direct tests when adding a public helper")
 
     def test_all_helper_imports_are_in_the_module_header(self):
@@ -840,7 +843,8 @@ class PatientOutputHelperTests(unittest.TestCase):
     def test_new_patient_result_has_every_field_in_order_with_null_outputs(self):
         self.assertEqual(list(H["new_patient_result"]("p")), RESULT_FIELDS)
         self.assertEqual(H["new_patient_result"]("p"), {"id": "p", "status": None,
-                                                        **dict.fromkeys(RESULT_FIELDS[2:])})
+                                                        **dict.fromkeys(RESULT_FIELDS[2:]),
+                                                        "model_responses": {stage: [] for stage in H["MODEL_RESPONSE_STAGES"]}})
         self.assertEqual(H["new_patient_result"]("p", "not_processed")["status"], "not_processed")
 
     def test_selected_reference_patient_follows_rerank_scores_not_candidate_order(self):
@@ -1202,6 +1206,269 @@ class ExperimentRunTests(TemporaryRootTestCase):
         self.assertEqual(results, [self.result("a", "not_processed")])
         self.assertEqual(metadata["status"], "running")
         self.assertEqual({path.name for path in run.run_dir.iterdir()}, {"run.json", "results.jsonl"})
+
+
+class CaptureHelperTests(unittest.TestCase):
+    def test_patient_initial_capture_values_and_stage_lists_are_independent(self):
+        first, second = H["new_patient_result"]("a"), H["new_patient_result"]("b", "not_processed")
+        for field in ("keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids", "reranked_patient_ids"):
+            self.assertIsNone(first[field])
+            self.assertIsNone(second[field])
+        self.assertEqual(list(first["model_responses"]), list(H["MODEL_RESPONSE_STAGES"]))
+        first["model_responses"]["keyword_extraction"].append({"sentinel": 1})
+        self.assertEqual(second["model_responses"], {stage: [] for stage in H["MODEL_RESPONSE_STAGES"]})
+        self.assertTrue(all(value == [] for stage, value in first["model_responses"].items()
+                            if stage != "keyword_extraction"))
+
+    def test_metadata_uses_only_provider_fields_and_handles_partial_usage(self):
+        normalize = H["model_response_metadata"]
+        self.assertEqual(normalize(SimpleNamespace(model="reported", id="provider-id", usage=SimpleNamespace(
+            prompt_tokens=0, total_tokens=17), _request_id="http-id")), {
+                "reported_model": "reported", "response_id": "provider-id",
+                "token_usage": {"prompt_tokens": 0, "completion_tokens": None, "total_tokens": 17}})
+        self.assertEqual(normalize({"model": "dict-model", "usage": {"completion_tokens": 3}}), {
+            "reported_model": "dict-model", "response_id": None,
+            "token_usage": {"prompt_tokens": None, "completion_tokens": 3, "total_tokens": None}})
+        for source in (None, {}, SimpleNamespace(_request_id="http-id"), Mock()):
+            actual = normalize(source)
+            self.assertIsNone(actual["reported_model"])
+            self.assertIsNone(actual["response_id"])
+        self.assertEqual(normalize({"usage": {"prompt_tokens": True, "total_tokens": "3"}})["token_usage"],
+                         {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None})
+        self.assertIsNone(normalize({})["token_usage"])
+        self.assertEqual(normalize({"usage": {}})["token_usage"],
+                         {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None})
+
+    def test_reference_identity_and_rank_snapshots_preserve_rows_order_and_full_scores(self):
+        corpus = [{"note_id": "DUP", "subject_id": "same"}, {"note_id": "unique"},
+                  {"note_id": "DUP"}, {"note_id": "  "}, {"note_id": 5}, {}]
+        expected = [{"note_id": "DUP", "corpus_row": 2}, {"corpus_row": 5},
+                    {"note_id": "unique"}, {"corpus_row": 3}, {"corpus_row": 4}]
+        for row, identity in zip((2, 5, 1, 3, 4), expected):
+            self.assertEqual(H["reference_patient_identity"](corpus, row), identity)
+        for row in (-1, len(corpus), "invalid", None):
+            with self.assertRaises((ValueError, TypeError)):
+                H["reference_patient_identity"](corpus, row)
+        candidates = [{"idx": 2, "hybrid_score": 0.123456789, "embedding_score": .9,
+                       "keyword_score": 0, "display_text": "PRIVATE SOAP"},
+                      {"idx": 5, "hybrid_score": 0.123456789, "rerank_score": -3.21}]
+        saved = H["ranked_reference_patients"](corpus, candidates)
+        self.assertEqual(saved, [{**expected[0], "embedding_score": .9, "keyword_score": 0.,
+                                  "hybrid_score": .123456789},
+                                 {**expected[1], "hybrid_score": .123456789, "rerank_score": -3.21}])
+        candidates[0]["hybrid_score"] = 88
+        self.assertEqual(saved[0]["hybrid_score"], .123456789)
+        self.assertEqual(H["ranked_reference_patients"](corpus, []), [])
+        with self.assertRaises(ValueError):
+            H["ranked_reference_patients"](corpus, [{"idx": 100}])
+
+    def test_extraction_captures_raw_and_metadata_before_every_validation_failure(self):
+        contents = ['{"symptoms":', '[]', '{"symptoms": [], "diagnoses": []}',
+                    '{"symptoms": [1], "diagnoses": [], "medications": []}',
+                    '', ' \n\t ', None, ["non-string"]]
+        replies = [keyword_response(content) for content in contents]
+        replies += [keyword_response("refused café", refusal="refusal"),
+                    keyword_response('{"symptoms": []}', finish_reason="length"),
+                    SimpleNamespace(choices=[]), SimpleNamespace(),
+                    SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace())])]
+        for response in replies:
+            with self.subTest(response=response):
+                response.model, response.id = "reported-not-requested", "provider-id"
+                response.usage = SimpleNamespace(prompt_tokens=4, completion_tokens=0, total_tokens=4)
+                client = Mock()
+                client.chat.completions.create.return_value = response
+                extractor = H["JSONKeywordExtractor"](client, "requested")
+                record = H["new_patient_result"]("p")
+                extractor.capture_result = record
+                with self.assertRaises((ValueError, AttributeError)):
+                    extractor.extract("S/O")
+                choices = getattr(response, "choices", None)
+                content = getattr(getattr(choices[0], "message", None), "content", None) if choices else None
+                self.assertEqual(record["keyword_extraction_raw"], content if isinstance(content, str) else None)
+                self.assertIsNone(record["retrieval_keywords"])
+                self.assertEqual(record["model_responses"]["keyword_extraction"], [{
+                    "reported_model": "reported-not-requested", "response_id": "provider-id",
+                    "token_usage": {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}}])
+                client.chat.completions.create.assert_called_once()
+
+    def test_success_raw_roundtrip_processed_list_empty_and_api_exception(self):
+        client = Mock()
+        extractor = H["JSONKeywordExtractor"](client, "requested")
+        raw = ' \n{ "medications": [" café ", "药"], "symptoms": [" 左腕 ", "café", "左腕"], "diagnoses": ["Cough", "café"] }\t '
+        for content, expected in [(raw, ["左腕", "café", "Cough", "药"]),
+                                  ('{"symptoms": [], "diagnoses": [], "medications": []}', [])]:
+            record = H["new_patient_result"]("p")
+            extractor.capture_result = record
+            client.chat.completions.create.return_value = keyword_response(content)
+            returned = extractor.extract("S/O")
+            self.assertEqual(returned, expected)
+            self.assertEqual(record["retrieval_keywords"], expected)
+            self.assertIsNot(returned, record["retrieval_keywords"])
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "results.jsonl"
+                path.write_text(json.dumps(record, ensure_ascii=False) + '\n', encoding="utf-8")
+                self.assertEqual(json.loads(path.read_text())["keyword_extraction_raw"], content)
+        record = H["new_patient_result"]("new")
+        extractor.capture_result = record
+        error = RuntimeError("API failure")
+        client.chat.completions.create.side_effect = error
+        with self.assertRaises(RuntimeError) as caught:
+            extractor.extract("S/O")
+        self.assertIs(caught.exception, error)
+        self.assertIsNone(record["keyword_extraction_raw"])
+        self.assertIsNone(record["retrieval_keywords"])
+        self.assertEqual(record["model_responses"]["keyword_extraction"], [])
+
+class PreparePatientOutputCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.prepare = H["prepare_patient_output_capture"]
+        self.record = H["new_patient_result"]("patient")
+        self.extractor = SimpleNamespace(capture_result="previous-result", extract=Mock())
+        self.retriever = SimpleNamespace(keyword_extractor=self.extractor, ranked_candidates=["old-hybrid"],
+                                         on_ranking=Mock(), search=Mock())
+        self.reranker = SimpleNamespace(ranked_candidates=["old-reranked"], on_ranking=Mock(), rerank=Mock())
+        self.corpus = [{"note_id": "DUP"}, {"note_id": "unique café"}, {"note_id": "DUP"}, {}]
+
+    def test_preparation_binds_result_resets_rankings_and_leaves_outputs_and_models_untouched(self):
+        self.record["keyword_extraction_raw"] = "already captured"
+        self.record["retrieval_keywords"] = ["already captured"]
+        snapshot = json.loads(json.dumps(self.record))
+        callbacks = (self.retriever.on_ranking, self.reranker.on_ranking)
+        self.assertIsNone(self.prepare(self.record, self.corpus, self.retriever, self.reranker))
+        self.assertIs(self.extractor.capture_result, self.record)
+        for component, previous in zip((self.retriever, self.reranker), callbacks):
+            self.assertIsNone(component.ranked_candidates)
+            self.assertTrue(callable(component.on_ranking))
+            self.assertIsNot(component.on_ranking, previous)
+        self.assertEqual(self.record, snapshot)
+        self.extractor.extract.assert_not_called()
+        self.retriever.search.assert_not_called()
+        self.reranker.rerank.assert_not_called()
+
+    def test_callbacks_keep_distinct_fields_and_snapshot_order_identities_scores_and_jsonl(self):
+        self.prepare(self.record, self.corpus, self.retriever, self.reranker)
+        hybrid = [{"idx": 2, "embedding_score": .9123456789, "keyword_score": .5,
+                   "hybrid_score": .70617283945, "assessment": "PRIVATE SOAP"},
+                  {"idx": 3, "hybrid_score": .4}, {"idx": 1, "hybrid_score": .3}]
+        reranked = [{**hybrid[2], "rerank_score": .987654321},
+                    {**hybrid[0], "rerank_score": .987654321}]
+        # Invoke reranking first to catch callbacks accidentally sharing the
+        # loop's final field; callbacks must preserve the supplied order.
+        self.assertIsNone(self.reranker.on_ranking(reranked))
+        self.assertIsNone(self.record["retrieved_patient_ids"])
+        self.assertIsNone(self.retriever.on_ranking(hybrid))
+        expected_hybrid = [
+            {"note_id": "DUP", "corpus_row": 2, "embedding_score": .9123456789,
+             "keyword_score": .5, "hybrid_score": .70617283945},
+            {"corpus_row": 3, "hybrid_score": .4}, {"note_id": "unique café", "hybrid_score": .3}]
+        expected_reranked = [
+            {"note_id": "unique café", "hybrid_score": .3, "rerank_score": .987654321},
+            {**expected_hybrid[0], "rerank_score": .987654321}]
+        self.assertEqual(self.record["retrieved_patient_ids"], expected_hybrid)
+        self.assertEqual(self.record["reranked_patient_ids"], expected_reranked)
+        hybrid[0]["hybrid_score"], reranked[0]["rerank_score"] = -999, -999
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "results.jsonl"
+            path.write_text(json.dumps(self.record, ensure_ascii=False) + '\n', encoding="utf-8")
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["retrieved_patient_ids"], expected_hybrid)
+        self.assertEqual(persisted["reranked_patient_ids"], expected_reranked)
+        self.assertNotIn("PRIVATE SOAP", json.dumps(persisted))
+        self.retriever.on_ranking([])
+        self.assertEqual(self.record["retrieved_patient_ids"], [])
+        self.assertEqual(self.record["reranked_patient_ids"], expected_reranked)
+        self.reranker.on_ranking([])
+        self.assertEqual(self.record["reranked_patient_ids"], [])
+
+    def test_missing_components_and_extractors_are_supported_without_changing_other_fields(self):
+        for use_retriever, use_reranker, extractor_state in (
+            (False, False, "missing"), (False, True, "missing"),
+            (True, False, "missing"), (True, True, "none"), (True, True, "present"),
+        ):
+            with self.subTest(retriever=use_retriever, reranker=use_reranker, extractor=extractor_state):
+                record = H["new_patient_result"]("optional")
+                retriever = SimpleNamespace() if use_retriever else None
+                reranker = SimpleNamespace() if use_reranker else None
+                extractor = SimpleNamespace(capture_result="stale")
+                if use_retriever and extractor_state != "missing":
+                    retriever.keyword_extractor = extractor if extractor_state == "present" else None
+                self.assertIsNone(self.prepare(record, [], retriever, reranker))
+                self.assertEqual(record, H["new_patient_result"]("optional"))
+                for component, field in ((retriever, "retrieved_patient_ids"),
+                                         (reranker, "reranked_patient_ids")):
+                    if component is not None:
+                        self.assertIsNone(component.ranked_candidates)
+                        component.on_ranking([])
+                        self.assertEqual(record[field], [])
+                    else:
+                        self.assertIsNone(record[field])
+                if use_retriever and extractor_state == "present":
+                    self.assertIs(extractor.capture_result, record)
+
+    def test_callback_errors_propagate_without_overwriting_captures_and_binding_remains_usable(self):
+        self.prepare(self.record, self.corpus, self.retriever, self.reranker)
+        for component, field in ((self.retriever, "retrieved_patient_ids"),
+                                 (self.reranker, "reranked_patient_ids")):
+            with self.subTest(field=field):
+                component.on_ranking([{"idx": 1, "hybrid_score": .123456789}])
+                saved = json.loads(json.dumps(self.record))
+                for candidates, error in (([{"idx": 100}], ValueError), ([{}], KeyError),
+                                          ([{"idx": 1, "hybrid_score": "invalid"}], ValueError)):
+                    with self.assertRaises(error):
+                        component.on_ranking(candidates)
+                    self.assertEqual(self.record, saved)
+                component.on_ranking([])
+                self.assertEqual(self.record[field], [])
+
+    def test_reused_components_capture_only_current_result_and_corpus_after_extraction_failure(self):
+        client = Mock()
+        extractor = H["JSONKeywordExtractor"](client, "requested")
+        self.retriever.keyword_extractor = extractor
+        records, snapshots, previous_callbacks = [], [], None
+        for index, note_id in enumerate(("first", "second", "第三")):
+            record = H["new_patient_result"](note_id)
+            corpus = [{"note_id": note_id}]
+            self.retriever.ranked_candidates = ["old-hybrid"]
+            self.reranker.ranked_candidates = ["old-reranked"]
+            calls_before = client.chat.completions.create.call_count
+            self.prepare(record, corpus, self.retriever, self.reranker)
+            self.assertEqual(client.chat.completions.create.call_count, calls_before)
+            self.assertIs(extractor.capture_result, record)
+            for component in (self.retriever, self.reranker):
+                self.assertIsNone(component.ranked_candidates)
+            current_callbacks = (self.retriever.on_ranking, self.reranker.on_ranking)
+            if previous_callbacks is not None:
+                for current, previous in zip(current_callbacks, previous_callbacks):
+                    self.assertIsNot(current, previous)
+            previous_callbacks = current_callbacks
+            if index == 1:
+                client.chat.completions.create.side_effect = RuntimeError("API unavailable")
+                with self.assertRaisesRegex(RuntimeError, "API unavailable"):
+                    extractor.extract("S/O")
+                self.assertEqual(record, H["new_patient_result"](note_id))
+            else:
+                raw = json.dumps({"symptoms": [f" {note_id} ", note_id],
+                                  "diagnoses": [], "medications": []}, ensure_ascii=False)
+                response = keyword_response(raw)
+                response.model, response.id = f"reported-{note_id}", f"response-{note_id}"
+                client.chat.completions.create.side_effect = None
+                client.chat.completions.create.return_value = response
+                self.assertEqual(extractor.extract("S/O"), [note_id])
+                self.retriever.on_ranking([{"idx": 0, "hybrid_score": index + .123456789}])
+                self.reranker.on_ranking([{"idx": 0, "rerank_score": index + .987654321}])
+                self.assertEqual(record["keyword_extraction_raw"], raw)
+                self.assertEqual(record["retrieval_keywords"], [note_id])
+                self.assertEqual(record["retrieved_patient_ids"], [
+                    {"note_id": note_id, "hybrid_score": index + .123456789}])
+                self.assertEqual(record["reranked_patient_ids"], [
+                    {"note_id": note_id, "rerank_score": index + .987654321}])
+                self.assertEqual(record["model_responses"]["keyword_extraction"], [{
+                    "reported_model": f"reported-{note_id}", "response_id": f"response-{note_id}",
+                    "token_usage": None}])
+            records.append(record)
+            snapshots.append(json.loads(json.dumps(record)))
+            self.assertEqual(records, snapshots)
+        self.assertEqual(client.chat.completions.create.call_count, 3)
 
 
 if __name__ == "__main__":

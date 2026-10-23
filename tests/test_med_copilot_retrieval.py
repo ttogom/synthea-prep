@@ -410,6 +410,70 @@ class SOMatchingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "model failure"):
             reranker.rerank("query", candidates)
 
+    def test_hybrid_capture_is_retained_topk_before_attribution_with_unrounded_scores(self):
+        records = [dict(self.records[index % 2], note_id=f"N{index}") for index in range(35)]
+        retriever = self.retriever(records)
+        saved = []
+        retriever.on_ranking = lambda ranking: saved.append(copy.deepcopy(ranking))
+        retriever.compute_case_phrase_contributions.side_effect = RuntimeError("attribution")
+        with self.assertRaisesRegex(RuntimeError, "attribution"):
+            retriever.search("cough", topk=20)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(len(saved[0]), 20)
+        self.assertEqual([item["idx"] for item in saved[0]], list(range(1, 35, 2)) + [0, 2, 4])
+        self.assertEqual([item["idx"] for item in retriever.ranked_candidates],
+                         [item["idx"] for item in saved[0]])
+        self.assertTrue(all("term_contributions" not in item for item in saved[0]))
+        self.assertEqual(saved[0][0]["hybrid_score"],
+                         .5 * saved[0][0]["embedding_score"] + .5 * saved[0][0]["keyword_score"])
+        retriever.keyword_extractor.extract.side_effect = RuntimeError("next patient")
+        with self.assertRaisesRegex(RuntimeError, "next patient"):
+            retriever.search("cough")
+        self.assertIsNone(retriever.ranked_candidates)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(retriever.search(" "), [])
+        self.assertEqual(retriever.ranked_candidates, [])
+        self.assertEqual(saved[-1], [])
+
+    def test_rerank_capture_precedes_formatting_and_keeps_actual_topfive_stable_ties(self):
+        records = [dict(self.records[index % 2], note_id=f"N{index}") for index in range(8)]
+        candidates = self.retriever(records).search("cough")
+        reranker = self.module.CrossEncoderReranker()
+        reranker.model.predict = Mock(return_value=[.1, .987654321, .987654321, .3, .4, .5, .6, .7])
+        saved = []
+        reranker.on_ranking = lambda ranking: saved.append(copy.deepcopy(ranking))
+        for candidate in candidates:
+            del candidate["dominant_terms"]
+        with self.assertRaises(KeyError):
+            reranker.rerank("cough", candidates, topk=5)
+        expected = [candidates[index]["idx"] for index in (1, 2, 7, 6, 5)]
+        self.assertEqual([item["idx"] for item in saved[0]], expected)
+        self.assertEqual(saved[0][0]["rerank_score"], .987654321)
+        self.assertEqual([item["idx"] for item in reranker.ranked_candidates], expected)
+        reranker.model.predict.assert_called_once()
+        reranker.model.predict.side_effect = RuntimeError("next patient")
+        with self.assertRaisesRegex(RuntimeError, "next patient"):
+            reranker.rerank("cough", candidates)
+        self.assertIsNone(reranker.ranked_candidates)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(reranker.rerank("cough", []), [])
+        self.assertEqual(saved[-1], [])
+
+    def test_observing_rankings_changes_neither_predictions_calls_scores_nor_full_soap(self):
+        retriever = self.retriever()
+        first = retriever.search("cough")
+        reranker = self.module.CrossEncoderReranker()
+        expected = reranker.rerank("cough", first)
+        retriever.on_ranking, reranker.on_ranking = Mock(), Mock()
+        second = retriever.search("cough")
+        actual = reranker.rerank("cough", second)
+        self.assertEqual(actual, expected)
+        self.assertEqual(first, second)
+        retriever.on_ranking.assert_called_once_with(second)
+        reranker.on_ranking.assert_called_once_with(reranker.ranked_candidates)
+        self.assertEqual(len(reranker.model.calls), 2)
+        self.assertEqual(retriever.keyword_extractor.extract.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
