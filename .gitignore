@@ -21,6 +21,9 @@ data/
 /med_copilot/data/guidelines/*
 !/med_copilot/data/guidelines/.gitattributes
 !/med_copilot/data/guidelines/settings.yaml
+!/med_copilot/data/guidelines/guideline_manifest.csv
+!/med_copilot/data/guidelines/guideline_manifest.json
+!/med_copilot/data/guidelines/provenance/
 !/med_copilot/data/guidelines/prompts/
 !/med_copilot/data/guidelines/output/
 

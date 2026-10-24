@@ -1,0 +1,26 @@
+{
+  "documents": 226,
+  "identity_status": {
+    "verified": 226
+  },
+  "source_types": {
+    "NICE_guideline": 221,
+    "journal_guideline": 5
+  },
+  "version_status": {
+    "isbn_matches_current_pdf_exact_revision_unverified": 203,
+    "historical_isbn_differs_from_current_pdf_revision_unverified": 17,
+    "superseded_guideline_pdf_unavailable_revision_unverified": 1,
+    "doi_and_publication_edition_verified": 5
+  },
+  "exact_original_pdf_snapshot_verified": 0,
+  "local_change_month_found": 180,
+  "title_changes": [
+    "NG36",
+    "NG49",
+    "NG52"
+  ],
+  "superseded_sources": [
+    "NG51"
+  ]
+}
