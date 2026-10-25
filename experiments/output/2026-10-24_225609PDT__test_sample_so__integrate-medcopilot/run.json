@@ -1,0 +1,85 @@
+{
+  "run_name": "2026-10-24_225609PDT__test_sample_so__integrate-medcopilot",
+  "started_at": "2026-10-24T22:56:09-07:00",
+  "finished_at": "2026-10-24T23:02:40-07:00",
+  "status": "completed",
+  "branch": "integrate-medcopilot",
+  "input": {
+    "file": "experiments/input/test_sample_so.jsonl",
+    "sha256": "7145b11d55e21b5e2020ff050b1ad41a632f7c4e7b1075dbd4b21bb8a4bebbfc"
+  },
+  "git_commit": "1e7b8caac74a9b63ec494dd76a2fd5f7e859afc7",
+  "reference_data": {
+    "patient_retrieval": {
+      "corpus_file": "med_copilot/upstream/soap_with_metadata.json",
+      "artifacts_directory": "med_copilot/data/patient_retrieval_so",
+      "sha256": "84ecf49773527ebfbb53602a790d451716f655058842a65b907fdd08f55cfd8b"
+    },
+    "guidelines": {
+      "directory": "med_copilot/data/guidelines",
+      "sha256": "35a203dbda3f9fee1ecd053b91c7d7f76f90ceab719d1c438b16a28c1c8333c0"
+    }
+  },
+  "evaluation": {
+    "labels_path": "experiments/input/test_sample_labels.jsonl",
+    "labels_sha256": "e6040762a4aeac46e78e64316b26e0fe5eb9e5f31e381578940f42b2f4aea907",
+    "evaluator_path": "med_copilot/upstream/evaluate_metrics.py",
+    "evaluator_sha256": "097222eeff2af7bbb8360210c8faabcc32f4adb4ff13b905a6fedf4e7245a001",
+    "presenting_evidence_only": true,
+    "input_patient_count": 10,
+    "selected_patient_count": 7,
+    "selected_patient_ids": [
+      "bacterial_sinusitis_88c45b54-e69a-fead-f18b-b54d517ab699",
+      "cystitis_48aef058-9128-a719-4fad-931b3f6af501",
+      "heart_failure_aef11ed0-293e-b41b-aea5-485d9312b5f4",
+      "strep_throat_14e194c2-d32c-3226-b0a8-8d11eb68b0b0",
+      "viral_pharyngitis_167da953-ee4a-5c69-6f8f-ff0d216fe1cf",
+      "strep_throat_2f8ca0a6-fef4-18ed-c24a-fe153140a973",
+      "viral_pharyngitis_6a1c66b8-a045-1cb8-9782-977b00d85ad0"
+    ],
+    "excluded_patient_ids": [
+      "copd_fedce73f-81f9-d444-c038-983e85d4e6aa",
+      "hypertension_cbbd3b5f-f992-e2aa-cb33-2982fe08106b",
+      "hypertension_b80691d9-67f8-69ed-d764-93c204530f6a"
+    ],
+    "label_count": 10,
+    "metric_packages": {
+      "sacrebleu": "2.6.0",
+      "nltk": "3.10.3",
+      "rouge-score": "0.1.2",
+      "bert-score": "0.3.13",
+      "transformers": "4.42.0",
+      "torch": "2.4.0"
+    },
+    "settings": {
+      "aggregation": "per_patient_per_rank_per_field_singleton",
+      "prediction_count": 3,
+      "plan_item_limit": 3,
+      "rank_weighting": null,
+      "lang": "en",
+      "condition_reference": "replace underscores with spaces",
+      "plan_reference": "join original items with comma and space",
+      "generated_plan": "join original generated items with comma and space",
+      "defaults_provenance": "configured defaults for the recorded library versions",
+      "bleu": {
+        "max_ngram_order": 4,
+        "lowercase": false,
+        "tokenize": "13a",
+        "smooth_method": "exp",
+        "use_effective_order": false,
+        "scale": "upstream score divided by 100"
+      },
+      "bert_score": {
+        "model_type": "roberta-large",
+        "num_layers": 17,
+        "idf": false,
+        "rescale_with_baseline": false,
+        "use_fast_tokenizer": false,
+        "batch_size": 64,
+        "expected_tokenizer_max_length": 512,
+        "model_revision": null,
+        "model_revision_status": "not verified; upstream selects the model by name"
+      }
+    }
+  }
+}
