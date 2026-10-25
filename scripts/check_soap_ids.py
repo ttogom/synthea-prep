@@ -2,9 +2,10 @@
 """Check that every id in <split>.jsonl appears exactly once in soap/<split>-soap.jsonl.
 
 Usage:
-  python3 check_soap_ids.py [--split corpus|dev|test [...]] [--data DIR]
+  python3 check_soap_ids.py [--split corpus|dev|test|corpus_nota|dev_nota|test_nota [...]] [--data DIR]
 
-  --split   splits to check, e.g. --split dev test (default: all)
+  --split   splits to check, e.g. --split dev test dev_nota
+            (default: corpus dev test; *_nota splits only when named)
   --data    release folder (default: data/release-v2)
 
 Reports ids that are missing, duplicated, or not in <split>.jsonl (extra).
@@ -17,6 +18,8 @@ from collections import Counter
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.join(REPO_ROOT, "data", "release-v2")
 SPLITS = ["dev", "test", "corpus"]  # same order as soap.py
+NOTA_SPLITS = [f"{s}_nota" for s in SPLITS]  # opt-in via --split, as in soap.py
+ALL_SPLITS = SPLITS + NOTA_SPLITS
 
 
 def read_ids(path):
@@ -64,8 +67,8 @@ def check(data, split):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--split", nargs="+", choices=SPLITS, default=SPLITS,
-                    help="splits to check (default: all)")
+    ap.add_argument("--split", nargs="+", choices=ALL_SPLITS, default=SPLITS,
+                    help="splits to check (default: corpus dev test; *_nota splits only when named)")
     ap.add_argument("--data", default=ROOT, help="release folder (default: data/release-v2)")
     args = ap.parse_args()
 
