@@ -21,9 +21,8 @@ EXPERIMENT_OUTPUT = ROOT / "experiments" / "output"
 # Similar-patient corpus: change this path to select another JSON corpus.
 # TODO: save new corpus in med_copilot/data/patient_corpus
 PATIENT_CORPUS = UPSTREAM / "soap_with_metadata.json"
-# EmbeddingRetriever loads (or rebuilds) embeddings.npy and index.faiss
-# relative to this working directory.
-PATIENT_RETRIEVAL_ARTIFACTS_DIR = UPSTREAM
+# S/O-only artifacts are separate from the upstream S/O/A cache.
+PATIENT_RETRIEVAL_ARTIFACTS_DIR = MED / "data" / "patient_retrieval_so"
 # Prepared S/O input for the experiment.
 PATIENT_INPUT = ROOT / "experiments" / "input" / "patient_records_so.jsonl"
 
@@ -31,7 +30,8 @@ PATIENT_INPUT = ROOT / "experiments" / "input" / "patient_records_so.jsonl"
 # create_embeddings, whose imports load FAISS.
 _preloaded_bioclinicalbert = SentenceTransformer("emilyalsentzer/Bio_ClinicalBERT")
 
-from create_embeddings import HybridRetriever, CrossEncoderReranker
+from scripts.med_copilot_retrieval import HybridRetriever, CrossEncoderReranker, matching_text
+from scripts.med_copilot_observability import capture_graphrag_responses
 from graphrag.cli.query import run_local_search
 from med_copilot.prompts.diagnosis_plan import (
     KEY_QUESTIONS_TEMPLATE,
@@ -44,9 +44,11 @@ from scripts.med_copilot_helpers import (
     git_commit,
     graphrag_context_json,
     load_patient_records,
+    model_response_metadata,
     new_patient_result,
     pacific_now,
     parse_guideline_questions,
+    prepare_patient_output_capture,
     reference_data_metadata,
     selected_reference_patient,
     split_assessment_plan,
@@ -60,10 +62,8 @@ client = OpenAI(api_key=api_key)
 
 def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output):
     """Run every pipeline stage for one patient, filling `result` as stages finish."""
-    s_o = (
-        f'Subjective: {patient["subjective"]}\n'
-        f'Objective: {patient["objective"]}'
-    )
+    prepare_patient_output_capture(result, corpus_records, retriever, reranker)
+    s_o = matching_text(patient)
 # %% ------------------------------------------------------------------
 # Similar-patient retrieval + reranking
 # ---------------------------------------------------------------------
@@ -110,6 +110,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
             },
         ],
     )
+    result["model_responses"]["guideline_questions"].append(model_response_metadata(key_response))
 
     key_questions = key_response.choices[0].message.content
     # The raw response remains the GraphRAG query; parsing only records it.
@@ -123,7 +124,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
 # ---------------------------------------------------------------------
 
     # The vendored table loader uses the working directory instead of storage's root.
-    with chdir(guideline_output):
+    with chdir(guideline_output), capture_graphrag_responses(result["model_responses"]):
         key_info, graphrag_context = run_local_search(
             config_filepath=GUIDELINES / "settings.yaml",
             data_dir=guideline_output,
@@ -170,6 +171,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
         model=model,
         messages=final_messages,
     )
+    result["model_responses"]["assessment_plan"].append(model_response_metadata(final_response))
 
     generated_plan = final_response.choices[0].message.content
     result["assessment_plan_raw"] = generated_plan
@@ -208,10 +210,9 @@ def main():
 
         retriever = reranker = None
         if not df.empty:
-            # EmbeddingRetriever uses relative paths for these artifacts.
+            PATIENT_RETRIEVAL_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
             with chdir(PATIENT_RETRIEVAL_ARTIFACTS_DIR):
-                # HybridRetriever combines embedding similarity and keyword overlap to find reference patients
-                retriever = HybridRetriever(df, alpha=0.5)
+                retriever = HybridRetriever(df, alpha=0.5, encoder=_preloaded_bioclinicalbert)
                 # Enforce JSON without changing the vendored retriever or its models.
                 retriever.keyword_extractor = JSONKeywordExtractor(
                     client=retriever.keyword_extractor.client,
@@ -230,6 +231,7 @@ def main():
             artifact_files=None if retriever is None else [
                 PATIENT_RETRIEVAL_ARTIFACTS_DIR / retriever.embedder.emb_path,
                 PATIENT_RETRIEVAL_ARTIFACTS_DIR / retriever.embedder.index_path,
+                PATIENT_RETRIEVAL_ARTIFACTS_DIR / retriever.embedder.metadata_path,
             ],
             guideline_directory=GUIDELINES,
             guideline_settings=GUIDELINES / "settings.yaml",

@@ -32,10 +32,15 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 
+from test_med_copilot_retrieval import FakeEncoder, load_retrieval_module
+from test_med_copilot_observability import ProviderHarness
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_med_copilot.py"
 HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
+RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
+OBSERVABILITY = ROOT / "scripts" / "med_copilot_observability.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
 UPSTREAM_GRAPH_QUERY = ROOT / "med_copilot/upstream/graphrag/cli/query.py"
 UPSTREAM_GRAPH_STORAGE = ROOT / "med_copilot/upstream/graphrag/utils/storage.py"
@@ -48,6 +53,8 @@ SAFE_BRANCH = "feature-issue-9"
 RESULT_FIELDS = [
     "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
+    "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
+    "reranked_patient_ids", "model_responses",
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
@@ -145,14 +152,27 @@ def git(root, *args):
 
 
 def frozen_reranker_class(scores):
-    # Execute the unchanged upstream reranker with only its model replaced, so
-    # reference selection is checked against the real ordering and formatting.
+    # Preserve upstream scoring/order/formatting, replacing its model and adding
+    # the project's capture contract immediately after its retained sort. This
+    # test-only AST instrumentation does not change the vendored source file.
     tree = ast.parse(UPSTREAM_RETRIEVER.read_text(encoding="utf-8"))
     nodes = [node for node in tree.body
              if (isinstance(node, ast.ClassDef) and node.name == "CrossEncoderReranker")
              or (isinstance(node, ast.Assign)
                  and any(getattr(target, "id", None) == "CONTRIBUTION_THRESHOLD"
                          for target in node.targets))]
+    reranker = next(node for node in nodes if isinstance(node, ast.ClassDef))
+    rerank = next(node for node in reranker.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "rerank")
+    retained_sort = next(index for index, node in enumerate(rerank.body)
+                         if isinstance(node, ast.Assign)
+                         and any(getattr(target, "id", None) == "reranked" for target in node.targets))
+    rerank.body[retained_sort + 1:retained_sort + 1] = ast.parse(
+        "self.ranked_candidates = reranked\n"
+        "if getattr(self, 'on_ranking', None) is not None:\n"
+        "    self.on_ranking(reranked)\n"
+    ).body
+    rerank.body.insert(0, ast.parse("self.ranked_candidates = None").body[0])
     namespace = {"CrossEncoder": lambda model_name: SimpleNamespace(
         predict=lambda pairs: list(scores[:len(pairs)]),
     )}
@@ -187,24 +207,32 @@ class PipelineFixture:
         self.branch = branch
         self.safe_branch = SAFE_BRANCH if branch == BRANCH else branch
         self.upstream = root / "med_copilot/upstream"
+        self.artifacts = root / "med_copilot/data/patient_retrieval_so"
         self.guidelines = root / "med_copilot/data/guidelines"
         self.output = root / "experiments/output"
         self.caller = root / "caller"
         self.script = root / "scripts/run_med_copilot.py"
-        for directory in [self.upstream, self.guidelines / "output", self.caller,
+        for directory in [self.upstream, self.artifacts, self.guidelines / "output", self.caller,
                           self.script.parent, root / "experiments/input"]:
             directory.mkdir(parents=True)
         for name in GUIDELINE_TABLES:
             (self.guidelines / "output" / f"{name}.parquet").write_text("MOCK_TABLE")
         self.write_guideline_settings(self.guidelines)
         for name, content in {"embeddings.npy": b"MOCK_EMBEDDINGS",
-                              "index.faiss": b"MOCK_INDEX"}.items():
-            (self.upstream / name).write_bytes(content)
+                              "index.faiss": b"MOCK_INDEX", "matching.json": b"MOCK_SO_METADATA"}.items():
+            (self.artifacts / name).write_bytes(content)
+        # Legacy files must remain untouched and must not enter run fingerprints.
+        for name in ("embeddings.npy", "index.faiss"):
+            (self.upstream / name).write_bytes(b"LEGACY_SOA")
         self.regenerated_artifacts = None
         # An unchanged copy lets runpy exercise the actual __main__ guard.
         self.script.write_text(RUNNER.read_text())
         self.helper_module = self.script.parent / "med_copilot_helpers.py"
         self.helper_module.write_text(HELPERS.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.script.parent / "med_copilot_retrieval.py").write_text(
+            RETRIEVAL.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.script.parent / "med_copilot_observability.py").write_text(
+            OBSERVABILITY.read_text(encoding="utf-8"), encoding="utf-8")
         self.prompt_module = root / "med_copilot/prompts/diagnosis_plan.py"
         self.prompt_module.parent.mkdir(parents=True)
         self.prompt_module.write_text(PROJECT_PROMPTS.read_text(encoding="utf-8"), encoding="utf-8")
@@ -252,6 +280,7 @@ class PipelineFixture:
         self.calls = []
         self.keyword_calls = []
         self.keyword_response = None
+        self.completion_responses = {}
         self.keyword_content = json.dumps({
             "symptoms": [" Cough ", "Cough", "denies fever"],
             "diagnoses": [], "medications": [],
@@ -324,7 +353,8 @@ class PipelineFixture:
             content = fixture.questions if stage == "questions" else fixture.final_output
             if fixture.reply is not None:
                 content = fixture.reply(stage, prompt)
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+            return fixture.completion_responses.get(stage, SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]))
 
         def client(api_key):
             fixture.events.append(("client", api_key))
@@ -334,7 +364,8 @@ class PipelineFixture:
             fixture.keyword_calls.append(kwargs)
             fixture.fail_at("keywords", kwargs["messages"][-1]["content"])
             if fixture.keyword_response is not None:
-                return fixture.keyword_response
+                return (fixture.keyword_response(kwargs) if callable(fixture.keyword_response)
+                        else fixture.keyword_response)
             # Reproduce the original failure: a perfectly valid model answer
             # wrapped in Markdown when JSON output was requested only in prose.
             content = fixture.keyword_content
@@ -346,14 +377,15 @@ class PipelineFixture:
             )])
 
         class HybridRetriever:
-            def __init__(self, df, alpha):
+            def __init__(self, df, alpha, encoder):
                 fixture.retrieval_calls.append(("init", df.copy(), alpha, Path.cwd()))
                 fixture.fail_at("retriever_init")
                 if fixture.regenerated_artifacts is not None:
                     # Like EmbeddingRetriever, rebuild artifacts relative to the cwd.
                     for name, content in fixture.regenerated_artifacts.items():
                         Path(name).write_bytes(content)
-                self.embedder = SimpleNamespace(emb_path="embeddings.npy", index_path="index.faiss")
+                self.embedder = SimpleNamespace(emb_path="embeddings.npy", index_path="index.faiss",
+                                               metadata_path="matching.json")
                 self.keyword_extractor = object.__new__(FROZEN_KEYWORD_EXTRACTOR)
                 self.keyword_extractor.model = "retrieval-keyword-model"
                 self.keyword_extractor.client = SimpleNamespace(chat=SimpleNamespace(
@@ -361,10 +393,15 @@ class PipelineFixture:
                 ))
 
             def search(self, query, topk):
+                self.ranked_candidates = None
                 fixture.retrieval_calls.append(("search", query, topk, Path.cwd()))
                 fixture.fail_at("retrieval", query)
                 fixture.extracted_keywords = self.keyword_extractor.extract(query)
-                return [dict(candidate) for candidate in fixture.candidates]
+                self.ranked_candidates = [dict(candidate) for candidate in fixture.candidates[:topk]]
+                if getattr(self, "on_ranking", None) is not None:
+                    self.on_ranking(self.ranked_candidates)
+                fixture.fail_at("retrieval_attribution", query)
+                return self.ranked_candidates
 
         class CrossEncoderReranker:
             def __init__(self):
@@ -372,13 +409,20 @@ class PipelineFixture:
                 fixture.fail_at("reranker_init")
 
             def rerank(self, query, candidates, topk):
+                self.ranked_candidates = None
                 fixture.rerank_calls.append(
                     ("rerank", query, [dict(candidate) for candidate in candidates], topk, Path.cwd()))
                 fixture.fail_at("reranking", query)
                 # Like the upstream reranker, record scores on the candidates.
                 for candidate, score in zip(candidates, fixture.rerank_scores):
                     candidate["rerank_score"] = score
-                return list(fixture.results)
+                self.ranked_candidates = sorted(
+                    candidates, key=lambda item: item["rerank_score"], reverse=True,
+                )[:min(topk, len(fixture.results))]
+                if getattr(self, "on_ranking", None) is not None:
+                    self.on_ranking(self.ranked_candidates)
+                fixture.fail_at("rerank_formatting", query)
+                return list(fixture.results[:topk])
 
         def graph_search(**kwargs):
             fixture.graph_calls.append((kwargs, Path.cwd()))
@@ -388,7 +432,7 @@ class PipelineFixture:
             return fixture.guideline_text, fixture.context
 
         modules = {name: ModuleType(name) for name in [
-            "sentence_transformers", "openai", "create_embeddings", "graphrag",
+            "sentence_transformers", "openai", "create_embeddings", "scripts.med_copilot_retrieval", "graphrag",
             "graphrag.cli", "graphrag.cli.query", "templates", "templates.SOA_P_TEMPLATE",
         ]}
         for name in ["graphrag", "graphrag.cli", "templates"]:
@@ -397,6 +441,14 @@ class PipelineFixture:
         modules["openai"].OpenAI = client
         modules["create_embeddings"].HybridRetriever = HybridRetriever
         modules["create_embeddings"].CrossEncoderReranker = CrossEncoderReranker
+        modules["scripts.med_copilot_retrieval"].HybridRetriever = HybridRetriever
+        modules["scripts.med_copilot_retrieval"].CrossEncoderReranker = CrossEncoderReranker
+        # Exercise the real, dependency-free S/O formatter even in orchestration tests.
+        tree = ast.parse(RETRIEVAL.read_text(encoding="utf-8"))
+        formatter = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef) and node.name == "matching_text")
+        exec(compile(ast.Module(body=[formatter], type_ignores=[]), str(RETRIEVAL), "exec"),
+             modules["scripts.med_copilot_retrieval"].__dict__)
         modules["graphrag.cli.query"].run_local_search = graph_search
         modules["templates.SOA_P_TEMPLATE"].__dict__.update(PROMPTS)
         return modules
@@ -406,7 +458,7 @@ class PipelineFixture:
         original_import = builtins.__import__
 
         def tracked_import(name, *args, **kwargs):
-            if name == "create_embeddings":
+            if name == "scripts.med_copilot_retrieval":
                 self.events.append(("import", name))
                 self.fail_at("upstream_import")
             return original_import(name, *args, **kwargs)
@@ -427,7 +479,7 @@ class PipelineFixture:
                 # Exercise this fixture's real project prompts, even when a
                 # caller has already imported the repository's package.
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
-                             "scripts.med_copilot_helpers", "scripts"]:
+                             "scripts.med_copilot_helpers", "scripts.med_copilot_observability", "scripts"]:
                     sys.modules.pop(name, None)
                 yield
         finally:
@@ -482,9 +534,40 @@ class RunMedCopilotTests(unittest.TestCase):
             Key_info=fixture.guideline_text if guideline_text is None else guideline_text,
         )
 
+    def expected_capture(self):
+        fixture = self.fixture
+        empty = {"reported_model": None, "response_id": None, "token_usage": None}
+        metadata = {stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]}
+        if fixture.corpus and fixture.failure not in ("retrieval", "keywords"):
+            metadata["keyword_extraction"] = [dict(empty)]
+        if fixture.failure not in ("retrieval", "keywords", "reranking", "questions"):
+            metadata["guideline_questions"] = [dict(empty)]
+        if fixture.failure is None:
+            metadata["assessment_plan"] = [dict(empty)]
+        ids = []
+        for candidate in fixture.candidates:
+            row = candidate["idx"]
+            note = fixture.corpus[row].get("note_id") if fixture.corpus else None
+            identity = {"note_id": note} if isinstance(note, str) and note.strip() else {"corpus_row": row}
+            if note and sum(record.get("note_id") == note for record in fixture.corpus) > 1:
+                identity["corpus_row"] = row
+            ids.append(identity)
+        ran = bool(fixture.corpus) and fixture.failure not in ("retrieval", "keywords")
+        scores = getattr(fixture, "expected_rerank_scores", fixture.rerank_scores)
+        ranking = sorted([{**identity, "rerank_score": score} for identity, score in zip(ids, scores)],
+                         key=lambda item: item["rerank_score"], reverse=True)[:len(fixture.results)]
+        return {
+            "keyword_extraction_raw": fixture.keyword_content if ran else None,
+            "retrieval_keywords": fixture.extracted_keywords if ran else None,
+            "retrieved_patient_ids": ids if ran else None,
+            "reranked_patient_ids": ranking if ran and ids and fixture.failure != "reranking" else None,
+            "model_responses": metadata,
+        }
+
     def expected_result(self, reference_text=None, reference="default", questions="default"):
         fixture = self.fixture
         return {
+            **self.expected_capture(),
             "id": fixture.patient_id,
             "status": "completed",
             **fixture.final_sections,
@@ -510,12 +593,13 @@ class RunMedCopilotTests(unittest.TestCase):
         # Enumerate the expected files independently of the helper's resolver.
         fixture = self.fixture
         corpus = fixture.upstream / "soap_with_metadata.json" if corpus is None else corpus
-        artifacts = fixture.upstream if artifacts is None else artifacts
+        artifacts = fixture.artifacts if artifacts is None else artifacts
         guidelines = fixture.guidelines if guidelines is None else guidelines
         retrieval_entries = [("corpus", corpus)]
         if retrieval_initialized:
             retrieval_entries += [("embeddings.npy", artifacts / "embeddings.npy"),
-                                  ("index.faiss", artifacts / "index.faiss")]
+                                  ("index.faiss", artifacts / "index.faiss"),
+                                  ("matching.json", artifacts / "matching.json")]
         guideline_entries = [
             ("settings", guidelines / "settings.yaml"),
             ("local_search_prompt", guidelines / "prompts/local_search_system_prompt.txt"),
@@ -614,12 +698,12 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertTrue(callable(runner["main"]))
         self.assertEqual(runner["PATIENT_CORPUS"],
                          fixture.upstream / "soap_with_metadata.json")
-        self.assertEqual(runner["PATIENT_RETRIEVAL_ARTIFACTS_DIR"], fixture.upstream)
+        self.assertEqual(runner["PATIENT_RETRIEVAL_ARTIFACTS_DIR"], fixture.artifacts)
         self.assertEqual(runner["PATIENT_INPUT"], fixture.input_path)
         self.assertEqual(runner["EXPERIMENT_OUTPUT"], fixture.output)
         self.assertNotIn("OUTPUT", runner)
         self.assertEqual(fixture.events, [
-            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "create_embeddings"),
+            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "scripts.med_copilot_retrieval"),
             ("client", "test-key"),
         ])
         self.assertEqual(fixture.calls, [])
@@ -634,7 +718,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_no_legacy_outputs()
 
     def test_all_imports_are_in_the_header_before_function_or_class_definitions(self):
-        for source in (RUNNER, HELPERS):
+        for source in (RUNNER, HELPERS, RETRIEVAL):
             with self.subTest(file=source.name):
                 tree = ast.parse(source.read_text(encoding="utf-8"))
                 imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
@@ -697,7 +781,7 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "completed")
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assertEqual(fixture.events[:2], [
-            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "create_embeddings"),
+            ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "scripts.med_copilot_retrieval"),
         ])
         self.assertEqual(sum(event[0] == "preload" for event in fixture.events), 1)
         self.assertEqual(sum(event[0] == "import" for event in fixture.events), 1)
@@ -720,11 +804,11 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertNotIn("response_format", fixture.calls[1])
         init, search = fixture.retrieval_calls
         self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
-        self.assertEqual(init[2:], (0.5, fixture.upstream))
-        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.upstream))
-        self.assertEqual(fixture.rerank_calls[0], ("init", fixture.upstream))
+        self.assertEqual(init[2:], (0.5, fixture.artifacts))
+        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.artifacts))
+        self.assertEqual(fixture.rerank_calls[0], ("init", fixture.artifacts))
         self.assertEqual(fixture.rerank_calls[1],
-                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
         self.assertEqual(fixture.graph_calls, [({
             "config_filepath": fixture.guidelines / "settings.yaml",
             "data_dir": fixture.guidelines / "output", "root_dir": fixture.guidelines,
@@ -878,7 +962,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(baseline, self.expected_reference_data())
         self.assertEqual(baseline["patient_retrieval"]["corpus_file"],
                          "med_copilot/upstream/soap_with_metadata.json")
-        self.assertEqual(baseline["patient_retrieval"]["artifacts_directory"], "med_copilot/upstream")
+        self.assertEqual(baseline["patient_retrieval"]["artifacts_directory"], "med_copilot/data/patient_retrieval_so")
         self.assertEqual(baseline["guidelines"]["directory"], "med_copilot/data/guidelines")
 
         (fixture.guidelines / "prompts/extract_graph.txt").write_text("CHANGED_UNUSED_PROMPT")
@@ -909,11 +993,11 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(current[other], previous[other])
                 previous = current
         # Fingerprints describe the regenerated artifacts actually loaded.
-        self.assertEqual((fixture.upstream / "index.faiss").read_bytes(), b"REBUILT_INDEX")
+        self.assertEqual((fixture.artifacts / "index.faiss").read_bytes(), b"REBUILT_INDEX")
 
         alternate = fixture.root / "alternate artifacts"
         alternate.mkdir()
-        for name in ("embeddings.npy", "index.faiss"):
+        for name in ("embeddings.npy", "index.faiss", "matching.json"):
             (alternate / name).write_bytes(b"ALTERNATE_" + name.encode())
         fixture.regenerated_artifacts = None
         fixture.retrieval_calls.clear()
@@ -1121,6 +1205,123 @@ class RunMedCopilotTests(unittest.TestCase):
     # Reference patients and per-patient stage outcomes
     # ----------------------------------------------------------------
 
+    def real_so_retrieval(self):
+        """Use production matching/cache code, mocking only external dependencies."""
+        fixture = self.fixture
+        adapter = fixture.modules["scripts.med_copilot_retrieval"]
+        stub = adapter.HybridRetriever(pd.DataFrame(fixture.corpus), alpha=0.5, encoder=None)
+        fixture.retrieval_calls.clear()
+        module = load_retrieval_module(keyword_client=stub.keyword_extractor.client)
+        encoder = FakeEncoder()
+        fixture.modules["sentence_transformers"].SentenceTransformer = lambda name: encoder
+        # NLP attribution is downstream display data, not matching or selection.
+        module.HybridRetriever.compute_case_phrase_contributions = Mock(return_value=([], []))
+        fixture.modules["scripts.med_copilot_retrieval"] = module
+        instances, rankers = [], []
+        retriever_class, reranker_class = module.HybridRetriever, module.CrossEncoderReranker
+
+        def retriever(*args, **kwargs):
+            instance = retriever_class(*args, **kwargs)
+            instance.search = Mock(wraps=instance.search)
+            instances.append(instance)
+            return instance
+
+        def reranker():
+            instance = reranker_class()
+            instance.rerank = Mock(wraps=instance.rerank)
+            rankers.append(instance)
+            return instance
+
+        module.HybridRetriever = retriever
+        module.CrossEncoderReranker = reranker
+        return SimpleNamespace(module=module, encoder=encoder, retrievers=instances, rankers=rankers)
+
+    def test_real_so_matching_excludes_reference_ap_and_keeps_full_soap_in_final_request_and_outputs(self):
+        fixture = self.fixture
+        fixture.corpus = [
+            {"note_id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
+             "assessment": "cough ONLY_IN_REFERENCE_A", "plan": "cough ONLY_IN_REFERENCE_P"},
+            {"note_id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
+             "assessment": "MATCH_ASSESSMENT", "plan": "MATCH_PLAN\nfollow-up"},
+        ]
+        fixture.write_corpus()
+        state = self.real_so_retrieval()
+        runner = self.load_runner()
+        clock = sequential_clock()
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
+            self.assertEqual(runner["main"](), "completed")
+        first_dir, first_run, first_results = self.read_run()
+        self.assertEqual(first_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        first_pairs = state.rankers[0].model.calls[0]
+        self.assertEqual(first_pairs, [(fixture.conditions, runner["matching_text"](record))
+                                      for record in reversed(fixture.corpus)])
+        self.assertEqual(state.encoder.calls[0], [runner["matching_text"](record)
+                                                for record in fixture.corpus])
+        for field in ("subjective", "objective", "assessment", "plan"):
+            self.assertIn(fixture.corpus[1][field], fixture.calls[-1]["messages"][-1]["content"])
+        self.assertEqual(first_results[0]["assessment_plan_raw"], fixture.final_output)
+        self.assertEqual(first_results[0]["assessment_plan_prompts"], {
+            "system": fixture.calls[-1]["messages"][0]["content"],
+            "user": fixture.calls[-1]["messages"][1]["content"],
+        })
+        self.assert_run_metadata(first_dir, first_run, "completed")
+        cache_before = {path.name: path.read_bytes() for path in fixture.artifacts.iterdir()}
+        # Read actual candidate scores from the downstream rerank input, captured
+        # without replacing the production matching or reranking implementation.
+        candidates_before = state.rankers[0].rerank.call_args.args[1]
+        first_scores = [{name: item[name] for name in
+                         ("idx", "embedding_score", "keyword_score", "hybrid_score", "rerank_score")}
+                        for item in candidates_before]
+        embedding_calls_before = len(state.encoder.calls)
+        for number, record in enumerate(fixture.corpus):
+            record.update(assessment=f"CHANGED_A_{number}", plan=f"CHANGED_P_{number}")
+        fixture.write_corpus()
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
+            self.assertEqual(runner["main"](), "completed")
+            self.assertEqual(Path.cwd(), fixture.caller)
+        second_dir = self.run_dirs()[-1]
+        _, second_run, second_results = self.read_run(second_dir)
+        self.assertEqual(second_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        self.assertEqual(state.rankers[1].model.calls[0], first_pairs)
+        self.assertEqual(cache_before, {path.name: path.read_bytes() for path in fixture.artifacts.iterdir()})
+        self.assertEqual(len(state.encoder.calls), embedding_calls_before + 1)  # query only, cache reused
+        self.assertIn("CHANGED_A_1", second_results[0]["assessment_plan_prompts"]["user"])
+        self.assertIn("CHANGED_P_1", second_results[0]["assessment_plan_prompts"]["user"])
+        candidates_after = state.rankers[1].rerank.call_args.args[1]
+        self.assertEqual(first_scores, [{name: item[name] for name in first_scores[0]}
+                                        for item in candidates_after])
+        self.assertNotEqual(first_run["reference_data"]["patient_retrieval"]["sha256"],
+                            second_run["reference_data"]["patient_retrieval"]["sha256"])
+        self.assertEqual((fixture.upstream / "index.faiss").read_bytes(), b"LEGACY_SOA")
+        self.assertEqual((fixture.upstream / "embeddings.npy").read_bytes(), b"LEGACY_SOA")
+
+    def test_real_so_cache_write_failure_stops_before_patients_and_reranker_failure_is_isolated(self):
+        fixture_root = self.fixture.root
+        for stage in ("cache_write", "reranking"):
+            with self.subTest(stage=stage):
+                self.fixture = PipelineFixture(fixture_root / stage)
+                fixture = self.fixture
+                state = self.real_so_retrieval()
+                runner = self.load_runner()
+                if stage == "cache_write":
+                    with fixture.runtime(), patch.object(state.module.faiss, "write_index",
+                                                         side_effect=OSError("cache write failed")):
+                        with self.assertRaisesRegex(OSError, "cache write failed"):
+                            runner["main"]()
+                    self.assert_stopped_run([(fixture.patient_id, "not_processed")])
+                    self.assertEqual(fixture.calls, [])
+                else:
+                    ranker = runner["CrossEncoderReranker"]()
+                    ranker.model.predict = Mock(side_effect=RuntimeError("reranking failed"))
+                    with fixture.runtime(), patch.dict(runner["main"].__globals__, {
+                        "CrossEncoderReranker": lambda: ranker,
+                    }):
+                        self.assertEqual(runner["main"](), "completed_with_errors")
+                    _, _, results = self.read_run()
+                    self.assertEqual(results[0]["status"], "failed_incomplete")
+                    self.assertIsNone(results[0]["assessment_plan_raw"])
+                    self.assertEqual(fixture.calls, [])
+
     def test_empty_reference_stages_continue_through_guidelines_and_final_generation(self):
         fixture_root = self.fixture.root
         for stage in ["corpus", "retrieval", "reranking"]:
@@ -1145,11 +1346,11 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertEqual(fixture.rerank_calls, [])
                 else:
                     self.assertEqual(fixture.retrieval_calls[1],
-                                     ("search", fixture.conditions, 20, fixture.upstream))
-                    self.assertEqual(fixture.rerank_calls[0], ("init", fixture.upstream))
+                                     ("search", fixture.conditions, 20, fixture.artifacts))
+                    self.assertEqual(fixture.rerank_calls[0], ("init", fixture.artifacts))
                 if stage == "reranking":
                     self.assertEqual(fixture.rerank_calls[1],
-                                     ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                                     ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
                 else:
                     self.assertEqual([call for call in fixture.rerank_calls if call[0] == "rerank"], [])
                 self.assertEqual(len(fixture.calls), 2)
@@ -1190,16 +1391,25 @@ class RunMedCopilotTests(unittest.TestCase):
         ]
         # Rows 1 and 2 tie; the upstream stable sort keeps retrieval order.
         scores = [0.5, 0.9, 0.9]
+        fixture.expected_rerank_scores = scores
         reranker_class = frozen_reranker_class(scores)
-        fixture.modules["create_embeddings"].CrossEncoderReranker = reranker_class
-        reference_text = reranker_class().rerank(
-            "query", [dict(candidate) for candidate in fixture.candidates], topk=5)[0]
+        fixture.modules["scripts.med_copilot_retrieval"].CrossEncoderReranker = reranker_class
+        fixture.results = reranker_class().rerank(
+            "query", [dict(candidate) for candidate in fixture.candidates], topk=5)
+        reference_text = fixture.results[0]
         self.assertIn("Reference P1", reference_text)
         fixture.reference = {"note_id": "NOTE-1"}
         runner = self.load_runner()
         with fixture.runtime():
             runner["main"]()
         self.assert_outputs(reference_text=reference_text)
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["retrieved_patient_ids"], [
+            {"note_id": "NOTE-3"}, {"note_id": "NOTE-1"}, {"note_id": "NOTE-2"}])
+        self.assertEqual(record["reranked_patient_ids"], [
+            {"note_id": "NOTE-1", "rerank_score": .9},
+            {"note_id": "NOTE-2", "rerank_score": .9},
+            {"note_id": "NOTE-3", "rerank_score": .5}])
 
     def test_corpus_without_note_ids_uses_corpus_row_and_duplicates_disambiguate(self):
         fixture_root = self.fixture.root
@@ -1331,14 +1541,18 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.graph_calls, [])
                 _, _, results = self.read_run()
                 self.assertEqual(results, [{"id": fixture.patient_id, "status": "failed_incomplete",
-                                            **dict.fromkeys(RESULT_FIELDS[2:])}])
+                                            **dict.fromkeys(RESULT_FIELDS[2:]),
+                                      "model_responses": {stage: ([{"reported_model": None, "response_id": None, "token_usage": None}]
+                                                       if stage == "keyword_extraction" else [])
+                                                       for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]},
+                                      "keyword_extraction_raw": fields.get("content") if fields else None}])
                 self.assertIn("ValueError", fixture.stderr.getvalue())
 
     def test_patient_stage_errors_are_isolated_and_keep_partial_outputs(self):
         fixture_root = self.fixture.root
         unavailable = {
-            "retrieval": RESULT_FIELDS[2:], "keywords": RESULT_FIELDS[2:],
-            "reranking": RESULT_FIELDS[2:],
+            "retrieval": RESULT_FIELDS[2:10], "keywords": RESULT_FIELDS[2:10],
+            "reranking": RESULT_FIELDS[2:10],
             "questions": ["assessment", "plan", "assessment_plan_raw", "guideline_questions",
                           "guideline_evidence", "graphrag_context", "assessment_plan_prompts"],
             "graphrag": ["assessment", "plan", "assessment_plan_raw", "guideline_evidence",
@@ -1468,6 +1682,7 @@ class RunMedCopilotTests(unittest.TestCase):
             conditions = f'Subjective: {record["subjective"]}\nObjective: {record["objective"]}'
             evidence = f"{marker} guideline evidence\nline two"
             self.assertEqual(result, {
+                **self.expected_capture(),
                 "id": record["id"],
                 "status": "completed",
                 "assessment": f"{marker} diagnosis café",
@@ -1560,7 +1775,8 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual([results[1][field] for field in RESULT_FIELDS[2:5]], [None] * 3)
         self.assertIn("MARKER_BRAVO", results[1]["assessment_plan_prompts"]["user"])
         self.assertEqual(results[2], {"id": records[2]["id"], "status": "not_processed",
-                                      **dict.fromkeys(RESULT_FIELDS[2:])})
+                                      **dict.fromkeys(RESULT_FIELDS[2:]),
+                                      "model_responses": {stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]}})
         self.assertEqual(len(fixture.calls), 4)
 
     def test_results_write_failure_preserves_saved_results_and_stops_the_run(self):
@@ -1989,10 +2205,10 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), fixture.caller)
         init, search = fixture.retrieval_calls
         self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
-        self.assertEqual(init[2:], (0.5, fixture.upstream))
-        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.upstream))
+        self.assertEqual(init[2:], (0.5, fixture.artifacts))
+        self.assertEqual(search, ("search", fixture.conditions, 20, fixture.artifacts))
         self.assertEqual(fixture.rerank_calls[1],
-                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.upstream))
+                         ("rerank", fixture.conditions, fixture.candidates, 5, fixture.artifacts))
         self.assertEqual(len(fixture.calls), 2)
         self.assertEqual(fixture.graph_calls[0][1], fixture.guidelines / "output")
         run_dir, run, results = self.read_run()
@@ -2027,6 +2243,838 @@ class RunMedCopilotTests(unittest.TestCase):
         corpus_path.write_text("not valid JSON", encoding="utf-8")
         error = self.assert_corpus_load_failure(corpus_path, json.JSONDecodeError)
         self.assertEqual(error.doc, "not valid JSON")
+
+    def provider_graph(self):
+        harness = ProviderHarness()
+        fixture = self.fixture
+        def graph_search(**kwargs):
+            fixture.graph_calls.append((kwargs, Path.cwd()))
+            answer, _ = asyncio.run(harness.query())
+            return answer, fixture.context
+        fixture.modules["graphrag.cli.query"].run_local_search = graph_search
+        return harness
+
+    def test_persisted_capture_keeps_exact_raw_keywords_and_reported_models_for_all_stages(self):
+        fixture = self.fixture
+        raw = ' \n{ "medications": ["药", " café "], "diagnoses": ["asthma", "café"], "symptoms": [" café ", "cough", "cough", "左腕"] }\t '
+        fixture.keyword_response = keyword_response(raw)
+        fixture.keyword_response.model, fixture.keyword_response.id = "reported-keyword", "keyword-id"
+        fixture.keyword_response.usage = SimpleNamespace(prompt_tokens=9, total_tokens=13)
+        for stage, content in (("questions", fixture.questions), ("final", fixture.final_output)):
+            fixture.completion_responses[stage] = SimpleNamespace(
+                model=f"reported-{stage}", id=f"{stage}-id",
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=3, total_tokens=23),
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        harness = self.provider_graph()
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["keyword_extraction_raw"], raw)
+        self.assertEqual(record["retrieval_keywords"], ["café", "cough", "左腕", "asthma", "药"])
+        self.assertEqual(record["retrieval_keywords"], fixture.extracted_keywords)
+        self.assertEqual(record["retrieved_patient_ids"], [{"note_id": "NOTE-A"}, {"note_id": "NOTE-B"}])
+        self.assertEqual(record["reranked_patient_ids"], [
+            {"note_id": "NOTE-B", "rerank_score": .9}, {"note_id": "NOTE-A", "rerank_score": .2}])
+        self.assertEqual(record["model_responses"]["keyword_extraction"], [{
+            "reported_model": "reported-keyword", "response_id": "keyword-id",
+            "token_usage": {"prompt_tokens": 9, "completion_tokens": None, "total_tokens": 13}}])
+        for stage, key in (("questions", "guideline_questions"), ("final", "assessment_plan")):
+            self.assertEqual(record["model_responses"][key], [{
+                "reported_model": f"reported-{stage}", "response_id": f"{stage}-id",
+                "token_usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23}}])
+        self.assertEqual(record["model_responses"]["guideline_evidence"], [{
+            "reported_model": "reported-chat-snapshot", "response_id": "stream-provider-id",
+            "token_usage": {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}}])
+        self.assertEqual(record["model_responses"]["guideline_query_embedding"], [{
+            "reported_model": "reported-embedding-snapshot", "response_id": None,
+            "token_usage": {"prompt_tokens": 11, "completion_tokens": None, "total_tokens": 11}}])
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        self.assertEqual(len(fixture.calls), 2)
+        self.assertEqual(len(fixture.graph_calls), 1)
+        harness.chat_create.assert_awaited_once()
+        harness.embedding_create.assert_awaited_once()
+        prompt = fixture.calls[-1]["messages"][-1]["content"]
+        self.assertIn(fixture.results[0], prompt)
+        for field in RESULT_FIELDS[10:]:
+            self.assertNotIn(field, prompt)
+        self.assertNotIn(raw, prompt)
+        self.assertEqual(fixture.graph_calls[0][0]["streaming"], False)
+
+    def test_all_keyword_response_failures_persist_raw_and_provider_metadata(self):
+        root = self.fixture.root
+        cases = [("malformed", keyword_response('{"symptoms":')),
+                 ("invalid-schema", keyword_response('{"symptoms": [], "diagnoses": []}')),
+                 ("whitespace", keyword_response(' \n\t ')), ("empty", keyword_response('')),
+                 ("truncated", keyword_response(' café {', finish_reason="length")),
+                 ("refused", keyword_response('refused text', refusal="refusal")),
+                 ("missing-choices", SimpleNamespace()), ("empty-choices", SimpleNamespace(choices=[])),
+                 ("none", keyword_response(None)), ("object", keyword_response({"text": "not string"})),
+                 ("missing-content", SimpleNamespace(choices=[SimpleNamespace(
+                     finish_reason="stop", message=SimpleNamespace(refusal=None))]))]
+        for name, response in cases:
+            with self.subTest(case=name):
+                self.fixture = PipelineFixture(root / name)
+                fixture = self.fixture
+                response.id, response.model = "provider-id", "reported"
+                response.usage = SimpleNamespace(total_tokens=17)
+                fixture.keyword_response = response
+                runner = self.load_runner()
+                with fixture.runtime():
+                    self.assertEqual(runner["main"](), "completed_with_errors")
+                _, _, [record] = self.read_run()
+                choices = getattr(response, "choices", None)
+                raw = getattr(choices[0].message, "content", None) if choices else None
+                self.assertEqual(record["keyword_extraction_raw"], raw if isinstance(raw, str) else None)
+                self.assertIsNone(record["retrieval_keywords"])
+                self.assertIsNone(record["retrieved_patient_ids"])
+                self.assertIsNone(record["reranked_patient_ids"])
+                self.assertEqual(record["model_responses"]["keyword_extraction"], [{
+                    "reported_model": "reported", "response_id": "provider-id",
+                    "token_usage": {"prompt_tokens": None, "completion_tokens": None, "total_tokens": 17}}])
+                self.assertTrue(all(value == [] for stage, value in record["model_responses"].items()
+                                    if stage != "keyword_extraction"))
+                self.assertEqual(len(fixture.keyword_calls), 1)
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertIn("ValueError" if name != "missing-content" else "AttributeError", fixture.stderr.getvalue())
+
+    def test_real_pipeline_preserves_capture_before_embedding_attribution_and_format_failures(self):
+        root = self.fixture.root
+        for stage in ("embedding", "index", "attribution", "formatting"):
+            with self.subTest(stage=stage):
+                self.fixture = PipelineFixture(root / stage)
+                fixture = self.fixture
+                state = self.real_so_retrieval()
+                constructor = state.module.HybridRetriever
+                def initialize(*args, **kwargs):
+                    instance = constructor(*args, **kwargs)
+                    if stage == "embedding":
+                        instance.build_query_embedding = Mock(side_effect=RuntimeError("embedding failed"))
+                    elif stage == "index":
+                        instance.embedder.index.search = Mock(side_effect=RuntimeError("index failed"))
+                    elif stage == "attribution":
+                        instance.compute_case_phrase_contributions = Mock(side_effect=RuntimeError("attribution failed"))
+                    else:
+                        instance.compute_case_phrase_contributions = Mock(return_value=([], [{}]))
+                    return instance
+                state.module.HybridRetriever = initialize
+                runner = self.load_runner()
+                with fixture.runtime():
+                    self.assertEqual(runner["main"](), "completed_with_errors")
+                _, _, [record] = self.read_run()
+                self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
+                self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
+                self.assertEqual(len(record["model_responses"]["keyword_extraction"]), 1)
+                if stage in ("embedding", "index"):
+                    self.assertIsNone(record["retrieved_patient_ids"])
+                else:
+                    self.assertEqual(len(record["retrieved_patient_ids"]), 2)
+                    self.assertIn("hybrid_score", record["retrieved_patient_ids"][0])
+                if stage == "formatting":
+                    self.assertEqual(len(record["reranked_patient_ids"]), 2)
+                    self.assertIn("rerank_score", record["reranked_patient_ids"][0])
+                else:
+                    self.assertIsNone(record["reranked_patient_ids"])
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertEqual(state.retrievers[0].keyword_extractor.capture_result, record)
+                self.assertTrue(callable(state.retrievers[0].on_ranking))
+                if state.rankers:
+                    self.assertTrue(callable(state.rankers[0].on_ranking))
+
+    def test_real_rankings_keep_nontrivial_rows_disambiguation_scores_ties_and_topfive(self):
+        fixture = self.fixture
+        fixture.corpus = [dict(note_id=f"N{row}", subjective="cough", objective="normal",
+                              assessment=f"ASSESSMENT {row}", plan=f"PLAN {row}", subject_id="SAME")
+                          for row in range(8)]
+        fixture.corpus[2]["note_id"] = fixture.corpus[5]["note_id"] = "DUP"
+        del fixture.corpus[6]["note_id"]
+        fixture.write_corpus()
+        state = self.real_so_retrieval()
+        constructor, rank_constructor = state.module.HybridRetriever, state.module.CrossEncoderReranker
+        order = [6, 2, 5, 1, 7, 0, 3, 4]
+        def initialize(*args, **kwargs):
+            instance = constructor(*args, **kwargs)
+            instance.embedder.index.search = Mock(return_value=(
+                state.module.np.array([[.9123456789] * 8]), state.module.np.array([order])))
+            return instance
+        def initialize_ranker():
+            instance = rank_constructor()
+            instance.model.predict = Mock(return_value=[.1, .987654321, .987654321, .3, .4, .5, .6, .7])
+            return instance
+        state.module.HybridRetriever, state.module.CrossEncoderReranker = initialize, initialize_ranker
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, _, [record] = self.read_run()
+        hybrid, reranked = record["retrieved_patient_ids"], record["reranked_patient_ids"]
+        expected = [{"corpus_row": 6}, {"note_id": "DUP", "corpus_row": 2},
+                    {"note_id": "DUP", "corpus_row": 5}, {"note_id": "N1"}, {"note_id": "N7"},
+                    {"note_id": "N0"}, {"note_id": "N3"}, {"note_id": "N4"}]
+        def identity(item):
+            return {key: value for key, value in item.items() if key in ("note_id", "corpus_row")}
+        self.assertEqual([identity(item) for item in hybrid], expected)
+        self.assertEqual([identity(item) for item in reranked], [expected[index] for index in (1, 2, 7, 6, 5)])
+        self.assertEqual(reranked[0]["rerank_score"], .987654321)
+        self.assertEqual(hybrid[0]["embedding_score"], .9123456789)
+        self.assertEqual(record["selected_reference_patient"], identity(reranked[0]))
+        prompt = fixture.calls[-1]["messages"][-1]["content"]
+        self.assertIn("ASSESSMENT 2", prompt)
+        self.assertIn("PLAN 2", prompt)
+        self.assertNotIn("ASSESSMENT 6", prompt)
+        for item in hybrid + reranked:
+            self.assertFalse(set(item) - {"note_id", "corpus_row", "embedding_score", "keyword_score", "hybrid_score", "rerank_score"})
+        self.assertEqual(state.retrievers[0].search.call_count, 1)
+        self.assertEqual(state.rankers[0].rerank.call_count, 1)
+        self.assertEqual(state.rankers[0].model.predict.call_count, 1)
+
+    def test_empty_processed_keywords_persist_and_real_full_query_fallback_is_unchanged(self):
+        fixture = self.fixture
+        fixture.keyword_content = '{"symptoms": [], "diagnoses": [], "medications": []}'
+        state = self.real_so_retrieval()
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["retrieval_keywords"], [])
+        self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
+        self.assertEqual(state.encoder.calls[-1], [fixture.conditions])
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        self.assertEqual(len(fixture.calls), 2)
+
+    def test_graph_stream_failure_preserves_provider_metadata_before_text_result_returns(self):
+        fixture = self.fixture
+        harness = self.provider_graph()
+        harness.stream_error = RuntimeError("partial stream failed")
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        _, _, [record] = self.read_run()
+        self.assertEqual(len(record["model_responses"]["guideline_evidence"]), 1)
+        self.assertEqual(record["model_responses"]["guideline_evidence"][0]["response_id"], "stream-provider-id")
+        self.assertEqual(len(record["model_responses"]["guideline_query_embedding"]), 1)
+        self.assertEqual(record["model_responses"]["assessment_plan"], [])
+        self.assertIsNone(record["guideline_evidence"])
+        self.assertIsNone(record["graphrag_context"])
+        self.assertIsNotNone(record["retrieved_patient_ids"])
+        self.assertIsNotNone(record["reranked_patient_ids"])
+        self.assertEqual(len(fixture.calls), 1)
+
+    def test_sequential_patient_capture_does_not_inherit_on_failure_before_extract_or_rerank(self):
+        fixture = self.fixture
+        patients = [{"id": str(index), "subjective": f"PATIENT {index}", "objective": "normal"}
+                    for index in range(4)]
+        fixture.write_patients(patients)
+        def keyword_reply(kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            index = int(re.search(r"PATIENT (\d)", prompt).group(1))
+            raw = json.dumps({"symptoms": [f"term {index}"], "diagnoses": [], "medications": []})
+            response = keyword_response(raw)
+            response.model, response.id = f"reported-{index}", f"response-{index}"
+            return response
+        fixture.keyword_response = keyword_reply
+        retriever_class = fixture.modules["scripts.med_copilot_retrieval"].HybridRetriever
+        ranker_class = fixture.modules["scripts.med_copilot_retrieval"].CrossEncoderReranker
+        original_search, original_rerank = retriever_class.search, ranker_class.rerank
+        def search(instance, query, topk):
+            if "PATIENT 1" in query:
+                raise RuntimeError("before extract")
+            return original_search(instance, query, topk)
+        def rerank(instance, query, candidates, topk):
+            if "PATIENT 2" in query:
+                raise RuntimeError("before rerank")
+            return original_rerank(instance, query, candidates, topk)
+        retriever_class.search, ranker_class.rerank = search, rerank
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        _, _, records = self.read_run()
+        for index in (0, 2, 3):
+            self.assertEqual(records[index]["retrieval_keywords"], [f"term {index}"])
+            self.assertEqual(records[index]["model_responses"]["keyword_extraction"][0]["response_id"], f"response-{index}")
+            self.assertEqual(json.loads(records[index]["keyword_extraction_raw"])["symptoms"], [f"term {index}"])
+        for field in ("keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids", "reranked_patient_ids"):
+            self.assertIsNone(records[1][field])
+        self.assertEqual(records[1]["model_responses"], {stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]})
+        self.assertIsNotNone(records[2]["retrieved_patient_ids"])
+        self.assertIsNone(records[2]["reranked_patient_ids"])
+        self.assertIsNotNone(records[3]["reranked_patient_ids"])
+        self.assertEqual(len(fixture.keyword_calls), 3)
+
+    def test_interrupt_after_graph_response_persists_capture_and_initializes_unstarted_patient(self):
+        fixture = self.fixture
+        fixture.write_patients([{"id": "first", **fixture.patient}, {"id": "second", **fixture.patient}])
+        harness = self.provider_graph()
+        harness.stream_error = KeyboardInterrupt()
+        runner = self.load_runner()
+        with fixture.runtime():
+            with self.assertRaises(KeyboardInterrupt):
+                runner["main"]()
+        _, run, [first, second] = self.read_run()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual(first["status"], "failed_incomplete")
+        self.assertEqual(first["keyword_extraction_raw"], fixture.keyword_content)
+        self.assertEqual(first["retrieval_keywords"], ["Cough", "denies fever"])
+        self.assertIsNotNone(first["retrieved_patient_ids"])
+        self.assertIsNotNone(first["reranked_patient_ids"])
+        self.assertEqual(len(first["model_responses"]["guideline_evidence"]), 1)
+        self.assertEqual(first["model_responses"]["assessment_plan"], [])
+        self.assertEqual(second, HELPER_NAMESPACE["new_patient_result"]("second", "not_processed"))
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        self.assertEqual(len(fixture.calls), 1)
+
+    def test_direct_completion_metadata_survives_missing_choices_and_partial_usage(self):
+        fixture = self.fixture
+        fixture.completion_responses["questions"] = SimpleNamespace(
+            id="provider-response", model="reported-not-requested", choices=[],
+            usage=SimpleNamespace(prompt_tokens=8), _request_id="HTTP-REQUEST")
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["model_responses"]["guideline_questions"], [{
+            "reported_model": "reported-not-requested", "response_id": "provider-response",
+            "token_usage": {"prompt_tokens": 8, "completion_tokens": None, "total_tokens": None}}])
+        self.assertIsNone(record["guideline_questions"])
+        self.assertEqual(fixture.graph_calls, [])
+        self.assertEqual(record["model_responses"]["assessment_plan"], [])
+
+    def test_shared_graphrag_models_preserve_multiple_responses_and_do_not_leak_after_failure(self):
+        fixture = self.fixture
+        fixture.write_patients([{"id": str(index), "subjective": f"PATIENT {index}", "objective": "normal"}
+                                for index in range(3)])
+        harness = ProviderHarness()
+        responses = itertools.count()
+        original_stream = harness.new_stream
+        async def stream(**kwargs):
+            number = next(responses)
+            if number == 2:
+                raise RuntimeError("third chat request failed")
+            chunks = [harness.chunk(f"evidence {number}"), harness.chunk(None, harness.usage)]
+            for chunk in chunks:
+                chunk.id, chunk.model = f"graph-id-{number}", f"reported-graph-{number}"
+            harness.chunks = chunks
+            return await original_stream(**kwargs)
+        harness.chat_create.side_effect = stream
+        def graph_search(**kwargs):
+            fixture.graph_calls.append((kwargs, Path.cwd()))
+            count = 2 if len(fixture.graph_calls) == 1 else 1
+            answer = ""
+            for _ in range(count):
+                answer, _ = asyncio.run(harness.query())
+            return answer, fixture.context
+        fixture.modules["graphrag.cli.query"].run_local_search = graph_search
+        fixture.failure, fixture.failure_marker = "retrieval", "PATIENT 2"
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        _, _, [first, second, third] = self.read_run()
+        self.assertEqual([entry["response_id"] for entry in first["model_responses"]["guideline_evidence"]],
+                         ["graph-id-0", "graph-id-1"])
+        self.assertEqual(len(first["model_responses"]["guideline_query_embedding"]), 2)
+        self.assertEqual(second["model_responses"]["guideline_evidence"], [])
+        self.assertEqual(len(second["model_responses"]["guideline_query_embedding"]), 1)
+        self.assertEqual(second["model_responses"]["assessment_plan"], [])
+        self.assertEqual(third["model_responses"], {stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]})
+        self.assertEqual(harness.chat_create.await_count, 3)
+        self.assertEqual(harness.embedding_create.await_count, 3)
+        self.assertEqual(len(fixture.keyword_calls), 2)
+        self.assertEqual(len(fixture.calls), 3)
+
+    def test_final_response_metadata_is_saved_before_missing_content_raises(self):
+        fixture = self.fixture
+        fixture.completion_responses["final"] = SimpleNamespace(
+            model="reported-final", usage=None, choices=[SimpleNamespace(message=SimpleNamespace())],
+            _request_id="http-id-only")
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["model_responses"]["assessment_plan"], [{
+            "reported_model": "reported-final", "response_id": None, "token_usage": None}])
+        self.assertIsNotNone(record["assessment_plan_prompts"])
+        self.assertIsNone(record["assessment_plan_raw"])
+        self.assertEqual(len(fixture.calls), 2)
+
+    def test_process_patient_rebinds_captures_after_success_failure_and_interruption(self):
+        root = self.fixture.root
+        for stage, error in ((None, None), ("keywords", RuntimeError("keyword failure")),
+                             ("questions", RuntimeError("question failure")),
+                             ("final", KeyboardInterrupt()), ("final", SystemExit(7))):
+            with self.subTest(stage=stage):
+                self.fixture = PipelineFixture(root / f"{stage or 'success'}-{type(error).__name__}")
+                fixture = self.fixture
+                state = self.real_so_retrieval()
+                fixture.failure = stage
+                if error is not None:
+                    fixture.error = error
+                runner = self.load_runner()
+                with fixture.runtime():
+                    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                        with self.assertRaises(type(error)) as caught:
+                            runner["main"]()
+                        self.assertIs(caught.exception, error)
+                    else:
+                        self.assertEqual(runner["main"](), "completed" if stage is None
+                                         else "completed_with_errors")
+                _, _, [record] = self.read_run()
+                self.assertEqual(record["status"], "completed" if stage is None else "failed_incomplete")
+                retriever, reranker = state.retrievers[0], state.rankers[0]
+                previous_result = retriever.keyword_extractor.capture_result
+                # stop() persists a copy with failed status after BaseException;
+                # the capture binding still points to the original in-flight record.
+                expected_status = None if isinstance(error, (KeyboardInterrupt, SystemExit)) else record["status"]
+                self.assertEqual(previous_result, {**record, "status": expected_status})
+                previous_snapshot = json.loads(json.dumps(previous_result))
+                previous_callbacks = [component.on_ranking for component in (retriever, reranker)]
+                self.assertTrue(all(callable(callback) for callback in previous_callbacks))
+                if stage == "keywords":
+                    self.assertIsNone(record["keyword_extraction_raw"])
+                    self.assertIsNone(record["retrieval_keywords"])
+                    self.assertIsNone(record["retrieved_patient_ids"])
+                    self.assertIsNone(record["reranked_patient_ids"])
+                    self.assertEqual(record["model_responses"], {
+                        stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]})
+                else:
+                    self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
+                    self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
+                    self.assertEqual(len(record["retrieved_patient_ids"]), 2)
+                    self.assertEqual(len(record["reranked_patient_ids"]), 2)
+                    self.assertEqual(len(record["model_responses"]["keyword_extraction"]), 1)
+                if stage in (None, "final"):
+                    self.assertIsNotNone(record["assessment_plan_prompts"])
+                    self.assertEqual(len(record["model_responses"]["guideline_questions"]), 1)
+                if stage is None:
+                    self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
+                    self.assertEqual(len(record["model_responses"]["assessment_plan"]), 1)
+                else:
+                    self.assertIsNone(record["assessment_plan_raw"])
+                    self.assertEqual(record["model_responses"]["assessment_plan"], [])
+
+                # The next call must replace every binding and clear both rankings
+                # even when it fails before search/extract/rerank can reset anything.
+                next_result = runner["new_patient_result"]("next-patient")
+                counts = (len(fixture.keyword_calls), len(fixture.calls), len(fixture.graph_calls))
+                with fixture.runtime():
+                    with self.assertRaises(ValueError):
+                        runner["process_patient"](
+                            {"subjective": "S", "objective": None}, next_result, fixture.corpus,
+                            retriever, reranker, fixture.guidelines / "output")
+                self.assertIs(retriever.keyword_extractor.capture_result, next_result)
+                self.assertEqual(next_result, runner["new_patient_result"]("next-patient"))
+                for component, previous_callback in zip((retriever, reranker), previous_callbacks):
+                    self.assertIsNone(component.ranked_candidates)
+                    self.assertIsNot(component.on_ranking, previous_callback)
+                    component.on_ranking([])
+                self.assertEqual(next_result["retrieved_patient_ids"], [])
+                self.assertEqual(next_result["reranked_patient_ids"], [])
+                self.assertEqual(previous_result, previous_snapshot)
+                self.assertEqual(self.read_run()[2], [record])
+                self.assertEqual((len(fixture.keyword_calls), len(fixture.calls), len(fixture.graph_calls)), counts)
+
+                # Reuse the same retriever/reranker after that early failure and
+                # even after a prior interrupt. Persist the successful new case.
+                fixture.failure = None
+                retry = runner["new_patient_result"]("retry-patient")
+                with fixture.runtime():
+                    runner["process_patient"](
+                        {"id": "retry-patient", **fixture.patient}, retry, fixture.corpus,
+                        retriever, reranker, fixture.guidelines / "output")
+                    retry["status"] = "completed"
+                    retry_run = runner["ExperimentRun"].start(
+                        fixture.root / "recovery_output", root=fixture.root,
+                        input_path=fixture.input_path, started_at=runner["pacific_now"](),
+                        branch=fixture.branch, commit=fixture.commit, patient_ids=["retry-patient"])
+                    retry_run.save_result(retry)
+                    self.assertEqual(retry_run.finish(runner["pacific_now"]()), "completed")
+                _, _, [saved_retry] = self.read_run(retry_run.run_dir)
+                self.assertEqual(saved_retry, retry)
+                self.assertIs(retriever.keyword_extractor.capture_result, retry)
+                self.assertEqual(retry["keyword_extraction_raw"], fixture.keyword_content)
+                self.assertEqual(retry["retrieval_keywords"], ["Cough", "denies fever"])
+                self.assertEqual(len(retry["retrieved_patient_ids"]), 2)
+                self.assertEqual(len(retry["reranked_patient_ids"]), 2)
+                self.assertEqual(len(retry["model_responses"]["keyword_extraction"]), 1)
+                self.assertEqual(len(retry["model_responses"]["guideline_questions"]), 1)
+                self.assertEqual(len(retry["model_responses"]["assessment_plan"]), 1)
+                self.assertEqual(retry["assessment_plan_raw"], fixture.final_output)
+                self.assertEqual(previous_result, previous_snapshot)
+                self.assertEqual(next_result["retrieved_patient_ids"], [])
+                self.assertEqual(next_result["reranked_patient_ids"], [])
+                self.assertEqual(self.read_run()[2], [record])
+
+    def test_process_patient_resets_stale_bindings_before_matching_text_can_fail(self):
+        fixture = self.fixture
+        runner = self.load_runner()
+        extractor = SimpleNamespace(capture_result="stale")
+        retriever = SimpleNamespace(keyword_extractor=extractor, ranked_candidates=["stale"],
+                                    on_ranking=Mock(), search=Mock())
+        reranker = SimpleNamespace(ranked_candidates=["stale"], on_ranking=Mock(), rerank=Mock())
+        previous_callbacks = [retriever.on_ranking, reranker.on_ranking]
+        record = runner["new_patient_result"](fixture.patient_id)
+        prepare = Mock(wraps=runner["prepare_patient_output_capture"])
+        with fixture.runtime(), patch.dict(runner["process_patient"].__globals__, {
+                "prepare_patient_output_capture": prepare}):
+            with self.assertRaises(ValueError):
+                runner["process_patient"](
+                    {"subjective": "S", "objective": None}, record, fixture.corpus,
+                    retriever, reranker, fixture.guidelines / "output")
+        prepare.assert_called_once_with(record, fixture.corpus, retriever, reranker)
+        self.assertIs(extractor.capture_result, record)
+        for component, previous_callback in zip((retriever, reranker), previous_callbacks):
+            self.assertTrue(callable(component.on_ranking))
+            self.assertIsNot(component.on_ranking, previous_callback)
+            self.assertIsNone(component.ranked_candidates)
+        retriever.search.assert_not_called()
+        reranker.rerank.assert_not_called()
+        self.assertEqual(record, runner["new_patient_result"](fixture.patient_id))
+        self.assertEqual(fixture.keyword_calls, [])
+        self.assertEqual(fixture.calls, [])
+        self.assertEqual(fixture.graph_calls, [])
+
+    def test_persisted_real_retained_ranking_excludes_larger_faiss_pool(self):
+        fixture = self.fixture
+        fixture.corpus = [dict(note_id=f"N{row}", subjective="cough", objective="normal",
+                              assessment=f"A {row}", plan=f"P {row}") for row in range(35)]
+        fixture.write_corpus()
+        state = self.real_so_retrieval()
+        constructor = state.module.HybridRetriever
+        def initialize(*args, **kwargs):
+            instance = constructor(*args, **kwargs)
+            instance.embedder.index.search = Mock(wraps=instance.embedder.index.search)
+            return instance
+        state.module.HybridRetriever = initialize
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, _, [record] = self.read_run()
+        self.assertEqual(len(record["retrieved_patient_ids"]), 20)
+        self.assertEqual(len(record["reranked_patient_ids"]), 5)
+        self.assertEqual([entry["note_id"] for entry in record["retrieved_patient_ids"]],
+                         [f"N{row}" for row in range(20)])
+        self.assertEqual([entry["note_id"] for entry in record["reranked_patient_ids"]],
+                         [f"N{row}" for row in range(5)])
+        self.assertEqual(state.retrievers[0].embedder.index.search.call_args.args[1], 35)
+        self.assertEqual(record["selected_reference_patient"], {"note_id": "N0"})
+        self.assertEqual(len(fixture.keyword_calls), 1)
+        self.assertEqual(len(fixture.calls), 2)
+
+    def test_completed_empty_real_hybrid_ranking_is_saved_and_reranking_stays_unattempted(self):
+        fixture = self.fixture
+        state = self.real_so_retrieval()
+        constructor = state.module.HybridRetriever
+        def initialize(*args, **kwargs):
+            instance = constructor(*args, **kwargs)
+            instance.embedder.index.search = Mock(return_value=(
+                state.module.np.array([[1., 0.]]), state.module.np.array([[-1, 999]])))
+            return instance
+        state.module.HybridRetriever = initialize
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, _, [record] = self.read_run()
+        self.assertEqual(record["retrieved_patient_ids"], [])
+        self.assertIsNone(record["reranked_patient_ids"])
+        self.assertIsNone(record["selected_reference_patient"])
+        self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
+        self.assertIn("No reference patient available.", fixture.calls[-1]["messages"][-1]["content"])
+        state.rankers[0].rerank.assert_not_called()
+
+    def test_start_reset_isolates_shared_components_across_every_pipeline_failure_boundary(self):
+        root = self.fixture.root
+        boundaries = (
+            "before_extract", "keyword_api", "keyword_schema", "embedding", "index",
+            "attribution", "rerank_model", "formatting", "questions_api", "questions_response",
+            "graph_embedding", "graph_stream", "graph_partial_stream", "graph_context",
+            "final_api", "final_response",
+        )
+        for boundary in boundaries:
+            with self.subTest(boundary=boundary):
+                self.fixture = PipelineFixture(root / boundary)
+                fixture = self.fixture
+                patients = self.write_marked_patients()
+                fixture.corpus = [
+                    {"note_id": f"REF-{index}", "subjective": "reference cough", "objective": "normal",
+                     "assessment": f"REFERENCE ASSESSMENT {index}", "plan": f"REFERENCE PLAN {index}"}
+                    for index in range(3)
+                ]
+                fixture.write_corpus()
+                state = self.real_so_retrieval()
+                harness = ProviderHarness()
+                active, seen_results, snapshots, callbacks = {}, [], [], []
+                raw_replies = {}
+                provider_chunks = harness.new_stream
+                base_reply = fixture.reply
+                create_retriever, create_reranker = state.module.HybridRetriever, state.module.CrossEncoderReranker
+
+                def trip(stage):
+                    if active["marker"] == "MARKER_BRAVO" and boundary == stage:
+                        raise RuntimeError(f"injected {stage} failure")
+
+                def keyword_reply(kwargs):
+                    trip("keyword_api")
+                    marker = active["marker"]
+                    self.assertIn(marker, kwargs["messages"][0]["content"])
+                    content = ' \n' + json.dumps({
+                        "symptoms": [f" {marker} ", "cough", marker],
+                        "diagnoses": ["cough"], "medications": ["药"],
+                    }, ensure_ascii=False, indent=2) + '\t '
+                    if marker == "MARKER_BRAVO" and boundary == "keyword_schema":
+                        content = '{"symptoms": ["BRAVO malformed schema"]}'
+                    raw_replies[marker] = content
+                    response = keyword_response(content)
+                    response.model, response.id = f"reported-keyword-{marker}", f"keyword-{marker}"
+                    response.usage = SimpleNamespace(prompt_tokens=9, completion_tokens=4, total_tokens=13)
+                    return response
+                fixture.keyword_response = keyword_reply
+
+                def retriever(*args, **kwargs):
+                    instance = create_retriever(*args, **kwargs)
+                    original_search, original_embedding = instance.search, instance.build_query_embedding
+                    def search(query, topk):
+                        self.assertIn(active["marker"], query)
+                        self.assertIs(instance.keyword_extractor.capture_result, active["result"])
+                        ranker = state.rankers[0]
+                        for component in (instance, ranker):
+                            self.assertIsNone(component.ranked_candidates)
+                        current_callbacks = (instance.on_ranking, ranker.on_ranking)
+                        if callbacks:
+                            for current, previous in zip(current_callbacks, callbacks[-1]):
+                                self.assertIsNot(current, previous)
+                        callbacks.append(current_callbacks)
+                        trip("before_extract")
+                        return original_search(query, topk=topk)
+                    def embed(keywords):
+                        trip("embedding")
+                        return original_embedding(keywords)
+                    def index_search(query_vector, count):
+                        trip("index")
+                        first = active["index"]
+                        order = [(first + offset) % 3 for offset in range(3)]
+                        return (state.module.np.array([[.9123456789, .8123456789, .7123456789]]),
+                                state.module.np.array([order]))
+                    def attribute(**kwargs):
+                        trip("attribution")
+                        malformed = active["marker"] == "MARKER_BRAVO" and boundary == "formatting"
+                        return [], ([{}] if malformed else [])
+                    instance.search = Mock(side_effect=search)
+                    instance.build_query_embedding = Mock(side_effect=embed)
+                    instance.embedder.index.search = Mock(side_effect=index_search)
+                    instance.compute_case_phrase_contributions = Mock(side_effect=attribute)
+                    return instance
+                def reranker():
+                    instance = create_reranker()
+                    def predict(pairs):
+                        trip("rerank_model")
+                        return [.12, .987654321, .12]
+                    instance.model.predict = Mock(side_effect=predict)
+                    return instance
+                state.module.HybridRetriever, state.module.CrossEncoderReranker = retriever, reranker
+
+                def reply(stage, text):
+                    trip("questions_api" if stage == "questions" else "final_api")
+                    marker = active["marker"]
+                    content = base_reply(stage, text)
+                    response = SimpleNamespace(
+                        model=f"reported-{stage}-{marker}", id=f"{stage}-{marker}",
+                        usage=SimpleNamespace(prompt_tokens=20, completion_tokens=3, total_tokens=23),
+                        choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+                    if marker == "MARKER_BRAVO" and boundary == f"{stage}_response":
+                        response.choices = []
+                    fixture.completion_responses[stage] = response
+                    return content
+                fixture.reply = reply
+
+                async def embedding_response(**kwargs):
+                    trip("graph_embedding")
+                    harness.embedding_response.model = f'reported-embedding-{active["marker"]}'
+                    return harness.embedding_raw
+                async def stream_response(**kwargs):
+                    trip("graph_stream")
+                    marker = active["marker"]
+                    harness.chunks = [harness.chunk(f"{marker} evidence"),
+                                      harness.chunk(None, harness.usage), harness.chunk(None, harness.usage)]
+                    for chunk in harness.chunks:
+                        chunk.id, chunk.model = f"graph-{marker}", f"reported-graph-{marker}"
+                    harness.stream_error = (RuntimeError("partial stream failed")
+                                            if marker == "MARKER_BRAVO" and boundary == "graph_partial_stream"
+                                            else None)
+                    return await provider_chunks(**kwargs)
+                harness.embedding_create.side_effect = embedding_response
+                harness.chat_create.side_effect = stream_response
+                def graph_search(**kwargs):
+                    fixture.graph_calls.append((kwargs, Path.cwd()))
+                    self.assertIn(active["marker"], kwargs["query"])
+                    answer, _ = asyncio.run(harness.query())
+                    context = (object() if active["marker"] == "MARKER_BRAVO" and boundary == "graph_context"
+                               else fixture.context)
+                    return answer, context
+                fixture.modules["graphrag.cli.query"].run_local_search = graph_search
+
+                runner = self.load_runner()
+                process = runner["process_patient"]
+                def observe_patient(patient, result, *args):
+                    active.update(marker=re.search(r"MARKER_[A-Z]+", patient["subjective"]).group(0),
+                                  index=len(seen_results), result=result)
+                    seen_results.append(result)
+                    try:
+                        return process(patient, result, *args)
+                    finally:
+                        snapshots.append(json.loads(json.dumps(result)))
+                with fixture.runtime(), patch.dict(runner["main"].__globals__, {"process_patient": observe_patient}):
+                    self.assertEqual(runner["main"](), "completed_with_errors")
+                _, _, records = self.read_run()
+                self.assertEqual([record["id"] for record in records], [patient["id"] for patient in patients])
+                self.assertEqual([record["status"] for record in records],
+                                 ["completed", "failed_incomplete", "completed"])
+                self.assertEqual(len(state.retrievers), 1)
+                self.assertEqual(len(state.rankers), 1)
+                self.assertEqual(len(callbacks), 3)
+                # Later responses, ranking mutations, and rebindings cannot alter
+                # either completed/failed in-memory captures or persisted JSONL.
+                for index, (record, memory, snapshot) in enumerate(zip(records, seen_results, snapshots)):
+                    self.assertEqual(memory, record)
+                    self.assertEqual({**snapshot, "status": record["status"]}, record)
+                    marker = ("MARKER_ALPHA", "MARKER_BRAVO", "MARKER_CHARLIE")[index]
+                    level = boundaries.index(boundary) if index == 1 else len(boundaries)
+                    if level >= 2:
+                        self.assertEqual(record["keyword_extraction_raw"], raw_replies[marker])
+                    else:
+                        self.assertIsNone(record["keyword_extraction_raw"])
+                    self.assertEqual(record["retrieval_keywords"],
+                                     [marker, "cough", "药"] if level >= 3 else None)
+                    if level >= 5:
+                        self.assertEqual([item["note_id"] for item in record["retrieved_patient_ids"]],
+                                         [f"REF-{(index + offset) % 3}" for offset in range(3)])
+                        self.assertNotIn("rerank_score", record["retrieved_patient_ids"][0])
+                    else:
+                        self.assertIsNone(record["retrieved_patient_ids"])
+                    if level >= 7:
+                        self.assertEqual([item["note_id"] for item in record["reranked_patient_ids"]],
+                                         [f"REF-{(index + offset) % 3}" for offset in (1, 0, 2)])
+                        self.assertEqual(record["reranked_patient_ids"][0]["rerank_score"], .987654321)
+                    else:
+                        self.assertIsNone(record["reranked_patient_ids"])
+                    expected_stages = {"keyword_extraction": level >= 2, "guideline_questions": level >= 9,
+                                       "guideline_query_embedding": level >= 11,
+                                       "guideline_evidence": level >= 12, "assessment_plan": level >= 15}
+                    for stage, available in expected_stages.items():
+                        entries = record["model_responses"][stage]
+                        self.assertEqual(len(entries), int(available), (boundary, index, stage, entries))
+                        if available:
+                            self.assertIn(marker, entries[0]["reported_model"])
+                            if stage == "guideline_query_embedding":
+                                self.assertIsNone(entries[0]["response_id"])
+                                self.assertEqual(entries[0]["token_usage"], {
+                                    "prompt_tokens": 11, "completion_tokens": None, "total_tokens": 11})
+                            else:
+                                self.assertIn(marker, entries[0]["response_id"])
+                            if index != 1:
+                                self.assertNotIn("MARKER_BRAVO", json.dumps(entries))
+                    if index != 1:
+                        self.assertEqual(record["selected_reference_patient"], {"note_id": f"REF-{(index + 1) % 3}"})
+                        self.assertIn(f"REFERENCE PLAN {(index + 1) % 3}", record["assessment_plan_prompts"]["user"])
+                self.assertIs(state.retrievers[0].keyword_extractor.capture_result, seen_results[-1])
+                self.assertEqual(len(fixture.keyword_calls), 3 - int(boundary == "before_extract"))
+                self.assertEqual(state.rankers[0].model.predict.call_count, 2 + int(boundaries.index(boundary) >= 6))
+
+
+    def test_reranker_callbacks_preserve_ranking_when_test_double_formatting_fails(self):
+        root = self.fixture.root
+        for implementation in ("stub", "frozen-upstream"):
+            with self.subTest(implementation=implementation):
+                self.fixture = PipelineFixture(root / implementation)
+                fixture = self.fixture
+                if implementation == "stub":
+                    fixture.failure = "rerank_formatting"
+                else:
+                    fixture.candidates = [
+                        {"idx": row, **record, "dominant_terms": [{}]}
+                        for row, record in enumerate(fixture.corpus)
+                    ]
+                    ranker = frozen_reranker_class(fixture.rerank_scores)()
+                    ranker.model.predict = Mock(wraps=ranker.model.predict)
+                    fixture.modules["scripts.med_copilot_retrieval"].CrossEncoderReranker = lambda: ranker
+                runner = self.load_runner()
+                with fixture.runtime():
+                    self.assertEqual(runner["main"](), "completed_with_errors")
+                _, _, [record] = self.read_run()
+                self.assertEqual(record["status"], "failed_incomplete")
+                self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
+                self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
+                self.assertEqual(record["retrieved_patient_ids"], [
+                    {"note_id": "NOTE-A"}, {"note_id": "NOTE-B"}])
+                self.assertEqual(record["reranked_patient_ids"], [
+                    {"note_id": "NOTE-B", "rerank_score": .9},
+                    {"note_id": "NOTE-A", "rerank_score": .2}])
+                self.assertIsNone(record["selected_reference_patient"])
+                self.assertIsNone(record["assessment_plan_prompts"])
+                self.assertIsNone(record["assessment_plan_raw"])
+                self.assertEqual(len(record["model_responses"]["keyword_extraction"]), 1)
+                for stage in ("guideline_questions", "guideline_query_embedding", "guideline_evidence", "assessment_plan"):
+                    self.assertEqual(record["model_responses"][stage], [])
+                self.assertEqual(len(fixture.keyword_calls), 1)
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                if implementation == "stub":
+                    self.assertEqual(len([call for call in fixture.rerank_calls if call[0] == "rerank"]), 1)
+                else:
+                    ranker.model.predict.assert_called_once()
+
+
+    def test_retrieval_callback_preserves_retained_ranking_before_stub_attribution_failure(self):
+        root = self.fixture.root
+        for error in (RuntimeError("attribution failed"), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                self.fixture = PipelineFixture(root / type(error).__name__)
+                fixture = self.fixture
+                fixture.failure, fixture.error = "retrieval_attribution", error
+                fixture.corpus = [
+                    {"note_id": f"NOTE-{row}", "subjective": "cough", "objective": "normal",
+                     "assessment": f"ASSESSMENT {row}", "plan": f"PLAN {row}"}
+                    for row in range(25)
+                ]
+                fixture.write_corpus()
+                order = [24, 3, 18] + [row for row in range(25) if row not in (24, 3, 18)]
+                # Equal scores retain this supplied hybrid order. Only the
+                # requested 20 candidates are published, before attribution.
+                fixture.candidates = [
+                    {"idx": row, "embedding_score": .9123456789, "keyword_score": .5,
+                     "hybrid_score": .70617283945, "display_text": "PRIVATE FULL SOAP"}
+                    for row in order
+                ]
+                runner = self.load_runner()
+                with fixture.runtime():
+                    if isinstance(error, KeyboardInterrupt):
+                        with self.assertRaises(KeyboardInterrupt) as caught:
+                            runner["main"]()
+                        self.assertIs(caught.exception, error)
+                    else:
+                        self.assertEqual(runner["main"](), "completed_with_errors")
+                _, run, [record] = self.read_run()
+                self.assertEqual(run["status"], "failed_incomplete" if isinstance(error, KeyboardInterrupt)
+                                 else "completed_with_errors")
+                self.assertEqual(record["status"], "failed_incomplete")
+                self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
+                self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
+                self.assertEqual(record["retrieved_patient_ids"], [
+                    {"note_id": f"NOTE-{row}", "embedding_score": .9123456789,
+                     "keyword_score": .5, "hybrid_score": .70617283945}
+                    for row in order[:20]
+                ])
+                self.assertNotIn("PRIVATE FULL SOAP", json.dumps(record))
+                self.assertIsNone(record["reranked_patient_ids"])
+                self.assertIsNone(record["selected_reference_patient"])
+                self.assertIsNone(record["assessment_plan_prompts"])
+                self.assertIsNone(record["assessment_plan_raw"])
+                self.assertEqual(len(record["model_responses"]["keyword_extraction"]), 1)
+                for stage in ("guideline_questions", "guideline_query_embedding", "guideline_evidence", "assessment_plan"):
+                    self.assertEqual(record["model_responses"][stage], [])
+                self.assertEqual(len(fixture.keyword_calls), 1)
+                self.assertEqual([call for call in fixture.rerank_calls if call[0] == "rerank"], [])
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.graph_calls, [])
 
 
 if __name__ == "__main__":

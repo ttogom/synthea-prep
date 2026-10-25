@@ -1,0 +1,2 @@
+med_copilot/data/patient_corpus/** filter=lfs diff=lfs merge=lfs -text
+med_copilot/data/patient_retrieval_so/** filter=lfs diff=lfs merge=lfs -text

@@ -59,8 +59,8 @@ Define machine-readable run metadata and per-patient results that record:
 
 ## Needs further investigation
 
-1\. **Patient matching is asymmetric.** Our target query contains S/O, while reference embeddings, keyword scoring, and cross-encoder reranking still use **reference S/O/A**. The reference’s full SOAP becomes the generation example. Proposed reference-S/O-only matching remains unimplemented.  
-*Verified:* actual imported classes in `upstream/create_embeddings.py`, runner calls, and `reference_corpus_integration.md`.
+1\. **Patient matching is asymmetric.** **Resolved in the project runner:** `scripts/med_copilot_retrieval.py` now uses reference S/O for embeddings, keyword scoring, and cross-encoder reranking, with a separate validated S/O cache. The selected reference’s full SOAP remains the generation example. Upstream retains its original S/O/A implementation unchanged. Full-corpus integration and passage handling remain separate work.
+*Verified:* project-owned adapter, runner wiring, direct matching/cache tests, and full-pipeline regression tests confirming A/P-independent selection and full-SOAP generation evidence.
 
 2\. **Clinical keyword matching is a simpler implementation than the paper’s description establishes.** The used code averages extracted keyword embeddings and combines dense similarity with an **equally weighted substring-hit fraction**. There are no explicit clinical-importance weights or eligibility-constraint checks. This behavior is inherited from the release; the paper underspecifies its detailed scoring formula.  
 *Verified:* paper §§1, 3.3; keyword extraction, embedding, and scoring implementations.
@@ -73,6 +73,8 @@ Define machine-readable run metadata and per-patient results that record:
 
 5\. **Guideline provenance is coarser.** The paper specifies source, section title, character span, and inspectable source links. Our artifacts retain filenames and document/chunk/graph identifiers, but lack structured section/span metadata; all document metadata entries are null.  
 *Verified:* actual document and TextUnit tables and their links.
+
+**Publication provenance recovered (2026-10-22):** The [verified manifest](../data/guidelines/guideline_manifest.csv) maps all 226 document IDs to original publication titles, issuing organizations, bibliographic dates, and official source URLs. [Evidence and limitations](../data/guidelines/provenance/README.md) distinguish the 203 NICE extracts whose ISBNs match current PDFs, 17 whose ISBNs differ, and superseded NG51, whose overview no longer offers a PDF. The five journal publication editions are verified by DOI and NCBI/Crossref records. Exact historical NICE revision dates, original PDF snapshots, and recommendation-level section/span mappings remain unverified. The existing index metadata and retrieval behavior have not been changed by this provenance work.
 
 6\. **Guideline retrieval/fusion differs from the published diagram.** Figure 8 shows vector-based and graph-based retrieval followed by weighted combination. Our execution uses **entity-description vector search to seed local graph context**, then selects linked communities, relationships, and TextUnits through context-building rules and budgets. There is no separate implementation of the diagram’s weighted retrieval-result fusion.  
 *Verified:* Figure 8; GraphRAG API, entity mapping, and local-context builder.

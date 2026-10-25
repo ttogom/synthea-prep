@@ -30,6 +30,7 @@ export OPENAI_API_KEY="your-key"
 export GRAPHRAG_API_KEY="$OPENAI_API_KEY"
 
 python tests/test_med_copilot_helpers.py
+python tests/test_med_copilot_retrieval.py
 python tests/test_run_med_copilot.py
 python scripts/run_med_copilot.py
 ```
@@ -38,12 +39,16 @@ python scripts/run_med_copilot.py
 
 The runner processes every record in `experiments/input/patient_records_so.jsonl`, configured by `PATIENT_INPUT` in [scripts/run_med_copilot.py](scripts/run_med_copilot.py). Each line is a JSON object with a nonempty, unique string `id` and prepared `subjective` and `objective` strings, used directly without an LLM normalization call. Optional evaluation labels belong in `experiments/input/patient_records_so_labels.jsonl`, joined by `id`; the runner does not read them.
 
+Reference matching uses S/O only for embeddings, keyword overlap, and cross-encoder reranking, through [scripts/med_copilot_retrieval.py](scripts/med_copilot_retrieval.py). The selected reference's complete SOAP is still supplied to final generation. S/O embeddings and the FAISS index are built on first use under `med_copilot/data/patient_retrieval_so/`, separate from the upstream S/O/A artifacts. A `matching.json` manifest binds the cache to the ordered S/O texts and encoder identity and checks artifact hashes; missing, stale, or corrupt caches are rebuilt. Upstream source and artifacts are left intact.
+
 Each execution writes a new directory, never overwriting an existing one:
 
 ```text
 experiments/output/<Pacific timestamp>__<input stem>__<branch>/   # e.g. 2026-10-17_153045PDT__patient_records_so__integrate-medcopilot
 ├── run.json        # run status, times, branch, commit, input and reference-resource fingerprints
-└── results.jsonl   # one line per patient: id, status, assessment, plan, raw reply, reference, guideline evidence, exact prompts
+└── results.jsonl   # one line per patient: id, status, assessment, plan, raw reply, reference, guideline evidence, exact prompts, retrieval trace, provider metadata
 ```
 
 Run statuses are `running`, `completed`, `completed_with_errors`, and `failed_incomplete`; patient statuses are `completed`, `failed_incomplete`, and `not_processed`. The generated reply is saved exactly as returned in `assessment_plan_raw` and split at its Assessment and Plan headings (`## Assessment` or a standalone `Assessment:` label) into the `assessment` and `plan` fields; a section that is missing, empty, or repeated is saved as `null`. All three fields are `null` when no reply was generated. A failing patient does not stop the batch, and the command exits nonzero unless the run is `completed`. `experiments/output/` is gitignored. The tests mock external APIs; running the pipeline uses the configured OpenAI models. The runner locates guideline artifacts under `med_copilot/data/guidelines/` independently of the launch directory.
+
+The [patient output schema](med_copilot/docs/output_schema.md) documents exact keyword replies, processed retrieval keywords, retained hybrid and cross-encoder IDs/scores, and per-stage provider response metadata. Captures survive subsequent failures and interruptions. They do not enter clinical prompts.
