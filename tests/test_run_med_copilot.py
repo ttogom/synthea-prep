@@ -2237,10 +2237,11 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 2)
         self.assert_outputs()
 
-    def test_checked_in_experiment_input_uses_id_and_unique_values(self):
+    def test_checked_in_sample_input_uses_id_and_unique_values(self):
         records = HELPER_NAMESPACE["load_patient_records"](
-            ROOT / "experiments/input/patient_records_so.jsonl")
-        self.assertEqual(len(records), 100)
+            ROOT / "experiments/input" / INPUT_NAME)
+        self.assertEqual(len(records), 10)
+        self.assertEqual(len({record["id"] for record in records}), len(records))
         self.assertTrue(all(list(record) == ["id", "subjective", "objective"] for record in records))
         self.assertFalse((ROOT / "data_run_med_copilot").exists())
 
