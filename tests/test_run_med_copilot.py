@@ -31,6 +31,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pandas as pd
+import yaml
 
 from test_med_copilot_retrieval import FakeEncoder, load_retrieval_module
 from test_med_copilot_observability import ProviderHarness
@@ -46,6 +47,9 @@ UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
 UPSTREAM_EVALUATOR = ROOT / "med_copilot" / "upstream" / "evaluate_metrics.py"
 UPSTREAM_GRAPH_QUERY = ROOT / "med_copilot/upstream/graphrag/cli/query.py"
 UPSTREAM_GRAPH_STORAGE = ROOT / "med_copilot/upstream/graphrag/utils/storage.py"
+UPSTREAM_GRAPH_ENTITY_EXTRACTION = (
+    ROOT / "med_copilot/upstream/graphrag/query/context_builder/entity_extraction.py"
+)
 GUIDELINE_SETTINGS = ROOT / "med_copilot/data/guidelines/settings.yaml"
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
 PROJECT_PROMPTS = ROOT / "med_copilot/prompts/diagnosis_plan.py"
@@ -1076,9 +1080,10 @@ class RunMedCopilotTests(unittest.TestCase):
 
         def load_config(root, config_filepath, overrides):
             state.config_calls.append((root, config_filepath, overrides, Path.cwd()))
+            settings = yaml.safe_load(Path(config_filepath).read_text(encoding="utf-8"))
             return SimpleNamespace(outputs={}, output=SimpleNamespace(
                 base_dir=overrides["output.base_dir"],
-            ))
+            ), local_search=SimpleNamespace(**settings["local_search"]))
 
         async def local_search(**kwargs):
             state.api_calls.append((kwargs, Path.cwd()))
@@ -1102,6 +1107,62 @@ class RunMedCopilotTests(unittest.TestCase):
         fixture.modules["graphrag.cli.query"].run_local_search = graph_search
         state.read_parquet = read_parquet
         return state
+
+    def test_configured_entity_limit_reaches_every_query_and_saved_resource_fingerprint(self):
+        fixture = self.fixture
+        settings_path = fixture.guidelines / "settings.yaml"
+        settings_path.write_bytes(GUIDELINE_SETTINGS.read_bytes())
+        fixture.write_patients([
+            {"id": fixture.patient_id, **fixture.patient},
+            {"id": "SECOND_PATIENT", "subjective": "Sore throat", "objective": "Fever"},
+        ])
+        self.write_guideline_tables(fixture.guidelines / "output")
+        state = self.real_guideline_search()
+        runner = self.load_runner()
+        with fixture.runtime(), patch("pandas.read_parquet", side_effect=state.read_parquet):
+            self.assertEqual(runner["main"](), "completed")
+        self.assertEqual(len(state.api_calls), 2)
+        for kwargs, _ in state.api_calls:
+            self.assertEqual(kwargs["config"].local_search.top_k_entities, 5)
+            self.assertEqual(kwargs["query"], fixture.questions)
+        _, run, results = self.read_run()
+        self.assertEqual([result["id"] for result in results],
+                         [fixture.patient_id, "SECOND_PATIENT"])
+        for result in results:
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["guideline_evidence"], fixture.guideline_text)
+            self.assertEqual(result["assessment_plan_raw"], fixture.final_output)
+            self.assertIn(fixture.guideline_text, result["assessment_plan_prompts"]["user"])
+        self.assertEqual(run["reference_data"], self.expected_reference_data())
+
+    def test_configured_entity_limit_bounds_actual_upstream_oversampled_selection(self):
+        # Execute the unchanged upstream mapper with a fake embedding store:
+        # verify the observable ten-result selection, not just the YAML value.
+        node = next(node for node in ast.parse(
+            UPSTREAM_GRAPH_ENTITY_EXTRACTION.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef) and node.name == "map_query_to_entities")
+        namespace = {
+            "Entity": object, "BaseVectorStore": object, "EmbeddingModel": object,
+            "EntityVectorStoreKey": SimpleNamespace(ID="id"),
+            "get_entity_by_id": lambda entities, identity: entities.get(identity),
+        }
+        exec(compile(ast.Module(body=[node], type_ignores=[]),
+                     str(UPSTREAM_GRAPH_ENTITY_EXTRACTION), "exec"), namespace)
+        entities = {str(i): SimpleNamespace(id=str(i), title=f"entity {i}") for i in range(30)}
+        requested_k = yaml.safe_load(GUIDELINE_SETTINGS.read_text())["local_search"]["top_k_entities"]
+        self.assertEqual(requested_k, 5)
+        for available in (0, 3, 30):
+            with self.subTest(available=available):
+                store = Mock()
+                store.similarity_search_by_text.side_effect = lambda **kwargs: [
+                    SimpleNamespace(document=SimpleNamespace(id=str(i)))
+                    for i in range(min(available, kwargs["k"]))
+                ]
+                mapped = namespace["map_query_to_entities"](
+                    "clinical questions", store, Mock(), entities, k=requested_k)
+                self.assertEqual([entity.id for entity in mapped],
+                                 [str(i) for i in range(min(available, 10))])
+                self.assertEqual(store.similarity_search_by_text.call_args.kwargs["k"], 10)
 
     def write_guideline_tables(self, directory, prefix="SELECTED", include_covariates=False):
         names = list(GUIDELINE_TABLES)

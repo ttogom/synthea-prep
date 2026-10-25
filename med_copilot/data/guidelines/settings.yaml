@@ -151,6 +151,8 @@ snapshots:
 local_search:
   chat_model_id: default_chat_model
   embedding_model_id: default_embedding_model
+  # Upstream oversamples entity matches by 2, so this retrieves up to ten.
+  top_k_entities: 5
   prompt: "prompts/local_search_system_prompt.txt"
 
 global_search:
