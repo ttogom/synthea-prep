@@ -6,11 +6,14 @@ import sys
 import traceback
 
 import pandas as pd
+from dotenv import load_dotenv
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
 # These script-local paths must be available before importing project modules.
 ROOT = Path(__file__).resolve().parents[1] #project root dir
+# Load credentials before dependency/client initialization; exported values win.
+load_dotenv(ROOT / ".env", override=False)
 MED = ROOT / "med_copilot"
 UPSTREAM = MED / "upstream"
 sys.path.insert(0, str(ROOT))
@@ -35,15 +38,17 @@ _preloaded_bioclinicalbert = SentenceTransformer("emilyalsentzer/Bio_ClinicalBER
 from scripts.med_copilot_retrieval import HybridRetriever, CrossEncoderReranker, matching_text
 from scripts.med_copilot_observability import capture_graphrag_responses
 from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
+from scripts.med_copilot_models import AssessmentPlanModels
+from scripts.med_copilot_config import ExperimentConfig, confirm_experiment
 from graphrag.cli.query import run_local_search
 from med_copilot.prompts.diagnosis_plan import (
-    CONDITION_PLAN_RESPONSE_FORMAT,
     KEY_QUESTIONS_TEMPLATE,
     EVALUATE_TEMPLATE_KEYINFO,
 )
 from scripts.med_copilot_helpers import (
     ExperimentRun,
     JSONKeywordExtractor,
+    format_assessment_plans,
     git_branch,
     git_commit,
     graphrag_context_json,
@@ -55,16 +60,18 @@ from scripts.med_copilot_helpers import (
     prepare_patient_output_capture,
     reference_data_metadata,
     selected_reference_patient,
-    parse_condition_plan,
     validate_guideline_tables,
 )
 
 # TODO: decide on API key to use for full experiment
-api_key = os.environ["OPENAI_API_KEY"]
-model = "gpt-4o-mini"
-client = OpenAI(api_key=api_key)
+api_key = os.environ.get("OPENAI_API_KEY")
+# Model that generates the questions sent to clinical guideline search.
+GUIDELINE_QUESTION_MODEL = "gpt-4o-mini"
+# The shared client is initialized only after startup validation and confirmation.
+client = None
 
-def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output):
+def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output,
+                    assessment_models):
     """Run every pipeline stage for one patient, filling `result` as stages finish."""
     prepare_patient_output_capture(result, corpus_records, retriever, reranker)
     s_o = matching_text(patient)
@@ -101,7 +108,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
     )
 
     key_response = client.chat.completions.create(
-        model=model,
+        model=GUIDELINE_QUESTION_MODEL,
         response_format={"type": "json_object"},
         messages=[
             {
@@ -171,45 +178,54 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
         "user": final_messages[1]["content"],
     }
 
-    final_response = client.chat.completions.create(
-        model=model,
-        messages=final_messages,
-        response_format=CONDITION_PLAN_RESPONSE_FORMAT,
-    )
-    result["model_responses"]["assessment_plan"].append(model_response_metadata(final_response))
-
-    generated_plan = final_response.choices[0].message.content
-    result["assessment_plan_raw"] = generated_plan
-    # Validate each ranked pair's fields; retain the exact reply for diagnosis.
-    result.update(parse_condition_plan(generated_plan))
-
+    assessment_models.generate(final_messages, result)
     print("\n========== RANKED CONDITIONS AND PLANS ==========\n")
-    print(generated_plan)
+    print(format_assessment_plans(
+        result["assessment_plans"], assessment_models.metadata(ROOT)["models"],
+    ))
 
 
 def main(argv=None):
 # %% ------------------------------------------------------------------
-#  Load input patient records in Subjective / Objective format
+#  Load assessment/plan generating models and input patient records
 # ---------------------------------------------------------------------
+    global client
     args = parse_scoring_args(argv)
+    try:
+        experiment = ExperimentConfig(ROOT / "experiments" / "configs" / "experiment.yaml")
+        assessment_models = AssessmentPlanModels(
+            experiment.model_config, experiment.selected_models,
+            temperature=experiment.temperature, max_retries=experiment.max_retries,
+            require_shared_credentials=True,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Experiment configuration check failed:\n\n{exc}\n\n"
+              "Run not started. Fix the errors above and restart the script.", file=sys.stderr)
+        return "configuration_error"
+    if not confirm_experiment(experiment, assessment_models.metadata(ROOT), ROOT):
+        return "cancelled"
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     started_at = pacific_now()
     branch = git_branch(ROOT)
     commit = git_commit(ROOT)
 
     # Load and validate all patient records before creating a run.
     patients = load_patient_records(PATIENT_INPUT)
-    scorer = PatientScorer(PATIENT_LABELS, patients, args.presenting_evidence_only)
+    scorer = PatientScorer(PATIENT_LABELS, patients, args.presenting_evidence_only,
+                           max_patients=experiment.max_patients)
     patients = scorer.patients
 
     run = ExperimentRun.start(
         EXPERIMENT_OUTPUT, root=ROOT, input_path=PATIENT_INPUT, started_at=started_at,
         branch=branch, commit=commit, patient_ids=[patient["id"] for patient in patients],
+        model_ids=assessment_models.model_ids,
     )
     print(f"Run directory: {run.run_dir}")
 
     current = None
     try:
-        run.update(evaluation=scorer.metadata(ROOT))
+        run.update(experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
+                   assessment_plan_models=assessment_models.metadata(ROOT))
 # %% ------------------------------------------------------------------
 # Shared resources: similar-patient retriever, reranker, guideline tables
 # ---------------------------------------------------------------------
@@ -252,12 +268,11 @@ def main(argv=None):
 # ---------------------------------------------------------------------
         for number, patient in enumerate(patients, 1):
             print(f"\n========== PATIENT {number}/{len(patients)}: {patient['id']} ==========")
-            current = new_patient_result(patient["id"])
+            current = new_patient_result(patient["id"], model_ids=assessment_models.model_ids)
             try:
                 process_patient(patient, current, corpus_records, retriever, reranker,
-                                guideline_output)
+                                guideline_output, assessment_models)
                 scorer.score_result(current)
-                current["status"] = "completed"
             except Exception:
                 current["status"] = "failed_incomplete"
                 print(f"Patient {patient['id']} failed:", file=sys.stderr)
@@ -276,5 +291,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    if main() != "completed":
+    if main() not in ("completed", "cancelled"):
         sys.exit(1)

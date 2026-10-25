@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from textwrap import indent
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -274,8 +275,53 @@ def reference_data_metadata(root, *, corpus_file, artifacts_directory, artifact_
 # Per-patient outputs
 # ---------------------------------------------------------------------
 
-def new_patient_result(patient_id, status=None):
+def new_model_result():
+    """Fresh final-model slot, including explicit unattempted generation status."""
+    return {"status": "not_processed", "error": None, "predictions": None,
+            "assessment_plan_raw": None, "model_responses": [], "evaluation": None}
+
+
+def format_assessment_plans(assessment_plans, model_settings):
+    """Render model-grouped ranked condition/Plan pairs without changing results."""
+    groups = []
+    for model_id, output in assessment_plans.items():
+        config = model_settings[model_id]["config"]
+        model_name = config.get("deployment_name") or config["model"]
+        lines = [f"Model: {model_id} ({config['model_provider']}/{model_name})"]
+        if output["status"] != "completed":
+            lines.append(f"    Generation status: {output['status']}")
+            if output["error"] is not None:
+                error = output["error"]
+                lines.append(indent(f"Error ({error['type']}): {error['message']}", "    "))
+        elif output["predictions"] is None:
+            lines.append("    No valid ranked conditions and plans returned.")
+        else:
+            for rank, pair in enumerate(output["predictions"], 1):
+                condition = pair["condition"] if pair["condition"] is not None else "[unavailable]"
+                lines.append(indent(f"{rank}. Condition: {condition}", "    "))
+                lines.append("        Plan:")
+                if pair["plan"] is None:
+                    lines.append("            [unavailable]")
+                elif not pair["plan"]:
+                    lines.append("            No plan items returned.")
+                else:
+                    for step, action in enumerate(pair["plan"], 1):
+                        lines.append(indent(f"{step}. {action}", "            "))
+                lines.append("")
+        groups.append("\n".join(lines).rstrip("\n"))
+    return "\n\n".join(groups)
+
+
+def new_patient_result(patient_id, status=None, model_ids=None):
     """Fresh patient outputs; provider response lists are independent per stage/patient."""
+    if model_ids is not None:
+        fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
+            "predictions", "assessment_plan_raw", "evaluation")]
+        return {"id": patient_id, "status": status, **dict.fromkeys(fields),
+                "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES
+                                    if stage != "assessment_plan"},
+                "assessment_plans": {model_id: new_model_result() for model_id in model_ids}}
+    # Preserve the public helper's historical single-model calling convention.
     return {"id": patient_id, "status": status, **dict.fromkeys(PATIENT_RESULT_FIELDS),
             "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES}}
 
@@ -474,15 +520,17 @@ def run_status(patient_statuses, stopped=False):
 class ExperimentRun:
     """Own one run directory: run.json plus one results.jsonl line per patient."""
 
-    def __init__(self, run_dir, metadata, patient_ids):
+    def __init__(self, run_dir, metadata, patient_ids, model_ids=None):
         self.run_dir = Path(run_dir)
         self.metadata = metadata
         self.unsaved = list(patient_ids)
         self.statuses = []
         self.results_writable = True
+        self.model_ids = None if model_ids is None else tuple(model_ids)
 
     @classmethod
-    def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids):
+    def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids,
+              model_ids=None):
         run_dir = create_run_dir(output_root, make_run_name(started_at, input_path, branch))
         metadata = {
             "run_name": run_dir.name,
@@ -494,8 +542,10 @@ class ExperimentRun:
             "git_commit": commit,
             "reference_data": None,
         }
+        if model_ids is not None:
+            metadata.update(schema_version=2, assessment_plan_models=None)
         (run_dir / RESULTS_FILE).touch(exist_ok=False)
-        run = cls(run_dir, metadata, patient_ids)
+        run = cls(run_dir, metadata, patient_ids, model_ids)
         run.update()
         return run
 
@@ -538,7 +588,8 @@ class ExperimentRun:
         """
         if current is not None and current["id"] in self.unsaved and self.results_writable:
             current = {**current, "status": "failed_incomplete"}
-            for record in (current, new_patient_result(current["id"], "failed_incomplete")):
+            for record in (current, new_patient_result(
+                    current["id"], "failed_incomplete", self.model_ids)):
                 try:
                     self.save_result(record)
                     break
@@ -549,7 +600,7 @@ class ExperimentRun:
             if not self.results_writable:
                 break
             try:
-                self.save_result(new_patient_result(patient_id, "not_processed"))
+                self.save_result(new_patient_result(patient_id, "not_processed", self.model_ids))
             except Exception:
                 break
         try:

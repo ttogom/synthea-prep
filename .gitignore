@@ -7,6 +7,9 @@
 # Local Python environment
 /.venv/
 
+# Local API credentials; the tracked template is .env.example.
+/.env
+
 # Generated data
 data/
 

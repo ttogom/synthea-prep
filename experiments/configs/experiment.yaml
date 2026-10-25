@@ -1,0 +1,16 @@
+# Main configuration for a MED-COPILOT experiment.
+#
+# selected_models: Aliases to run in order, defined in condition_plan_models.yaml.
+# temperature: Sampling variability passed to every selected final model (0 to 2).
+# max_retries: Upstream retry limit after the initial failed call; at least 1.
+# max_patients: Run the first N patients after evidence filtering; null runs all.
+
+selected_models:
+  - gpt_4o_mini
+  - ollama_healthcare
+  - ollama_llama3
+  - ollama_gemma2_2b
+
+temperature: 1
+max_retries: 3
+max_patients: 1

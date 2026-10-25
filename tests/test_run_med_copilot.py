@@ -11,6 +11,7 @@ Prepared S/O text is trusted; the loader checks JSON objects, ids, and string fi
 import ast
 import asyncio
 import builtins
+from copy import deepcopy
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 import errno
@@ -43,6 +44,10 @@ HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
 RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
 OBSERVABILITY = ROOT / "scripts" / "med_copilot_observability.py"
 SCORING = ROOT / "scripts" / "med_copilot_scoring.py"
+MODELS = ROOT / "scripts" / "med_copilot_models.py"
+CONFIG = ROOT / "scripts" / "med_copilot_config.py"
+EXPERIMENT_CONFIG = ROOT / "experiments/configs/experiment.yaml"
+MODEL_CONFIG = ROOT / "experiments" / "configs" / "condition_plan_models.yaml"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot" / "upstream" / "create_embeddings.py"
 UPSTREAM_EVALUATOR = ROOT / "med_copilot" / "upstream" / "evaluate_metrics.py"
 UPSTREAM_GRAPH_QUERY = ROOT / "med_copilot/upstream/graphrag/cli/query.py"
@@ -65,7 +70,7 @@ RESULT_FIELDS = [
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
-    "reference_data", "evaluation",
+    "reference_data", "schema_version", "assessment_plan_models", "experiment", "evaluation",
 ]
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 FINAL_RESPONSE_FORMAT = {
@@ -89,6 +94,26 @@ FINAL_RESPONSE_FORMAT = {
         },
     },
 }
+
+
+V2_RESULT_FIELDS = [field for field in RESULT_FIELDS
+                    if field not in ("predictions", "assessment_plan_raw", "evaluation")] + ["assessment_plans"]
+
+
+def legacy_patient_result(record):
+    """Project the default model for the preserved single-model regression assertions.
+
+    Native schema/selection/failure assertions live in MultiModelIntegrationTests.
+    No production fallback fields are added to saved records.
+    """
+    if "assessment_plans" not in record:
+        return record
+    projected = deepcopy(record)
+    output = projected.pop("assessment_plans")["gpt_4o_mini"]
+    for key in ("predictions", "assessment_plan_raw", "evaluation"):
+        projected[key] = output[key]
+    projected["model_responses"]["assessment_plan"] = output["model_responses"]
+    return {key: projected[key] for key in RESULT_FIELDS}
 
 
 def prediction_pairs(condition="MOCK_DIAGNOSIS", plan=None):
@@ -271,6 +296,22 @@ class PipelineFixture:
             (self.script.parent / SCORING.name).write_text(
                 SCORING.read_text(encoding="utf-8"), encoding="utf-8")
         (self.upstream / "evaluate_metrics.py").write_bytes(UPSTREAM_EVALUATOR.read_bytes())
+        (self.script.parent / MODELS.name).write_bytes(MODELS.read_bytes())
+        (self.script.parent / CONFIG.name).write_bytes(CONFIG.read_bytes())
+        self.model_config = root / "experiments/configs/condition_plan_models.yaml"
+        self.model_config.parent.mkdir()
+        self.model_config.write_bytes(MODEL_CONFIG.read_bytes())
+        self.experiment_config = self.model_config.with_name("experiment.yaml")
+        self.experiment_config.write_bytes(EXPERIMENT_CONFIG.read_bytes())
+        # Pipeline regressions use an explicit single-model, uncapped selection.
+        experiment = yaml.safe_load(self.experiment_config.read_text())
+        experiment["selected_models"] = ["gpt_4o_mini"]
+        experiment["max_patients"] = None
+        self.experiment_config.write_text(yaml.safe_dump(experiment, sort_keys=False))
+        self.final_reply = None
+        self.environment = {"OPENAI_API_KEY": "test-key", "GRAPHRAG_API_KEY": "test-key"}
+        self.confirm_input = Mock(return_value="y")
+        self.model_configs = []
         self.real_scoring = False
         self.scoring_calls = []
         self.scoring_reply = None
@@ -393,12 +434,14 @@ class PipelineFixture:
             fixture.fail_at("preload")
             return object()
 
-        def completion(**kwargs):
+        def completion(_stage=None, **kwargs):
             fixture.calls.append(kwargs)
             fixture.completion_cwds.append(Path.cwd())
-            stage = "questions" if kwargs.get("response_format") == {"type": "json_object"} else "final"
+            stage = _stage or ("questions" if kwargs.get("response_format") == {"type": "json_object"} else "final")
             prompt = kwargs["messages"][-1]["content"]
             fixture.fail_at(stage, prompt)
+            if stage == "final" and fixture.final_reply is not None:
+                return fixture.final_reply(kwargs)
             content = fixture.questions if stage == "questions" else fixture.final_output
             if fixture.reply is not None:
                 content = fixture.reply(stage, prompt)
@@ -480,15 +523,32 @@ class PipelineFixture:
                 return fixture.reply("graphrag", kwargs["query"])
             return fixture.guideline_text, fixture.context
 
+        class ModelConfig:
+            model_fields = {"type", "model", "model_provider", "temperature", "max_retries",
+                            "retry_strategy", "api_base", "n", "api_key"}
+
+            def __init__(self, **settings):
+                self.settings = settings
+                self.__dict__.update(settings)
+
+            def model_dump(self, **kwargs):
+                return {key: value for key, value in self.settings.items() if key != "api_key"}
+
+        def create_chat_model(model_type, name, config):
+            fixture.model_configs.append((name, config.settings.copy()))
+            return SimpleNamespace(completion=lambda **kwargs: completion(
+                _stage="final", model=f"{config.model_provider}/{config.model}", **kwargs))
+
         modules = {name: ModuleType(name) for name in [
             "sentence_transformers", "openai", "create_embeddings", "scripts.med_copilot_retrieval", "graphrag",
             "graphrag.cli", "graphrag.cli.query", "templates", "templates.SOA_P_TEMPLATE",
             "scripts.med_copilot_scoring", "med_copilot.upstream.evaluate_metrics",
+            "graphrag.config.models.language_model_config", "graphrag.language_model.factory",
         ]}
         class NoopPatientScorer:
             # Legacy regressions retain every assertion about generation.
             # Dedicated integration tests below exercise the actual scorer.
-            def __init__(self, labels_path, patients, presenting_evidence_only=True):
+            def __init__(self, labels_path, patients, presenting_evidence_only=True, *, max_patients=None):
                 self.patients = patients
 
             def metadata(self, root):
@@ -503,6 +563,8 @@ class PipelineFixture:
                 return fixture.scoring_reply(references, candidates, lang)
             return fixture.metric_values.copy()
 
+        modules["graphrag.config.models.language_model_config"].LanguageModelConfig = ModelConfig
+        modules["graphrag.language_model.factory"].ModelFactory = SimpleNamespace(create_chat_model=create_chat_model)
         modules["scripts.med_copilot_scoring"].PatientScorer = NoopPatientScorer
         modules["scripts.med_copilot_scoring"].parse_scoring_args = lambda argv=None: SimpleNamespace(
             presenting_evidence_only=True)
@@ -526,6 +588,12 @@ class PipelineFixture:
         modules["templates.SOA_P_TEMPLATE"].__dict__.update(PROMPTS)
         return modules
 
+    def assessment_models(self, runner):
+        experiment = runner["ExperimentConfig"](self.experiment_config)
+        return runner["AssessmentPlanModels"](
+            experiment.model_config, experiment.selected_models,
+            temperature=experiment.temperature, max_retries=experiment.max_retries)
+
     @contextmanager
     def runtime(self):
         original_import = builtins.__import__
@@ -546,16 +614,18 @@ class PipelineFixture:
             selected_modules = {name: module for name, module in self.modules.items()
                                 if not (self.real_scoring and name == "scripts.med_copilot_scoring")}
             with patch.dict(sys.modules, selected_modules), \
-                    patch.dict(os.environ, {"OPENAI_API_KEY": "test-key",
-                                            "PATH": os.environ.get("PATH", os.defpath)}, clear=True), \
+                    patch.dict(os.environ, {"PATH": os.environ.get("PATH", os.defpath),
+                                            **self.environment}, clear=True), \
                     patch.object(sys, "path", isolated_path), \
                     patch.object(sys, "argv", [str(self.script)]), \
+                    patch("builtins.input", self.confirm_input), \
                     patch("builtins.__import__", side_effect=tracked_import), \
                     redirect_stdout(self.stdout), redirect_stderr(self.stderr):
                 # Exercise this fixture's real project prompts, even when a
                 # caller has already imported the repository's package.
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
-                             "scripts.med_copilot_helpers", "scripts.med_copilot_observability", "scripts"]:
+                             "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
+                             "scripts.med_copilot_observability", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
                     sys.modules.pop("scripts.med_copilot_scoring", None)
@@ -596,7 +666,10 @@ class RunMedCopilotTests(unittest.TestCase):
         # JSONL lines are separated only by "\n"; other Unicode separators stay inside records.
         results = [json.loads(line) for line in text.split("\n")[:-1]]
         for record in results:
-            self.assertEqual(list(record), RESULT_FIELDS)
+            self.assertEqual(list(record), V2_RESULT_FIELDS)
+            self.assertEqual(list(record["assessment_plans"]), ["gpt_4o_mini"])
+            self.assertNotIn("assessment_plan", record["model_responses"])
+        results = [legacy_patient_result(record) for record in results]
         self.assertEqual(len({record["id"] for record in results}), len(results))
         return run_dir, run, results
 
@@ -767,7 +840,7 @@ class RunMedCopilotTests(unittest.TestCase):
     # Import, startup, and entry point
     # ----------------------------------------------------------------
 
-    def test_import_initializes_client_without_processing_input_or_creating_outputs(self):
+    def test_import_defers_shared_client_and_confirmation_without_processing_or_outputs(self):
         fixture = self.fixture
         original_path = sys.path.copy()
         original_cwd = Path.cwd()
@@ -785,8 +858,9 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertNotIn("OUTPUT", runner)
         self.assertEqual(fixture.events, [
             ("preload", "emilyalsentzer/Bio_ClinicalBERT"), ("import", "scripts.med_copilot_retrieval"),
-            ("client", "test-key"),
         ])
+        self.assertIsNone(runner["client"])
+        fixture.confirm_input.assert_not_called()
         self.assertEqual(fixture.calls, [])
         self.assertEqual(fixture.keyword_calls, [])
         self.assertEqual(fixture.retrieval_calls, [])
@@ -797,6 +871,71 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertFalse(fixture.output.exists())
         self.assertFalse((fixture.root / "experiments/output").exists())
         self.assert_no_legacy_outputs()
+
+    def test_root_dotenv_loads_before_dependencies_and_clients_from_unrelated_cwd(self):
+        fixture = self.fixture
+        fixture.environment = {}
+        source = fixture.root / ".env"
+        contents = ('OPENAI_API_KEY="dotenv-openai"\n'
+                    'GRAPHRAG_API_KEY=${OPENAI_API_KEY}\nGROQ_API_KEY=dotenv-groq\n')
+        source.write_text(contents)
+        (fixture.caller / ".env").write_text("OPENAI_API_KEY=wrong-cwd-key\n")
+        (fixture.script.parent / ".env").write_text("OPENAI_API_KEY=wrong-script-key\n")
+        original_preload = fixture.modules["sentence_transformers"].SentenceTransformer
+        observed = []
+        def preload(model_name):
+            observed.append({key: os.environ.get(key) for key in
+                             ("OPENAI_API_KEY", "GRAPHRAG_API_KEY", "GROQ_API_KEY")})
+            return original_preload(model_name)
+        fixture.modules["sentence_transformers"].SentenceTransformer = preload
+        with fixture.runtime():
+            runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+            self.assertEqual(runner["api_key"], "dotenv-openai")
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(observed, [{"OPENAI_API_KEY": "dotenv-openai",
+                                    "GRAPHRAG_API_KEY": "dotenv-openai", "GROQ_API_KEY": "dotenv-groq"}])
+        self.assertFalse(any(event[0] == "client" for event in fixture.events))
+        self.assertEqual(fixture.calls, [])
+        self.assertEqual(fixture.retrieval_calls, [])
+        self.assertFalse(fixture.output.exists())
+        self.assertEqual(source.read_text(), contents)
+
+    def test_exported_credentials_override_dotenv_and_interpolation_uses_effective_value(self):
+        fixture = self.fixture
+        (fixture.root / ".env").write_text(
+            "OPENAI_API_KEY=file-openai\nGRAPHRAG_API_KEY=${OPENAI_API_KEY}\nGROQ_API_KEY=file-groq\n")
+        for graph_key in (None, "exported-graph"):
+            with self.subTest(graph_key=graph_key):
+                fixture.environment = {"OPENAI_API_KEY": "exported-openai", "GROQ_API_KEY": "exported-groq"}
+                if graph_key is not None:
+                    fixture.environment["GRAPHRAG_API_KEY"] = graph_key
+                with fixture.runtime():
+                    runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+                    self.assertEqual(runner["api_key"], "exported-openai")
+                    self.assertEqual(os.environ["GROQ_API_KEY"], "exported-groq")
+                    self.assertEqual(os.environ["GRAPHRAG_API_KEY"], graph_key or "exported-openai")
+        self.assertEqual(fixture.calls, [])
+        self.assertFalse(fixture.output.exists())
+
+    def test_missing_required_key_does_not_fall_back_to_caller_dotenv_or_start_a_run(self):
+        fixture = self.fixture
+        fixture.environment = {}
+        (fixture.caller / ".env").write_text("OPENAI_API_KEY=wrong-cwd-key\n")
+        source = fixture.root / ".env"
+        for contents in (None, "GRAPHRAG_API_KEY=only-graph\n"):
+            with self.subTest(contents=contents):
+                if contents is not None:
+                    source.write_text(contents)
+                with fixture.runtime():
+                    runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.assertIn("OPENAI_API_KEY", fixture.stderr.getvalue())
+                self.assertIn(".env in the repository root", fixture.stderr.getvalue())
+                self.assertNotIn("Traceback", fixture.stderr.getvalue())
+                fixture.confirm_input.assert_not_called()
+                self.assertFalse(fixture.output.exists())
+                self.assertFalse(any(event[0] == "client" for event in fixture.events))
+                self.assertEqual(fixture.calls, [])
 
     def test_all_imports_are_in_the_header_before_function_or_class_definitions(self):
         for source in (RUNNER, HELPERS, RETRIEVAL):
@@ -832,6 +971,57 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assert_outputs(input_path=alternate_input)
         self.assertTrue(self.run_dirs()[0].name.endswith(f"__patients café__{SAFE_BRANCH}"))
+
+    def test_default_model_registry_comes_from_experiment_configs_from_unrelated_cwd(self):
+        fixture = self.fixture
+        old_path = fixture.root / "configs/condition_plan_models.yaml"
+        old_path.parent.mkdir()
+        old_path.write_text("OBSOLETE_CONFIG_DO_NOT_LOAD")
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+            self.assertEqual(Path.cwd(), fixture.caller)
+        _, run, _ = self.read_run()
+        self.assertEqual(run["assessment_plan_models"]["config_file"],
+                         "experiments/configs/condition_plan_models.yaml")
+        self.assertEqual(run["assessment_plan_models"]["config_sha256"],
+                         hashlib.sha256(fixture.model_config.read_bytes()).hexdigest())
+        # Keep this exhaustive as new experiment settings are introduced.
+        for field, value in yaml.safe_load(fixture.experiment_config.read_text()).items():
+            with self.subTest(config_field=field):
+                self.assertIn(field, run["experiment"])
+                self.assertEqual(run["experiment"][field], value)
+        self.assertEqual(run["experiment"], {
+            "config_file": "experiments/configs/experiment.yaml",
+            "config_sha256": hashlib.sha256(fixture.experiment_config.read_bytes()).hexdigest(),
+            "model_config": "experiments/configs/condition_plan_models.yaml",
+            "selected_models": ["gpt_4o_mini"], "temperature": 1, "max_retries": 3, "max_patients": None,
+        })
+        self.assertEqual(old_path.read_text(), "OBSOLETE_CONFIG_DO_NOT_LOAD")
+        self.assert_outputs()
+
+    def test_missing_or_invalid_experiment_model_config_fails_without_legacy_fallback(self):
+        fixture_root = self.fixture.root
+        for case, error in (("missing", FileNotFoundError), ("invalid", ValueError)):
+            with self.subTest(case=case):
+                self.fixture = PipelineFixture(fixture_root / case)
+                fixture = self.fixture
+                old_path = fixture.root / "configs/condition_plan_models.yaml"
+                old_path.parent.mkdir()
+                old_path.write_bytes(MODEL_CONFIG.read_bytes())
+                if case == "missing":
+                    fixture.model_config.unlink()
+                else:
+                    fixture.model_config.write_text("models: [")
+                runner = self.load_runner()
+                with fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.assertIn("condition_plan_models.yaml", fixture.stderr.getvalue())
+                fixture.confirm_input.assert_not_called()
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.retrieval_calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertFalse(fixture.output.exists())
 
     def test_dependency_startup_failures_stop_before_processing_input(self):
         fixture_root = self.fixture.root
@@ -876,7 +1066,8 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertIn(fixture.conditions, keyword_request["messages"][0]["content"])
         self.assertEqual(fixture.extracted_keywords, ["Cough", "denies fever"])
         for call in fixture.calls:
-            self.assertEqual(call["model"], "gpt-4o-mini")
+            self.assertEqual(call["model"], "gpt-4o-mini" if call is fixture.calls[0]
+                             else "openai/gpt-4o-mini")
         self.assertEqual(fixture.calls[0]["messages"], [
             {"role": "system", "content": "You are a clinical expert."},
             {"role": "user", "content": PROMPTS["KEY_QUESTIONS_TEMPLATE"].format(conditions=fixture.conditions)},
@@ -1022,7 +1213,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(self.run_dirs()[0].parent, fixture.output)
                 self.assert_outputs()
                 self.assertEqual({path.name for path in (fixture.root / "experiments").iterdir()},
-                                 {"input", "output"})
+                                 {"configs", "input", "output"})
 
     # ----------------------------------------------------------------
     # Reference-data metadata
@@ -1660,7 +1851,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_outputs()
         [run_dir] = self.run_dirs()
         raw_line = (run_dir / "results.jsonl").read_text(encoding="utf-8")
-        self.assertEqual(json.loads(raw_line)["assessment_plan_raw"], fixture.final_output)
+        self.assertEqual(json.loads(raw_line)["assessment_plans"]["gpt_4o_mini"]["assessment_plan_raw"], fixture.final_output)
 
     def test_empty_keyword_arrays_continue_through_full_pipeline(self):
         fixture = self.fixture
@@ -2328,6 +2519,24 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.input_path.read_bytes(), original_input)
         self.assert_outputs()
 
+    def test_guideline_question_model_setting_controls_only_question_generation(self):
+        fixture = self.fixture
+        runner = self.load_runner()
+        self.assertEqual(runner["GUIDELINE_QUESTION_MODEL"], "gpt-4o-mini")
+        with fixture.runtime(), patch.dict(runner["main"].__globals__,
+                                           GUIDELINE_QUESTION_MODEL="question-model-only"):
+            self.assertEqual(runner["main"](), "completed")
+        self.assertEqual(fixture.calls[0]["model"], "question-model-only")
+        self.assertEqual(fixture.calls[0]["response_format"], {"type": "json_object"})
+        self.assertEqual(fixture.calls[1]["model"], "openai/gpt-4o-mini")
+        self.assertEqual(fixture.keyword_calls[0]["model"], "retrieval-keyword-model")
+        self.assertEqual(fixture.graph_calls[0][0]["query"], fixture.questions)
+        _, run, [record] = self.read_run()
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["experiment"]["selected_models"], ["gpt_4o_mini"])
+        self.assertEqual(record["guideline_questions"], json.loads(fixture.questions)["Key Questions"])
+        self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
+
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture
         fixture.prompts = {name: f"PROJECT_{name} café\n{value}" for name, value in PROMPTS.items()}
@@ -2568,7 +2777,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertIsNone(record["reranked_patient_ids"])
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.graph_calls, [])
-                self.assertEqual(state.retrievers[0].keyword_extractor.capture_result, record)
+                self.assertEqual(legacy_patient_result(state.retrievers[0].keyword_extractor.capture_result), record)
                 self.assertTrue(callable(state.retrievers[0].on_ranking))
                 if state.rankers:
                     self.assertTrue(callable(state.rankers[0].on_ranking))
@@ -2815,7 +3024,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 # stop() persists a copy with failed status after BaseException;
                 # the capture binding still points to the original in-flight record.
                 expected_status = None if isinstance(error, (KeyboardInterrupt, SystemExit)) else record["status"]
-                self.assertEqual(previous_result, {**record, "status": expected_status})
+                self.assertEqual(legacy_patient_result(previous_result), {**record, "status": expected_status})
                 previous_snapshot = json.loads(json.dumps(previous_result))
                 previous_callbacks = [component.on_ranking for component in (retriever, reranker)]
                 self.assertTrue(all(callable(callback) for callback in previous_callbacks))
@@ -2844,15 +3053,15 @@ class RunMedCopilotTests(unittest.TestCase):
 
                 # The next call must replace every binding and clear both rankings
                 # even when it fails before search/extract/rerank can reset anything.
-                next_result = runner["new_patient_result"]("next-patient")
+                next_result = runner["new_patient_result"]("next-patient", model_ids=["gpt_4o_mini"])
                 counts = (len(fixture.keyword_calls), len(fixture.calls), len(fixture.graph_calls))
                 with fixture.runtime():
                     with self.assertRaises(ValueError):
                         runner["process_patient"](
                             {"subjective": "S", "objective": None}, next_result, fixture.corpus,
-                            retriever, reranker, fixture.guidelines / "output")
+                            retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
                 self.assertIs(retriever.keyword_extractor.capture_result, next_result)
-                self.assertEqual(next_result, runner["new_patient_result"]("next-patient"))
+                self.assertEqual(next_result, runner["new_patient_result"]("next-patient", model_ids=["gpt_4o_mini"]))
                 for component, previous_callback in zip((retriever, reranker), previous_callbacks):
                     self.assertIsNone(component.ranked_candidates)
                     self.assertIsNot(component.on_ranking, previous_callback)
@@ -2866,11 +3075,11 @@ class RunMedCopilotTests(unittest.TestCase):
                 # Reuse the same retriever/reranker after that early failure and
                 # even after a prior interrupt. Persist the successful new case.
                 fixture.failure = None
-                retry = runner["new_patient_result"]("retry-patient")
+                retry = runner["new_patient_result"]("retry-patient", model_ids=["gpt_4o_mini"])
                 with fixture.runtime():
                     runner["process_patient"](
                         {"id": "retry-patient", **fixture.patient}, retry, fixture.corpus,
-                        retriever, reranker, fixture.guidelines / "output")
+                        retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
                     retry["status"] = "completed"
                     retry_run = runner["ExperimentRun"].start(
                         fixture.root / "recovery_output", root=fixture.root,
@@ -2879,7 +3088,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     retry_run.save_result(retry)
                     self.assertEqual(retry_run.finish(runner["pacific_now"]()), "completed")
                 _, _, [saved_retry] = self.read_run(retry_run.run_dir)
-                self.assertEqual(saved_retry, retry)
+                self.assertEqual(saved_retry, legacy_patient_result(retry))
                 self.assertIs(retriever.keyword_extractor.capture_result, retry)
                 self.assertEqual(retry["keyword_extraction_raw"], fixture.keyword_content)
                 self.assertEqual(retry["retrieval_keywords"], ["Cough", "denies fever"])
@@ -2887,8 +3096,8 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(len(retry["reranked_patient_ids"]), 2)
                 self.assertEqual(len(retry["model_responses"]["keyword_extraction"]), 1)
                 self.assertEqual(len(retry["model_responses"]["guideline_questions"]), 1)
-                self.assertEqual(len(retry["model_responses"]["assessment_plan"]), 1)
-                self.assertEqual(retry["assessment_plan_raw"], fixture.final_output)
+                self.assertEqual(len(retry["assessment_plans"]["gpt_4o_mini"]["model_responses"]), 1)
+                self.assertEqual(retry["assessment_plans"]["gpt_4o_mini"]["assessment_plan_raw"], fixture.final_output)
                 self.assertEqual(previous_result, previous_snapshot)
                 self.assertEqual(next_result["retrieved_patient_ids"], [])
                 self.assertEqual(next_result["reranked_patient_ids"], [])
@@ -2909,7 +3118,7 @@ class RunMedCopilotTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 runner["process_patient"](
                     {"subjective": "S", "objective": None}, record, fixture.corpus,
-                    retriever, reranker, fixture.guidelines / "output")
+                    retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
         prepare.assert_called_once_with(record, fixture.corpus, retriever, reranker)
         self.assertIs(extractor.capture_result, record)
         for component, previous_callback in zip((retriever, reranker), previous_callbacks):
@@ -3124,8 +3333,8 @@ class RunMedCopilotTests(unittest.TestCase):
                 # Later responses, ranking mutations, and rebindings cannot alter
                 # either completed/failed in-memory captures or persisted JSONL.
                 for index, (record, memory, snapshot) in enumerate(zip(records, seen_results, snapshots)):
-                    self.assertEqual(memory, record)
-                    self.assertEqual({**snapshot, "status": record["status"]}, record)
+                    self.assertEqual(legacy_patient_result(memory), record)
+                    self.assertEqual({**legacy_patient_result(snapshot), "status": record["status"]}, record)
                     marker = ("MARKER_ALPHA", "MARKER_BRAVO", "MARKER_CHARLIE")[index]
                     level = boundaries.index(boundary) if index == 1 else len(boundaries)
                     if level >= 2:
@@ -3819,6 +4028,740 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertIsNone(records[1]["evaluation"])
         self.assertEqual(len(fixture.scoring_calls), 4)
         self.assertEqual(len(fixture.calls), 2)
+
+
+
+class MultiModelIntegrationTests(unittest.TestCase):
+    """Assert the native v2 artifacts with real config loading/parsing/scoring orchestration."""
+
+    load_runner = RunMedCopilotTests.load_runner
+    run_dirs = RunMedCopilotTests.run_dirs
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.fixture = PipelineFixture(Path(temporary.name))
+        self.fixture.real_scoring = True
+        self.fixture.write_labels([self.label(self.fixture.patient_id)])
+        self.experiment = {"selected_models": ["gpt_4o_mini", "llama"], "temperature": 1,
+                           "max_retries": 3, "max_patients": None}
+        self.config = {"models": {
+            "gpt_4o_mini": {"type": "chat", "model_provider": "openai", "model": "gpt-4o-mini",
+                            "api_key_env": "OPENAI_API_KEY"},
+            "llama": {"type": "chat", "model_provider": "groq", "model": "llama-3.3-70b-versatile",
+                       "api_key_env": "OPENAI_API_KEY", "output_mode": "json_object"},
+            "third": {"type": "chat", "model_provider": "gemini", "model": "example-gemini",
+                       "api_key_env": "OPENAI_API_KEY", "output_mode": "prompt"},
+        }}
+        self.write_config()
+        self.fixture.final_reply = self.reply
+
+    def label(self, patient_id):
+        return {"id": patient_id, "condition": "GOLD_ONLY_condition", "plan": ["GOLD_ONLY_plan"],
+                "has_presenting_evidence": True}
+
+    def write_config(self):
+        self.fixture.model_config.write_text(yaml.safe_dump(self.config, sort_keys=False))
+        self.fixture.experiment_config.write_text(yaml.safe_dump(self.experiment, sort_keys=False))
+
+    def reply(self, request):
+        model = request["model"]
+        raw = json.dumps({"predictions": prediction_pairs(model, [model + " action"])})
+        return SimpleNamespace(model="reported:" + model, id="response:" + model,
+            usage=SimpleNamespace(prompt_tokens=2, completion_tokens=3, total_tokens=5),
+            choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=raw))])
+
+    def read_native(self):
+        [directory] = self.run_dirs()
+        run = json.loads((directory / "run.json").read_text())
+        records = [json.loads(line) for line in (directory / "results.jsonl").read_text().split("\n") if line]
+        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"})
+        for record in records:
+            self.assertEqual(list(record), V2_RESULT_FIELDS)
+            self.assertNotIn("assessment_plan", record["model_responses"])
+            for output in record["assessment_plans"].values():
+                self.assertEqual(list(output), ["status", "error", "predictions", "assessment_plan_raw",
+                                                "model_responses", "evaluation"])
+        return run, records
+
+    def execute(self, args=None):
+        runner = self.load_runner()
+        with self.fixture.runtime():
+            status = runner["main"](args)
+        return status, *self.read_native()
+
+    def test_confirmation_precedes_client_patient_loading_retrieval_requests_and_output(self):
+        fixture = self.fixture
+        runner = self.load_runner()
+        load_patients = Mock(wraps=runner["load_patient_records"])
+        def confirm(prompt):
+            self.assertEqual(prompt, "Is this correct? Start the run? [y/N]: ")
+            self.assertFalse(fixture.output.exists())
+            self.assertFalse(any(event[0] == "client" for event in fixture.events))
+            self.assertEqual(fixture.calls, [])
+            self.assertEqual(fixture.retrieval_calls, [])
+            self.assertEqual(fixture.graph_calls, [])
+            self.assertEqual(fixture.scoring_calls, [])
+            load_patients.assert_not_called()
+            text = fixture.stdout.getvalue()
+            self.assertIn("Experiment: experiments/configs/experiment.yaml", text)
+            self.assertIn("Model definitions: experiments/configs/condition_plan_models.yaml", text)
+            self.assertIn("  1. gpt_4o_mini (openai/gpt-4o-mini)", text)
+            self.assertIn("  2. llama (groq/llama-3.3-70b-versatile)", text)
+            self.assertIn("API key configured: OPENAI_API_KEY", text)
+            self.assertIn("edit selected_models in\nexperiments/configs/experiment.yaml and restart", text)
+            for excluded in ("GRAPHRAG_API_KEY", "Shared API keys", "temperature", "max_retries", "test-key"):
+                self.assertNotIn(excluded, text)
+            return " YeS "
+        fixture.confirm_input.side_effect = confirm
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, load_patient_records=load_patients):
+            self.assertEqual(runner["main"](), "completed")
+        fixture.confirm_input.assert_called_once()
+        load_patients.assert_called_once_with(fixture.input_path)
+        run, [record] = self.read_native()
+        self.assertEqual(run["experiment"]["temperature"], 1)
+        self.assertEqual(run["experiment"]["max_retries"], 3)
+        self.assertEqual(record["status"], "completed")
+        self.assertTrue(any(event[0] == "client" for event in fixture.events))
+
+    def test_cancellation_never_creates_client_reads_patient_or_starts_pipeline(self):
+        fixture = self.fixture
+        runner = self.load_runner()
+        for answer in ("n", "", "maybe", EOFError(), KeyboardInterrupt()):
+            with self.subTest(answer=answer):
+                fixture.confirm_input.reset_mock(side_effect=True)
+                if isinstance(answer, BaseException):
+                    fixture.confirm_input.side_effect = answer
+                else:
+                    fixture.confirm_input.return_value = answer
+                with fixture.runtime(), patch.dict(runner["main"].__globals__,
+                        load_patient_records=Mock(side_effect=AssertionError("patient read before confirmation"))):
+                    self.assertEqual(runner["main"](), "cancelled")
+                fixture.confirm_input.assert_called_once()
+                self.assertIn("Run cancelled. No experiment output was created.", fixture.stdout.getvalue())
+                self.assertFalse(fixture.output.exists())
+                self.assertFalse(any(event[0] == "client" for event in fixture.events))
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.retrieval_calls, [])
+                self.assertEqual(fixture.scoring_calls, [])
+
+    def test_unknown_alias_and_missing_keys_are_reported_together_before_any_clients(self):
+        fixture = self.fixture
+        self.experiment["selected_models"] = ["gpt_typo", "gpt_4o_mini", "llama"]
+        self.config["models"]["llama"]["api_key_env"] = "GROQ_API_KEY"
+        self.write_config()
+        fixture.environment = {}
+        with fixture.runtime():
+            runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+            self.assertEqual(runner["main"](), "configuration_error")
+        message = fixture.stderr.getvalue()
+        for expected in ("Experiment configuration check failed", "Unknown model alias: gpt_typo",
+                         "experiment.yaml", "condition_plan_models.yaml", "Available aliases",
+                         "OPENAI_API_KEY", "GROQ_API_KEY", "GRAPHRAG_API_KEY", ".env in the repository root",
+                         "Run not started."):
+            self.assertIn(expected, message)
+        self.assertNotIn("Traceback", message)
+        fixture.confirm_input.assert_not_called()
+        self.assertEqual(fixture.model_configs, [])
+        self.assertEqual(fixture.calls, [])
+        self.assertFalse(any(event[0] == "client" for event in fixture.events))
+        self.assertFalse(fixture.output.exists())
+
+    def test_shared_graph_key_is_required_before_confirmation_and_not_exposed(self):
+        fixture = self.fixture
+        fixture.environment = {"OPENAI_API_KEY": "private-openai", "GRAPHRAG_API_KEY": "  "}
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "configuration_error")
+        message = fixture.stderr.getvalue()
+        self.assertIn("Shared-stage API key is missing or empty: GRAPHRAG_API_KEY", message)
+        self.assertIn("Add GRAPHRAG_API_KEY to .env in the repository root.", message)
+        self.assertNotIn("private-openai", message + fixture.stdout.getvalue())
+        fixture.confirm_input.assert_not_called()
+        self.assertEqual(fixture.model_configs, [])
+        self.assertEqual(fixture.calls, [])
+        self.assertFalse(fixture.output.exists())
+
+    def test_keyless_local_model_is_confirmed_and_runs_with_shared_credentials(self):
+        self.experiment["selected_models"] = ["local"]
+        self.config["models"]["local"] = {"type": "chat", "model_provider": "openai", "model": "llama-local",
+            "api_base": "http://localhost:8000/v1", "output_mode": "prompt"}
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(list(record["assessment_plans"]), ["local"])
+        self.assertEqual(run["assessment_plan_models"]["models"]["local"]["api_key_env"], None)
+        self.assertIn("1. local (openai/llama-local)", self.fixture.stdout.getvalue())
+        self.assertIn("API key not required (unauthenticated endpoint)", self.fixture.stdout.getvalue())
+        self.assertNotIn("local-no-key", self.fixture.stdout.getvalue())
+
+    def test_confirmation_occurs_once_for_the_whole_patient_batch(self):
+        fixture = self.fixture
+        patients = [{**fixture.patient, "id": str(index)} for index in range(2)]
+        fixture.write_patients(patients)
+        fixture.write_labels([self.label(patient["id"]) for patient in patients])
+        status, run, records = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual([record["id"] for record in records], ["0", "1"])
+        fixture.confirm_input.assert_called_once()
+
+    def test_patient_limits_select_first_eligible_patients_and_record_exact_cohort(self):
+        fixture_root = self.fixture.root
+        patients = [{"id": name, "subjective": f"LIMIT_PATIENT_{name}_TEXT", "objective": "O"}
+                    for name in ("EXCLUDED", "SECOND", "ANOTHER", "FINAL")]
+        for evidence_only in (True, False):
+            for limit in (None, 1, 2, 99):
+                with self.subTest(evidence_only=evidence_only, max_patients=limit):
+                    self.fixture = PipelineFixture(fixture_root / f"{evidence_only}-{limit}")
+                    fixture = self.fixture
+                    fixture.real_scoring = True
+                    fixture.final_reply = self.reply
+                    fixture.write_patients(patients)
+                    labels = [{**self.label(patient["id"]),
+                               "has_presenting_evidence": patient["id"] != "EXCLUDED"}
+                              for patient in reversed(patients)]
+                    fixture.write_labels(labels)
+                    self.experiment["max_patients"] = limit
+                    self.write_config()
+                    eligible = patients[1:] if evidence_only else patients
+                    expected_ids = [patient["id"] for patient in eligible[:limit]]
+                    excluded_ids = [patient["id"] for patient in patients if patient["id"] not in expected_ids]
+                    status, run, records = self.execute(["--presenting-evidence-only", str(evidence_only).lower()])
+                    self.assertEqual(status, "completed")
+                    self.assertEqual([row["id"] for row in records], expected_ids)
+                    self.assertEqual(run["experiment"]["max_patients"], limit)
+                    self.assertEqual(run["experiment"]["config_sha256"],
+                                     hashlib.sha256(fixture.experiment_config.read_bytes()).hexdigest())
+                    self.assertEqual(run["input"]["sha256"], hashlib.sha256(fixture.input_path.read_bytes()).hexdigest())
+                    evaluation = run["evaluation"]
+                    self.assertEqual(evaluation["max_patients"], limit)
+                    self.assertEqual(evaluation["input_patient_count"], 4)
+                    self.assertEqual(evaluation["selected_patient_count"], len(expected_ids))
+                    self.assertEqual(evaluation["selected_patient_ids"], expected_ids)
+                    self.assertEqual(evaluation["excluded_patient_ids"], excluded_ids)
+                    self.assertEqual(len(fixture.calls), 3 * len(expected_ids))
+                    self.assertEqual(len(fixture.keyword_calls), len(expected_ids))
+                    self.assertEqual(len(fixture.graph_calls), len(expected_ids))
+                    self.assertEqual(len(fixture.scoring_calls), 12 * len(expected_ids))
+                    requests = json.dumps(fixture.calls)
+                    for patient_id in excluded_ids:
+                        self.assertNotIn(f"LIMIT_PATIENT_{patient_id}_TEXT", requests)
+                        self.assertNotIn(f": {patient_id} ==========", fixture.stdout.getvalue())
+                    for number, row in enumerate(records, 1):
+                        self.assertEqual(list(row["assessment_plans"]), ["gpt_4o_mini", "llama"])
+                        self.assertTrue(all(output["status"] == "completed"
+                                            for output in row["assessment_plans"].values()))
+                        self.assertIn(f"PATIENT {number}/{len(records)}: {row['id']}", fixture.stdout.getvalue())
+                    fixture.confirm_input.assert_called_once()
+
+    def test_invalid_patient_limit_stops_before_confirmation_clients_or_run_files(self):
+        runner = self.load_runner()
+        for value in (0, -1, True, False, 1.0, "1", [], {}):
+            with self.subTest(max_patients=value):
+                self.experiment["max_patients"] = value
+                self.write_config()
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.assertIn("max_patients", self.fixture.stderr.getvalue())
+                self.assertIn("experiments/configs/experiment.yaml", self.fixture.stderr.getvalue())
+                self.fixture.confirm_input.assert_not_called()
+                self.assertEqual(self.fixture.model_configs, [])
+                self.assertEqual(self.fixture.calls, [])
+                self.assertFalse(self.fixture.output.exists())
+                self.assertFalse(any(event[0] == "client" for event in self.fixture.events))
+
+    def test_patient_limit_does_not_hide_invalid_input_or_labels_later_in_file(self):
+        fixture_root = self.fixture.root
+        self.experiment["max_patients"] = 1
+        for case in ("malformed_input", "missing_label", "invalid_label", "no_eligible"):
+            with self.subTest(case=case):
+                self.fixture = PipelineFixture(fixture_root / case)
+                fixture = self.fixture
+                fixture.real_scoring = True
+                fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
+                                        for name in ("FIRST", "AFTER_LIMIT")])
+                labels = [self.label("FIRST"), self.label("AFTER_LIMIT")]
+                if case == "malformed_input":
+                    with fixture.input_path.open("a") as source:
+                        source.write("{bad json}\n")
+                elif case == "missing_label":
+                    labels.pop()
+                elif case == "invalid_label":
+                    labels[1]["plan"] = [None]
+                else:
+                    for label in labels:
+                        label["has_presenting_evidence"] = False
+                fixture.write_labels(labels)
+                self.write_config()
+                runner = self.load_runner()
+                with fixture.runtime(), self.assertRaises(ValueError):
+                    runner["main"]()
+                self.assertFalse(fixture.output.exists())
+                self.assertEqual(fixture.calls, [])
+                self.assertEqual(fixture.keyword_calls, [])
+                self.assertEqual(fixture.graph_calls, [])
+                self.assertEqual(fixture.scoring_calls, [])
+
+    def test_interrupted_limited_run_does_not_create_placeholders_for_excluded_patients(self):
+        self.experiment["max_patients"] = 2
+        self.write_config()
+        fixture = self.fixture
+        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
+                                for name in ("FIRST", "SECOND", "OUTSIDE_LIMIT")])
+        fixture.write_labels([self.label(name) for name in ("FIRST", "SECOND", "OUTSIDE_LIMIT")])
+        fixture.failure, fixture.error = "final", KeyboardInterrupt()
+        runner = self.load_runner()
+        with fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        run, records = self.read_native()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual(run["experiment"]["max_patients"], 2)
+        self.assertEqual(run["evaluation"]["selected_patient_ids"], ["FIRST", "SECOND"])
+        self.assertEqual(run["evaluation"]["excluded_patient_ids"], ["OUTSIDE_LIMIT"])
+        self.assertEqual([row["id"] for row in records], ["FIRST", "SECOND"])
+        self.assertEqual([row["status"] for row in records], ["failed_incomplete", "not_processed"])
+
+    def test_entrypoint_cancellation_exits_successfully_without_output(self):
+        self.fixture.confirm_input.return_value = "n"
+        with self.fixture.runtime():
+            runpy.run_path(str(self.fixture.script), run_name="__main__")
+        self.assertIn("Run cancelled.", self.fixture.stdout.getvalue())
+        self.assertFalse(self.fixture.output.exists())
+        self.assertEqual(self.fixture.calls, [])
+
+    def test_entrypoint_configuration_failure_exits_nonzero_without_confirmation(self):
+        self.experiment["selected_models"] = ["typo"]
+        self.write_config()
+        with self.fixture.runtime(), self.assertRaises(SystemExit) as failure:
+            runpy.run_path(str(self.fixture.script), run_name="__main__")
+        self.assertEqual(failure.exception.code, 1)
+        self.fixture.confirm_input.assert_not_called()
+        self.assertIn("Unknown model alias: typo", self.fixture.stderr.getvalue())
+        self.assertFalse(self.fixture.output.exists())
+        self.assertEqual(self.fixture.calls, [])
+
+    def test_experiment_settings_are_passed_to_all_models_and_saved_with_both_fingerprints(self):
+        self.experiment.update(temperature=0.25, max_retries=6)
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual([(name, settings["temperature"], settings["max_retries"])
+                          for name, settings in self.fixture.model_configs],
+                         [("gpt_4o_mini", 0.25, 6), ("llama", 0.25, 6)])
+        self.assertEqual(run["experiment"], {
+            "config_file": "experiments/configs/experiment.yaml",
+            "config_sha256": hashlib.sha256(self.fixture.experiment_config.read_bytes()).hexdigest(),
+            "model_config": "experiments/configs/condition_plan_models.yaml",
+            "selected_models": ["gpt_4o_mini", "llama"], "temperature": 0.25, "max_retries": 6, "max_patients": None,
+        })
+        self.assertEqual(run["assessment_plan_models"]["config_sha256"],
+                         hashlib.sha256(self.fixture.model_config.read_bytes()).hexdigest())
+        for settings in run["assessment_plan_models"]["models"].values():
+            self.assertEqual(settings["config"]["temperature"], 0.25)
+            self.assertEqual(settings["config"]["max_retries"], 6)
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(self.fixture.keyword_calls[0]["temperature"], 0)
+        self.assertEqual(len(self.fixture.scoring_calls), 12)
+        self.assertEqual(record["status"], "completed")
+
+    def test_shipped_gpt_and_downloaded_ollama_selection_runs_and_records_all_models(self):
+        fixture = self.fixture
+        fixture.model_config.write_bytes(MODEL_CONFIG.read_bytes())
+        fixture.experiment_config.write_bytes(EXPERIMENT_CONFIG.read_bytes())
+        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
+                                for name in ("FIRST", "OUTSIDE_LIMIT")])
+        fixture.write_labels([self.label(name) for name in ("FIRST", "OUTSIDE_LIMIT")])
+        expected = {"gpt_4o_mini": "gpt-4o-mini", "ollama_healthcare": "Jayasimma/healthcare:latest",
+                    "ollama_llama3": "llama3:latest", "ollama_gemma2_2b": "gemma2:2b"}
+        # Only the shared stages/GPT have a key; no Groq or Ollama key is supplied.
+        self.assertEqual(set(fixture.environment), {"OPENAI_API_KEY", "GRAPHRAG_API_KEY"})
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(record["id"], "FIRST")
+        self.assertEqual(list(record["assessment_plans"]), list(expected))
+        self.assertEqual(run["experiment"]["selected_models"], list(expected))
+        self.assertEqual(run["experiment"]["max_patients"], 1)
+        self.assertEqual(run["evaluation"]["selected_patient_ids"], ["FIRST"])
+        self.assertEqual(run["evaluation"]["excluded_patient_ids"], ["OUTSIDE_LIMIT"])
+        self.assertEqual(run["assessment_plan_models"]["selected_models"], list(expected))
+        self.assertEqual(run["assessment_plan_models"]["config_sha256"],
+                         hashlib.sha256(fixture.model_config.read_bytes()).hexdigest())
+        self.assertEqual(run["experiment"]["config_sha256"],
+                         hashlib.sha256(fixture.experiment_config.read_bytes()).hexdigest())
+        self.assertEqual([request["model"] for request in fixture.calls[1:]],
+                         ["openai/" + tag for tag in expected.values()])
+        self.assertEqual(len(fixture.calls), 5)
+        self.assertTrue(all(request["messages"] == fixture.calls[1]["messages"] for request in fixture.calls[1:]))
+        self.assertEqual(len(fixture.graph_calls), 1)
+        self.assertEqual(len(fixture.scoring_calls), 24)
+        for alias, tag in expected.items():
+            settings = run["assessment_plan_models"]["models"][alias]
+            self.assertEqual(settings["config"]["model"], tag)
+            self.assertNotIn("api_key", settings["config"])
+            self.assertEqual(record["assessment_plans"][alias]["status"], "completed")
+            if alias.startswith("ollama_"):
+                self.assertIsNone(settings["api_key_env"])
+                self.assertEqual(settings["config"]["api_base"], "http://localhost:11434/v1")
+                self.assertIn(f"{alias} (openai/{tag})", fixture.stdout.getvalue())
+        self.assertEqual(fixture.stdout.getvalue().count("API key not required (unauthenticated endpoint)"), 3)
+        self.assertNotIn("test-key", json.dumps(run) + fixture.stdout.getvalue())
+        fixture.confirm_input.assert_called_once()
+
+    def test_removed_config_and_model_cli_overrides_are_rejected_before_confirmation(self):
+        runner = self.load_runner()
+        for option in ("--config", "--experiment-config", "--model-config", "--models"):
+            with self.subTest(option=option), self.fixture.runtime():
+                with self.assertRaises(SystemExit) as error:
+                    runner["main"]([option, "override"])
+                self.assertEqual(error.exception.code, 2)
+                self.assertFalse(self.fixture.output.exists())
+                self.fixture.confirm_input.assert_not_called()
+                self.assertEqual(self.fixture.calls, [])
+                self.assertEqual(self.fixture.model_configs, [])
+
+    def test_invalid_experiment_values_fail_before_model_initialization_or_pipeline_calls(self):
+        runner = self.load_runner()
+        for changes in ({"temperature": -1}, {"temperature": True}, {"temperature": float("nan")},
+                        {"max_retries": 0}, {"max_retries": "3"}, {"selected_models": []},
+                        {"selected_models": ["missing"]}, {"model_config": "missing.yaml"},
+                        {"unexpected_setting": 1}):
+            with self.subTest(changes=changes):
+                self.fixture.experiment_config.write_text(yaml.safe_dump({**self.experiment, **changes}))
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.fixture.confirm_input.assert_not_called()
+                self.assertFalse(self.fixture.output.exists())
+                self.assertEqual(self.fixture.model_configs, [])
+                self.assertEqual(self.fixture.calls, [])
+                self.assertEqual(self.fixture.retrieval_calls, [])
+
+    def test_missing_or_malformed_master_cannot_fall_back_to_the_registry(self):
+        runner = self.load_runner()
+        for source in (None, "[", "temperature: 1\ntemperature: 2"):
+            with self.subTest(source=source):
+                if source is None:
+                    self.fixture.experiment_config.unlink()
+                else:
+                    self.fixture.experiment_config.write_text(source)
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.fixture.confirm_input.assert_not_called()
+                self.assertFalse(self.fixture.output.exists())
+                self.assertEqual(self.fixture.model_configs, [])
+                self.assertEqual(self.fixture.calls, [])
+
+    def test_registry_cannot_override_shared_experiment_temperature_or_retry_budget(self):
+        runner = self.load_runner()
+        for setting, value in (("temperature", 0.5), ("max_retries", 9)):
+            with self.subTest(setting=setting):
+                data = deepcopy(self.config)
+                data["models"]["gpt_4o_mini"][setting] = value
+                self.fixture.model_config.write_text(yaml.safe_dump(data))
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.assertIn("experiment.yaml", self.fixture.stderr.getvalue())
+                self.fixture.confirm_input.assert_not_called()
+                self.assertFalse(self.fixture.output.exists())
+                self.assertEqual(self.fixture.calls, [])
+                self.assertEqual(self.fixture.model_configs, [])
+
+    def test_dotenv_only_credentials_reach_shared_and_selected_models_without_leaking_to_artifacts(self):
+        fixture = self.fixture
+        fixture.environment = {}
+        self.config["models"]["llama"]["api_key_env"] = "GROQ_API_KEY"
+        self.write_config()
+        source = fixture.root / ".env"
+        contents = ("OPENAI_API_KEY=file-only-openai\nGRAPHRAG_API_KEY=${OPENAI_API_KEY}\n"
+                    "GROQ_API_KEY=file-only-groq\n")
+        source.write_text(contents)
+        original_graph = fixture.modules["graphrag.cli.query"].run_local_search
+        observed = []
+        def graph_search(**kwargs):
+            observed.append(os.environ["GRAPHRAG_API_KEY"])
+            return original_graph(**kwargs)
+        fixture.modules["graphrag.cli.query"].run_local_search = graph_search
+        # Match a real invocation: import and main run within the same process environment.
+        with fixture.runtime():
+            runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+            self.assertEqual(runner["main"](), "completed")
+        run, [record] = self.read_native()
+        self.assertIn(("client", "file-only-openai"), fixture.events)
+        self.assertEqual(observed, ["file-only-openai"])
+        self.assertEqual([(name, config["api_key"]) for name, config in fixture.model_configs],
+                         [("gpt_4o_mini", "file-only-openai"), ("llama", "file-only-groq")])
+        self.assertEqual(list(record["assessment_plans"]), ["gpt_4o_mini", "llama"])
+        self.assertEqual(len(fixture.calls), 3)
+        self.assertEqual(len(fixture.scoring_calls), 12)
+        captured = json.dumps([run, record]) + fixture.stdout.getvalue() + fixture.stderr.getvalue()
+        for token in ("file-only-openai", "file-only-groq"):
+            self.assertNotIn(token, captured)
+        self.assertEqual(source.read_text(), contents)
+
+    def test_missing_selected_key_in_dotenv_fails_preflight_but_unselected_key_is_optional(self):
+        fixture = self.fixture
+        fixture.environment = {}
+        self.config["models"]["llama"]["api_key_env"] = "GROQ_API_KEY"
+        self.write_config()
+        (fixture.root / ".env").write_text("OPENAI_API_KEY=file-openai\nGRAPHRAG_API_KEY=${OPENAI_API_KEY}\n")
+        with fixture.runtime():
+            runner = runpy.run_path(str(fixture.script), run_name="runner_under_test")
+            self.assertEqual(runner["main"](), "configuration_error")
+            self.assertIn("GROQ_API_KEY", fixture.stderr.getvalue())
+            fixture.confirm_input.assert_not_called()
+            self.assertFalse(fixture.output.exists())
+            self.assertEqual(fixture.calls, [])
+            self.assertEqual(fixture.retrieval_calls, [])
+            self.experiment["selected_models"] = ["gpt_4o_mini"]
+            self.write_config()
+            self.assertEqual(runner["main"](), "completed")
+        run, [record] = self.read_native()
+        self.assertEqual(list(record["assessment_plans"]), ["gpt_4o_mini"])
+        self.assertEqual(len(fixture.calls), 2)
+
+    def test_runner_prints_models_with_three_numbered_condition_and_three_step_plan_pairs(self):
+        def ranked_reply(request):
+            reply = self.reply(request)
+            prefix = "First" if request["model"].startswith("openai/") else "Second"
+            reply.choices[0].message.content = json.dumps({"predictions": [
+                {"condition": f"{prefix} condition {letter}",
+                 "plan": [f"{prefix} {letter} step {step}" for step in (1, 2, 3)]}
+                for letter in ("A", "B", "C")
+            ]})
+            return reply
+        self.fixture.final_reply = ranked_reply
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        stdout = self.fixture.stdout.getvalue()
+        heading = "\n========== RANKED CONDITIONS AND PLANS ==========\n"
+        self.assertEqual(stdout.count(heading), 1)
+        printed = stdout.split(heading, 1)[1].split("\nRun ", 1)[0].strip("\n")
+        self.assertEqual(printed, "\n".join([
+            "Model: gpt_4o_mini (openai/gpt-4o-mini)",
+            "    1. Condition: First condition A", "        Plan:",
+            "            1. First A step 1", "            2. First A step 2", "            3. First A step 3", "",
+            "    2. Condition: First condition B", "        Plan:",
+            "            1. First B step 1", "            2. First B step 2", "            3. First B step 3", "",
+            "    3. Condition: First condition C", "        Plan:",
+            "            1. First C step 1", "            2. First C step 2", "            3. First C step 3", "",
+            "Model: llama (groq/llama-3.3-70b-versatile)",
+            "    1. Condition: Second condition A", "        Plan:",
+            "            1. Second A step 1", "            2. Second A step 2", "            3. Second A step 3", "",
+            "    2. Condition: Second condition B", "        Plan:",
+            "            1. Second B step 1", "            2. Second B step 2", "            3. Second B step 3", "",
+            "    3. Condition: Second condition C", "        Plan:",
+            "            1. Second C step 1", "            2. Second C step 2", "            3. Second C step 3",
+        ]))
+        self.assertNotIn('"predictions":', printed)
+        self.assertNotIn("========== CONDITIONS AND PLANS:", stdout)
+        self.assertEqual(len(self.fixture.calls), 3)
+        self.assertEqual(len(self.fixture.scoring_calls), 12)
+        for alias, prefix in (("gpt_4o_mini", "First"), ("llama", "Second")):
+            saved = record["assessment_plans"][alias]
+            self.assertEqual(saved["predictions"], [
+                {"condition": f"{prefix} condition {letter}",
+                 "plan": [f"{prefix} {letter} step {step}" for step in (1, 2, 3)]}
+                for letter in ("A", "B", "C")])
+            self.assertEqual(saved["predictions"], json.loads(saved["assessment_plan_raw"])["predictions"])
+            self.assertTrue(all(item[field]["status"] == "scored" for item in saved["evaluation"]
+                                for field in ("condition", "plan")))
+
+    def test_runner_prints_failed_model_details_and_keeps_successful_sibling_pairs_separate(self):
+        def fail_first(request):
+            if request["model"].startswith("openai/"):
+                raise RuntimeError("unavailable test-key\nretry later")
+            return self.reply(request)
+        self.fixture.final_reply = fail_first
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        stdout = self.fixture.stdout.getvalue()
+        printed = stdout.split("========== RANKED CONDITIONS AND PLANS ==========\n", 1)[1]
+        self.assertIn("Model: gpt_4o_mini (openai/gpt-4o-mini)\n"
+                      "    Generation status: failed_incomplete\n"
+                      "    Error (RuntimeError): unavailable [REDACTED]\n"
+                      "    retry later\n\nModel: llama (groq/llama-3.3-70b-versatile)\n", printed)
+        self.assertNotIn("test-key", printed)
+        self.assertEqual(len(re.findall(r"^    [123]\. Condition:", printed, re.MULTILINE)), 3)
+        self.assertIsNone(record["assessment_plans"]["gpt_4o_mini"]["evaluation"])
+        self.assertEqual(record["assessment_plans"]["llama"]["evaluation"][0]["plan"]["status"], "scored")
+
+    def test_two_models_share_exact_evidence_and_receive_independent_predictions_and_scores(self):
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(run["schema_version"], 2)
+        self.assertEqual(run["assessment_plan_models"]["selected_models"], ["gpt_4o_mini", "llama"])
+        self.assertEqual(run["assessment_plan_models"]["config_sha256"],
+                         hashlib.sha256(self.fixture.model_config.read_bytes()).hexdigest())
+        self.assertNotIn("test-key", json.dumps(run))
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(len(self.fixture.keyword_calls), 1)
+        self.assertEqual(len(self.fixture.calls), 3)
+        first, second = self.fixture.calls[1:]
+        self.assertEqual(first["messages"], second["messages"])
+        self.assertEqual(first["messages"], [
+            {"role": "system", "content": record["assessment_plan_prompts"]["system"]},
+            {"role": "user", "content": record["assessment_plan_prompts"]["user"]}])
+        self.assertEqual(first["response_format"], FINAL_RESPONSE_FORMAT)
+        self.assertEqual(second["response_format"], {"type": "json_object"})
+        for alias, request in zip(("gpt_4o_mini", "llama"), (first, second)):
+            output = record["assessment_plans"][alias]
+            self.assertEqual(output["predictions"], prediction_pairs(request["model"], [request["model"] + " action"]))
+            self.assertEqual(json.loads(output["assessment_plan_raw"])["predictions"], output["predictions"])
+            self.assertEqual(output["model_responses"][0]["reported_model"], "reported:" + request["model"])
+            self.assertEqual(output["model_responses"][0]["token_usage"]["total_tokens"], 5)
+            self.assertEqual([entry["rank"] for entry in output["evaluation"]], [1, 2, 3])
+            self.assertTrue(all(entry[field]["status"] == "scored" for entry in output["evaluation"]
+                                for field in ("condition", "plan")))
+            self.assertNotIn("GOLD_ONLY", json.dumps(request["messages"]))
+        self.assertEqual(len(self.fixture.scoring_calls), 12)
+        self.assertEqual(self.fixture.scoring_calls[0][0], ["GOLD ONLY condition"])
+        self.assertEqual(self.fixture.scoring_calls[6][1], [second["model"]])
+
+    def test_config_selection_order_and_shared_settings_are_recorded(self):
+        self.experiment.update(selected_models=["third", "gpt_4o_mini"], temperature=0.5, max_retries=4)
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(list(record["assessment_plans"]), ["third", "gpt_4o_mini"])
+        self.assertEqual(run["assessment_plan_models"]["config_file"], "experiments/configs/condition_plan_models.yaml")
+        self.assertEqual(run["experiment"]["selected_models"], ["third", "gpt_4o_mini"])
+        self.assertEqual(run["experiment"]["model_config"], "experiments/configs/condition_plan_models.yaml")
+        self.assertEqual(run["experiment"]["temperature"], 0.5)
+        self.assertEqual(run["experiment"]["max_retries"], 4)
+        self.assertTrue(all(settings["temperature"] == 0.5 and settings["max_retries"] == 4
+                            for _, settings in self.fixture.model_configs))
+        self.assertNotIn("response_format", self.fixture.calls[1])
+        self.assertEqual([call["model"] for call in self.fixture.calls[1:]],
+                         ["gemini/example-gemini", "openai/gpt-4o-mini"])
+
+    def test_failure_is_model_and_patient_local_and_successful_sibling_still_scores(self):
+        fixture = self.fixture
+        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"} for name in ("BAD", "GOOD")])
+        fixture.write_labels([self.label("GOOD"), self.label("BAD")])
+        def fail_first(request):
+            if request["model"].startswith("openai/") and "BAD" in request["messages"][-1]["content"]:
+                raise RuntimeError("request failed test-key")
+            return self.reply(request)
+        fixture.final_reply = fail_first
+        status, run, records = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertEqual([record["status"] for record in records], ["failed_incomplete", "completed"])
+        failed = records[0]["assessment_plans"]["gpt_4o_mini"]
+        self.assertEqual(failed["error"], {"type": "RuntimeError", "message": "request failed [REDACTED]"})
+        self.assertIsNone(failed["evaluation"])
+        self.assertIsNone(failed["predictions"])
+        self.assertEqual(failed["model_responses"], [])
+        self.assertEqual(records[0]["assessment_plans"]["llama"]["evaluation"][0]["condition"]["status"], "scored")
+        self.assertEqual(len(fixture.scoring_calls), 18)
+        self.assertEqual(len(fixture.graph_calls), 2)
+        self.assertEqual(len(fixture.calls), 6)
+
+    def test_shared_stage_failure_leaves_every_model_unattempted(self):
+        self.fixture.failure = "graphrag"
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertEqual(len(self.fixture.calls), 1)
+        self.assertEqual(record["status"], "failed_incomplete")
+        self.assertNotIn("========== RANKED CONDITIONS AND PLANS ==========", self.fixture.stdout.getvalue())
+        self.assertTrue(all(output == HELPER_NAMESPACE["new_model_result"]()
+                            for output in record["assessment_plans"].values()))
+
+    def test_model_preflight_errors_make_no_calls_or_output_directory(self):
+        runner = self.load_runner()
+        for selection in (["unknown"], ["llama", "llama"]):
+            with self.subTest(selection=selection):
+                self.experiment["selected_models"] = selection
+                self.write_config()
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "configuration_error")
+                self.assertFalse(self.fixture.output.exists())
+                self.fixture.confirm_input.assert_not_called()
+                self.assertEqual(self.fixture.calls, [])
+                self.assertEqual(self.fixture.retrieval_calls, [])
+        self.experiment["selected_models"] = ["llama"]
+        self.config["models"]["llama"]["api_key_env"] = "UNCONFIGURED_TOKEN"
+        self.write_config()
+        with self.fixture.runtime():
+            self.assertEqual(runner["main"](), "configuration_error")
+        self.assertIn("UNCONFIGURED_TOKEN", self.fixture.stderr.getvalue())
+        self.assertIn(".env in the repository root", self.fixture.stderr.getvalue())
+        self.assertFalse(self.fixture.output.exists())
+
+    def test_generation_interrupt_keeps_first_model_and_unattempted_slots_and_patients(self):
+        self.experiment["selected_models"].append("third")
+        self.write_config()
+        self.fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
+                                     for name in ("FIRST", "UNSTARTED")])
+        self.fixture.write_labels([self.label("FIRST"), self.label("UNSTARTED")])
+        def interrupt(request):
+            if request["model"].startswith("groq/"):
+                raise KeyboardInterrupt()
+            return self.reply(request)
+        self.fixture.final_reply = interrupt
+        runner = self.load_runner()
+        with self.fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        run, [first, second] = self.read_native()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual(first["status"], "failed_incomplete")
+        self.assertEqual(first["assessment_plans"]["gpt_4o_mini"]["status"], "completed")
+        self.assertIsNotNone(first["assessment_plans"]["gpt_4o_mini"]["predictions"])
+        self.assertEqual(first["assessment_plans"]["llama"]["error"]["type"], "KeyboardInterrupt")
+        self.assertEqual(first["assessment_plans"]["third"]["status"], "not_processed")
+        self.assertEqual(second["status"], "not_processed")
+        self.assertEqual(list(second["assessment_plans"]), ["gpt_4o_mini", "llama", "third"])
+        self.assertTrue(all(output == HELPER_NAMESPACE["new_model_result"]()
+                            for output in second["assessment_plans"].values()))
+
+    def test_malformed_output_and_field_errors_do_not_erase_sibling_predictions_or_metrics(self):
+        def malformed(request):
+            reply = self.reply(request)
+            if request["model"].startswith("groq/"):
+                reply.choices[0].message.content = "  malformed café\n"
+            return reply
+        self.fixture.final_reply = malformed
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        output = record["assessment_plans"]["llama"]
+        self.assertEqual(output["assessment_plan_raw"], "  malformed café\n")
+        self.assertIsNone(output["predictions"])
+        self.assertEqual(output["evaluation"][0]["condition"]["status"], "missing_generation")
+        self.assertEqual(record["assessment_plans"]["gpt_4o_mini"]["evaluation"][0]["plan"]["status"], "scored")
+        self.assertEqual(len(self.fixture.scoring_calls), 6)
+        stdout = self.fixture.stdout.getvalue()
+        self.assertIn("Model: llama (groq/llama-3.3-70b-versatile)\n"
+                      "    No valid ranked conditions and plans returned.", stdout)
+        self.assertNotIn("  malformed café\n", stdout)
+
+    def test_scoring_errors_are_local_to_model_rank_and_field(self):
+        def metric(references, candidates, lang):
+            if candidates[0].startswith("groq/") and "action" in candidates[0]:
+                raise RuntimeError("metric failure")
+            return self.fixture.metric_values.copy()
+        self.fixture.scoring_reply = metric
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        first, second = record["assessment_plans"].values()
+        self.assertTrue(all(entry["plan"]["status"] == "scored" for entry in first["evaluation"]))
+        self.assertTrue(all(entry["plan"]["status"] == "error" and entry["condition"]["status"] == "scored"
+                            for entry in second["evaluation"]))
+
+    def test_scoring_interrupt_preserves_completed_sibling_scores(self):
+        def metric(references, candidates, lang):
+            if candidates[0].startswith("groq/"):
+                raise KeyboardInterrupt()
+            return self.fixture.metric_values.copy()
+        self.fixture.scoring_reply = metric
+        runner = self.load_runner()
+        with self.fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        run, [record] = self.read_native()
+        first, second = record["assessment_plans"].values()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertTrue(all(entry[field]["status"] == "scored" for entry in first["evaluation"]
+                            for field in ("condition", "plan")))
+        self.assertEqual(second["evaluation"][0]["condition"]["status"], "interrupted")
+        self.assertEqual(second["evaluation"][0]["plan"]["status"], "pending")
+        self.assertIsNotNone(second["assessment_plan_raw"])
 
 
 if __name__ == "__main__":

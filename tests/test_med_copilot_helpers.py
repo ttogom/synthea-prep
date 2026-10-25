@@ -377,9 +377,9 @@ class HelperImportTests(unittest.TestCase):
                   if callable(value) and not name.startswith("_")
                   and getattr(value, "__module__", None) == "<run_path>"]
         self.assertEqual(sorted(public), sorted([
-            "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "git_branch", "git_commit",
+            "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "format_assessment_plans", "git_branch", "git_commit",
             "graphrag_context_json", "guideline_resource_files", "load_patient_records",
-            "make_run_name", "new_patient_result", "pacific_now", "pacific_time",
+            "make_run_name", "new_model_result", "new_patient_result", "pacific_now", "pacific_time",
             "parse_condition_plan", "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
@@ -840,6 +840,93 @@ class FingerprintTests(TemporaryRootTestCase):
 
 
 class PatientOutputHelperTests(unittest.TestCase):
+    def test_formatted_output_numbers_three_condition_plan_pairs_under_the_model(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": "Condition café", "plan": ["First action", "Second action", "Third action"]},
+            {"condition": "Condition B", "plan": ["B action one", "B action two", "B action three"]},
+            {"condition": "Condition C", "plan": ["C action one", "C action two", "C action three"]},
+        ])
+        outputs = {"mini": output}
+        settings = {"mini": {"config": {"model_provider": "openai", "model": "gpt-4o-mini"}}}
+        before = json.dumps([outputs, settings])
+        self.assertEqual(H["format_assessment_plans"](outputs, settings), "\n".join([
+            "Model: mini (openai/gpt-4o-mini)",
+            "    1. Condition: Condition café", "        Plan:",
+            "            1. First action", "            2. Second action", "            3. Third action", "",
+            "    2. Condition: Condition B", "        Plan:",
+            "            1. B action one", "            2. B action two", "            3. B action three", "",
+            "    3. Condition: Condition C", "        Plan:",
+            "            1. C action one", "            2. C action two", "            3. C action three",
+        ]))
+        self.assertEqual(json.dumps([outputs, settings]), before)
+
+    def test_formatted_output_distinguishes_unavailable_fields_empty_plans_and_short_plans(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": None, "plan": ["One action", "Second action"]},
+            {"condition": "B", "plan": None}, {"condition": "C", "plan": []},
+        ])
+        settings = {"mini": {"config": {"model_provider": "openai", "model": "gpt-4o-mini"}}}
+        formatted = H["format_assessment_plans"]({"mini": output}, settings)
+        self.assertIn("    1. Condition: [unavailable]\n        Plan:\n"
+                      "            1. One action\n            2. Second action\n\n", formatted)
+        self.assertIn("    2. Condition: B\n        Plan:\n            [unavailable]\n\n", formatted)
+        self.assertTrue(formatted.endswith("    3. Condition: C\n        Plan:\n            No plan items returned."))
+        self.assertNotIn("            3.", formatted)
+
+    def test_formatted_output_preserves_model_order_and_shows_failed_unattempted_and_invalid_models(self):
+        failed = H["new_model_result"]()
+        failed.update(status="failed_incomplete", error={"type": "RuntimeError", "message": "failed\nmore detail"})
+        invalid = H["new_model_result"]()
+        invalid.update(status="completed", assessment_plan_raw="RAW_RESPONSE_SHOULD_NOT_BE_PRINTED")
+        outputs = {"failed": failed, "waiting": H["new_model_result"](), "invalid": invalid}
+        settings = {key: {"config": {"model_provider": "azure", "model": "base-model",
+                                    "deployment_name": "clinical-deployment"}} for key in outputs}
+        self.assertEqual(H["format_assessment_plans"](outputs, settings), "\n".join([
+            "Model: failed (azure/clinical-deployment)", "    Generation status: failed_incomplete",
+            "    Error (RuntimeError): failed", "    more detail", "",
+            "Model: waiting (azure/clinical-deployment)", "    Generation status: not_processed", "",
+            "Model: invalid (azure/clinical-deployment)", "    No valid ranked conditions and plans returned.",
+        ]))
+
+    def test_formatted_multiline_text_keeps_each_line_inside_its_model_and_plan(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": "A\ncontinuation", "plan": ["First action\ncontinuation café"]},
+            {"condition": "B", "plan": ["same", "same"]}, {"condition": "C", "plan": []},
+        ])
+        settings = {"llama": {"config": {"model_provider": "groq", "model": "llama-3.3-70b-versatile"}}}
+        formatted = H["format_assessment_plans"]({"llama": output}, settings)
+        self.assertIn("    1. Condition: A\n    continuation\n        Plan:\n"
+                      "            1. First action\n            continuation café", formatted)
+        self.assertIn("            1. same\n            2. same", formatted)
+        self.assertTrue(all(line.startswith("    ") for line in formatted.splitlines()[1:] if line))
+        self.assertEqual(H["format_assessment_plans"]({}, {}), "")
+
+    def test_model_slots_are_fresh_and_explicitly_unattempted(self):
+        expected = {"status": "not_processed", "error": None, "predictions": None,
+                    "assessment_plan_raw": None, "model_responses": [], "evaluation": None}
+        self.assertEqual(H["new_model_result"](), expected)
+        first = H["new_model_result"]()
+        first["model_responses"].append({"response_id": "first"})
+        first["evaluation"] = ["scored"]
+        self.assertEqual(H["new_model_result"](), expected)
+
+    def test_multiple_model_patient_shape_and_mutation_isolation(self):
+        first = H["new_patient_result"]("a", model_ids=["openai", "llama"])
+        second = H["new_patient_result"]("b", "not_processed", ["llama", "openai"])
+        self.assertEqual(list(first["assessment_plans"]), ["openai", "llama"])
+        self.assertEqual(list(second["assessment_plans"]), ["llama", "openai"])
+        self.assertEqual(second["status"], "not_processed")
+        for key in ("predictions", "assessment_plan_raw", "evaluation"):
+            self.assertNotIn(key, first)
+        self.assertNotIn("assessment_plan", first["model_responses"])
+        first["assessment_plans"]["openai"]["model_responses"].append({"response_id": "one"})
+        self.assertEqual(first["assessment_plans"]["llama"], H["new_model_result"]())
+        self.assertEqual(second["assessment_plans"]["openai"], H["new_model_result"]())
+        self.assertEqual(H["new_patient_result"]("empty", model_ids=[])["assessment_plans"], {})
+
     def test_new_patient_result_has_every_field_in_order_with_null_outputs(self):
         self.assertEqual(list(H["new_patient_result"]("p")), RESULT_FIELDS)
         self.assertEqual(H["new_patient_result"]("p"), {"id": "p", "status": None,
@@ -1213,6 +1300,39 @@ class RunFileTests(TemporaryRootTestCase):
 
 
 class ExperimentRunTests(TemporaryRootTestCase):
+    def test_multimodel_stop_preserves_partial_outputs_and_initializes_unstarted_models(self):
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="feature", commit="0" * 40,
+            patient_ids=["a", "b"], model_ids=["mini", "llama"],
+        )
+        self.assertEqual(run.metadata["schema_version"], 2)
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"])
+        current["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="exact café\n", predictions=[{"condition": "A"}],
+            evaluation=[{"rank": 1, "condition": {"metrics": {"BLEU": 0.0}}}],
+        )
+        run.stop(self.finished, current)
+        metadata, records, _ = self.read(run)
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(records[0], {**current, "status": "failed_incomplete"})
+        self.assertEqual(records[1], H["new_patient_result"]("b", "not_processed", ["mini", "llama"]))
+        self.assertEqual(current["status"], None)
+        records[0]["assessment_plans"]["llama"]["model_responses"].append({"response_id": "x"})
+        self.assertEqual(records[1]["assessment_plans"]["llama"], H["new_model_result"]())
+
+    def test_multimodel_stop_serialization_fallback_keeps_model_slots(self):
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="feature", commit="0" * 40,
+            patient_ids=["a"], model_ids=["mini", "llama"],
+        )
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"])
+        current["assessment_plans"]["mini"]["predictions"] = float("nan")
+        run.stop(self.finished, current)
+        self.assertEqual(self.read(run)[1], [H["new_patient_result"](
+            "a", "failed_incomplete", ["mini", "llama"])])
+
     def setUp(self):
         super().setUp()
         self.repo = self.root / "repo"

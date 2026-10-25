@@ -36,6 +36,49 @@ with patch.object(nltk, "download", return_value=True):
 
 
 class PatientScorerTests(unittest.TestCase):
+    def test_each_model_scores_against_same_patient_without_mutating_predictions(self):
+        first, second = self.result(condition="mini"), self.result(condition="llama")
+        first.pop("id")
+        second.pop("id")
+        record = {"id": "patient-a", "assessment_plans": {"mini": first, "llama": second}}
+        before = deepcopy(record)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as metric:
+            self.assertIs(self.scorer().score_result(record), record)
+        self.assertEqual(metric.call_count, 12)
+        self.assertEqual(metric.call_args_list[0].args, (["acute bronchitis"], ["mini"]))
+        self.assertEqual(metric.call_args_list[6].args, (["acute bronchitis"], ["llama"]))
+        for key in record["assessment_plans"]:
+            self.assertEqual(record["assessment_plans"][key]["predictions"],
+                             before["assessment_plans"][key]["predictions"])
+        self.assertNotIn("evaluation", record)
+        first["evaluation"][0]["condition"]["metrics"]["BLEU"] = 999
+        self.assertEqual(second["evaluation"][0]["condition"]["metrics"], self.metrics)
+
+    def test_failed_and_unattempted_models_are_not_scored(self):
+        failed = {"status": "failed_incomplete", "predictions": None, "evaluation": None}
+        waiting = {"status": "not_processed", "predictions": None, "evaluation": None}
+        good = self.result()
+        record = {"id": "patient-a", "assessment_plans": {"failed": failed, "waiting": waiting, "good": good}}
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as metric:
+            self.scorer().score_result(record)
+        self.assertEqual(metric.call_count, 6)
+        self.assertIsNone(failed["evaluation"])
+        self.assertIsNone(waiting["evaluation"])
+
+    def test_interruption_keeps_prior_model_scores_and_later_models_unscored(self):
+        record = {"id": "patient-a", "assessment_plans": {
+            name: self.result(condition=name) for name in ("mini", "llama", "later")}}
+        def metric(references, candidates, lang):
+            if candidates == ["llama"]:
+                raise KeyboardInterrupt()
+            return self.metrics
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=metric), self.assertRaises(KeyboardInterrupt):
+            self.scorer().score_result(record)
+        first, second, last = record["assessment_plans"].values()
+        self.assertEqual(first["evaluation"][2]["plan"]["status"], "scored")
+        self.assertEqual(second["evaluation"][0]["condition"]["status"], "interrupted")
+        self.assertNotIn("evaluation", last)
+
     def setUp(self):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -90,6 +133,54 @@ class PatientScorerTests(unittest.TestCase):
 
     def test_explicit_false_retains_original_order(self):
         self.assertEqual(self.scorer(presenting_evidence_only=False).patients, self.patients)
+
+    def test_patient_limit_runs_after_evidence_filter_and_preserves_input(self):
+        before = deepcopy(self.patients)
+        scorer = self.scorer(max_patients=1)
+        self.assertEqual(scorer.patients, [self.patients[1]])
+        self.assertIs(scorer.patients[0], self.patients[1])
+        self.assertEqual(self.patients, before)
+        unfiltered = self.scorer(presenting_evidence_only=False, max_patients=1)
+        self.assertEqual(unfiltered.patients, [self.patients[0]])
+        metadata = unfiltered.metadata(self.directory)
+        self.assertEqual(metadata["max_patients"], 1)
+        self.assertEqual(metadata["input_patient_count"], 2)
+        self.assertEqual(metadata["selected_patient_count"], 1)
+        self.assertEqual(metadata["selected_patient_ids"], ["patient-b"])
+        self.assertEqual(metadata["excluded_patient_ids"], ["patient-a"])
+        with self.assertRaisesRegex(ValueError, "selected input patient"):
+            unfiltered.score_result(self.result("patient-a"))
+
+    def test_null_or_large_limit_keeps_the_entire_filtered_cohort(self):
+        for value in (None, 2, 10):
+            with self.subTest(value=value):
+                scorer = self.scorer(presenting_evidence_only=False, max_patients=value)
+                self.assertEqual(scorer.patients, self.patients)
+                self.assertEqual(scorer.metadata(self.directory)["excluded_patient_ids"], [])
+                self.assertEqual(scorer.metadata(self.directory)["max_patients"], value)
+
+    def test_invalid_patient_limit_fails_before_reading_labels(self):
+        self.labels_path.unlink()
+        for value in (0, -1, True, False, 1.0, "1", [], {}):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "max_patients"):
+                self.scorer(max_patients=value)
+
+    def test_limit_does_not_hide_missing_labels_or_bad_rows_beyond_selected_patients(self):
+        self.write_labels(self.labels[1:])
+        with self.assertRaisesRegex(ValueError, "Missing labels.*patient-a"):
+            self.scorer(presenting_evidence_only=False, max_patients=1)
+        self.write_labels([self.labels[1], {**self.labels[0], "plan": [None]}])
+        with self.assertRaisesRegex(ValueError, "plan"):
+            self.scorer(presenting_evidence_only=False, max_patients=1)
+        self.write_labels(self.labels)
+        self.patients.append(self.patients[0])
+        with self.assertRaisesRegex(ValueError, "Duplicate input patient"):
+            self.scorer(presenting_evidence_only=False, max_patients=1)
+
+    def test_limit_does_not_allow_empty_eligible_cohort(self):
+        self.write_labels([{**label, "has_presenting_evidence": False} for label in self.labels])
+        with self.assertRaisesRegex(ValueError, "No patients selected"):
+            self.scorer(max_patients=1)
 
     def test_boolean_filter_rejects_truthy_nonbooleans(self):
         for value in (0, 1, "true", None, [], {}):
@@ -548,6 +639,15 @@ class PatientScorerTests(unittest.TestCase):
 
 
 class ScoringArgumentTests(unittest.TestCase):
+    def test_config_and_model_cli_overrides_are_rejected(self):
+        self.assertEqual(vars(parse_scoring_args([])), {"presenting_evidence_only": True})
+        for option in ("--config", "--experiment-config", "--model-config", "--models"):
+            with self.subTest(option=option), redirect_stderr(StringIO()) as stderr:
+                with self.assertRaises(SystemExit) as failure:
+                    parse_scoring_args([option, "override"])
+                self.assertEqual(failure.exception.code, 2)
+                self.assertIn("unrecognized arguments", stderr.getvalue())
+
     def test_default_bare_and_explicit_boolean_forms(self):
         for arguments, expected in (([], True), (["--presenting-evidence-only"], True),
                                     (["--presenting-evidence-only", "true"], True),

@@ -1,0 +1,50 @@
+# Only selected models require credentials. No API tokens belong in this file.
+#
+# Run-wide selected_models, temperature, and max_retries are in experiment.yaml.
+# models: Registry keyed by your model aliases, which also identify saved results.
+# type: Request interface; use chat for the upstream chat-completion interface.
+# model_provider: Provider/API adapter; openai also handles OpenAI-compatible servers.
+# model: Actual model identifier understood by the provider or server.
+# api_key_env: Name of the variable holding the key in root .env or the environment.
+# api_base: Optional server base URL, such as a local model server's /v1 endpoint.
+# output_mode: json_schema requests schema enforcement; json_object requests valid JSON; prompt relies on prompt instructions without an API format option.
+# ollama_* entries use downloaded model tags on the local Ollama server; no api_key_env is needed.
+# llama_3_3_70b is an optional Groq enterprise model, excluded from the selected local experiment.
+
+models:
+  gpt_4o_mini:
+    type: chat
+    model_provider: openai
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+    output_mode: json_schema
+  ollama_healthcare:
+    type: chat
+    model_provider: openai
+    model: Jayasimma/healthcare:latest
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  ollama_llama3:
+    type: chat
+    model_provider: openai
+    model: llama3:latest
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  ollama_gemma2_2b:
+    type: chat
+    model_provider: openai
+    model: gemma2:2b
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  llama_3_3_70b:
+    type: chat
+    model_provider: groq
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
+    output_mode: json_object
+  llama_3_3_70b_local:
+    type: chat
+    model_provider: openai
+    model: meta-llama/Llama-3.3-70B-Instruct
+    api_base: http://localhost:8000/v1
+    output_mode: json_schema

@@ -25,7 +25,7 @@ def _boolean_argument(value):
 
 
 def parse_scoring_args(argv=None):
-    """Parse the cohort filter, enabled by default and when the flag is bare."""
+    """Parse the cohort option; experiment/model settings come only from config files."""
     parser = argparse.ArgumentParser(description="Run MED-COPILOT on prepared patient records.")
     parser.add_argument(
         "--presenting-evidence-only", nargs="?", const=True, default=True,
@@ -57,13 +57,17 @@ class PatientScorer:
     Label files may contain additional patient IDs so a shared label file can
     serve several input subsets. Every label row is validated, and every input
     ID must have exactly one label before the presenting-evidence filter runs.
+    Apply max_patients to the filtered cohort in input order, after validation.
     """
 
-    def __init__(self, labels_path, patients, presenting_evidence_only=True):
+    def __init__(self, labels_path, patients, presenting_evidence_only=True, *, max_patients=None):
         if type(presenting_evidence_only) is not bool:
             raise TypeError("presenting_evidence_only must be a bool")
+        if max_patients is not None and (type(max_patients) is not int or max_patients < 1):
+            raise ValueError("max_patients must be null or a positive integer")
         self.labels_path = Path(labels_path).resolve()
         self.presenting_evidence_only = presenting_evidence_only
+        self.max_patients = max_patients
         source_bytes = self.labels_path.read_bytes()
         self._labels_sha256 = hashlib.sha256(source_bytes).hexdigest()
         labels = {}
@@ -113,6 +117,7 @@ class PatientScorer:
             patient for patient in original_patients
             if not presenting_evidence_only or labels[patient["id"]]["has_presenting_evidence"]
         ]
+        self.patients = self.patients[:max_patients]
         if not self.patients:
             raise ValueError("No patients selected for evaluation")
         self._selected_ids = {patient["id"] for patient in self.patients}
@@ -133,6 +138,7 @@ class PatientScorer:
             "evaluator_path": _relative_path(UPSTREAM_EVALUATOR, root),
             "evaluator_sha256": hashlib.sha256(UPSTREAM_EVALUATOR.read_bytes()).hexdigest(),
             "presenting_evidence_only": self.presenting_evidence_only,
+            "max_patients": self.max_patients,
             "input_patient_count": len(self._input_ids),
             "selected_patient_count": len(self.patients),
             "selected_patient_ids": [patient["id"] for patient in self.patients],
@@ -172,7 +178,16 @@ class PatientScorer:
         if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
                 or result["id"] not in self._selected_ids):
             raise ValueError("Result must name a selected input patient")
-        label = self._labels[result["id"]]
+        if "assessment_plans" in result:
+            for output in result["assessment_plans"].values():
+                if output["status"] == "completed":
+                    self._score_predictions(result["id"], output)
+        else:
+            self._score_predictions(result["id"], result)
+        return result
+
+    def _score_predictions(self, patient_id, result):
+        label = self._labels[patient_id]
         result["evaluation"] = [
             {"rank": rank, **{field: _empty_entry("pending") for field in ("condition", "plan")}}
             for rank in range(1, 4)
