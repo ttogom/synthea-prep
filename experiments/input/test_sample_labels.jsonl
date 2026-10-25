@@ -1,0 +1,10 @@
+{"id": "bacterial_sinusitis_88c45b54-e69a-fead-f18b-b54d517ab699", "condition": "bacterial_sinusitis", "bin": "acute", "has_presenting_evidence": true, "plan": ["none recorded"]}
+{"id": "copd_fedce73f-81f9-d444-c038-983e85d4e6aa", "condition": "copd", "bin": "history", "has_presenting_evidence": false, "plan": ["Chronic obstructive pulmonary disease clinical management plan (record artifact)"]}
+{"id": "cystitis_48aef058-9128-a719-4fad-931b3f6af501", "condition": "cystitis", "bin": "acute", "has_presenting_evidence": true, "plan": ["none recorded"]}
+{"id": "heart_failure_aef11ed0-293e-b41b-aea5-485d9312b5f4", "condition": "heart_failure", "bin": "control", "has_presenting_evidence": true, "plan": ["Electrocardiographic procedure (procedure)", "Assessment using New York Heart Association Classification (procedure)"]}
+{"id": "hypertension_cbbd3b5f-f992-e2aa-cb33-2982fe08106b", "condition": "hypertension", "bin": "history", "has_presenting_evidence": false, "plan": ["Lifestyle education regarding hypertension (procedure)"]}
+{"id": "strep_throat_14e194c2-d32c-3226-b0a8-8d11eb68b0b0", "condition": "strep_throat", "bin": "acute", "has_presenting_evidence": true, "plan": ["Penicillin V Potassium 500 MG Oral Tablet", "Throat culture (procedure)"]}
+{"id": "viral_pharyngitis_167da953-ee4a-5c69-6f8f-ff0d216fe1cf", "condition": "viral_pharyngitis", "bin": "acute", "has_presenting_evidence": true, "plan": ["Throat culture (procedure)"]}
+{"id": "strep_throat_2f8ca0a6-fef4-18ed-c24a-fe153140a973", "condition": "strep_throat", "bin": "acute", "has_presenting_evidence": true, "plan": ["Penicillin V Potassium 500 MG Oral Tablet", "Throat culture (procedure)"]}
+{"id": "viral_pharyngitis_6a1c66b8-a045-1cb8-9782-977b00d85ad0", "condition": "viral_pharyngitis", "bin": "acute", "has_presenting_evidence": true, "plan": ["Throat culture (procedure)"]}
+{"id": "hypertension_b80691d9-67f8-69ed-d764-93c204530f6a", "condition": "hypertension", "bin": "history", "has_presenting_evidence": false, "plan": ["Lifestyle education regarding hypertension (procedure)"]}
