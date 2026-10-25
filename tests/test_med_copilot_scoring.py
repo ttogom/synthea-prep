@@ -1,6 +1,7 @@
 """Offline tests for label validation, field routing, and upstream metric reuse."""
 
 from contextlib import redirect_stderr
+from copy import deepcopy
 import hashlib
 from importlib import metadata as package_metadata
 from io import StringIO
@@ -67,7 +68,12 @@ class PatientScorerTests(unittest.TestCase):
         return PatientScorer(self.labels_path, self.patients, **kwargs)
 
     def result(self, patient_id="patient-a", **kwargs):
-        return {"id": patient_id, "status": "completed", "assessment": "A", "plan": "P", **kwargs}
+        condition = kwargs.pop("condition", "A")
+        plan = kwargs.pop("plan", ["P"])
+        predictions = kwargs.pop("predictions", [
+            {"condition": condition, "plan": plan} for _ in range(3)
+        ])
+        return {"id": patient_id, "status": "completed", "predictions": predictions, **kwargs}
 
     def assert_unscored(self, entry, status):
         self.assertEqual(entry["status"], status)
@@ -167,23 +173,50 @@ class PatientScorerTests(unittest.TestCase):
     def test_exact_singleton_inputs_preserve_reference_order_and_whitespace(self):
         self.labels[0]["condition"] = " acute__bronchitis "
         self.write_labels(self.labels)
-        scorer = self.scorer()
-        result = self.result(assessment="  Diagnosis  ", plan="  Proposed plan\n")
-        original = dict(result)
+        result = self.result(condition="  Diagnosis  ", plan=["  Proposed plan\n"])
+        original = deepcopy(result)
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
-            returned = scorer.score_result(result)
+            returned = self.scorer().score_result(result)
         self.assertIs(returned, result)
-        self.assertEqual(evaluate.call_args_list[0].args,
-                         ([" acute  bronchitis "], ["  Diagnosis  "]))
-        self.assertEqual(evaluate.call_args_list[1].args,
-                         (["Rest,  Drink fluids "], ["  Proposed plan\n"]))
-        self.assertEqual([call.kwargs for call in evaluate.call_args_list],
-                         [{"lang": "en"}, {"lang": "en"}])
+        self.assertEqual([call.args for call in evaluate.call_args_list], [
+            ([" acute  bronchitis "], ["  Diagnosis  "]),
+            (["Rest,  Drink fluids "], ["  Proposed plan\n"]),
+        ] * 3)
+        self.assertEqual([call.kwargs for call in evaluate.call_args_list], [{"lang": "en"}] * 6)
         self.assertEqual({key: result[key] for key in original}, original)
-        for field in ("condition", "plan"):
-            self.assertEqual(result["evaluation"][field], {
-                "status": "scored", "metrics": self.metrics, "error": None,
-            })
+        self.assertEqual([entry["rank"] for entry in result["evaluation"]], [1, 2, 3])
+        for entry in result["evaluation"]:
+            self.assertEqual(set(entry), {"rank", "condition", "plan"})
+            for field in ("condition", "plan"):
+                self.assertEqual(entry[field], {"status": "scored", "metrics": self.metrics, "error": None})
+        self.assertIsNot(result["evaluation"][0]["condition"], result["evaluation"][1]["condition"])
+
+    def test_distinct_ranked_pairs_are_scored_separately_without_weighting_or_reordering(self):
+        predictions = [
+            {"condition": "Likely diagnosis", "plan": ["First action", "Second action", "Third action"]},
+            {"condition": "Alternative diagnosis", "plan": ["Different action"]},
+            {"condition": "Third diagnosis", "plan": ["Another action", "Follow-up, if worse"]},
+        ]
+        result = self.result(predictions=predictions)
+        original = deepcopy(result)
+        metrics = [{name: (index + 1) / 10 for name in METRIC_NAMES} for index in range(6)]
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=metrics) as evaluate:
+            self.scorer().score_result(result)
+        self.assertEqual([call.args for call in evaluate.call_args_list], [
+            (["acute bronchitis"], ["Likely diagnosis"]),
+            (["Rest,  Drink fluids "], ["First action, Second action, Third action"]),
+            (["acute bronchitis"], ["Alternative diagnosis"]),
+            (["Rest,  Drink fluids "], ["Different action"]),
+            (["acute bronchitis"], ["Third diagnosis"]),
+            (["Rest,  Drink fluids "], ["Another action, Follow-up, if worse"]),
+        ])
+        self.assertIs(result["predictions"], predictions)
+        self.assertEqual({key: result[key] for key in original}, original)
+        for index, entry in enumerate(result["evaluation"]):
+            self.assertEqual(entry["rank"], index + 1)
+            self.assertEqual(entry["condition"]["metrics"], metrics[index * 2])
+            self.assertEqual(entry["plan"]["metrics"], metrics[index * 2 + 1])
+        self.assertEqual(set(result) - set(original), {"evaluation"})
 
     def test_unicode_line_separators_inside_label_text_are_not_jsonl_delimiters(self):
         self.labels[0]["condition"] = "acute\u2028bronchitis"
@@ -192,16 +225,49 @@ class PatientScorerTests(unittest.TestCase):
         self.assertIn("\u2028", self.labels_path.read_text(encoding="utf-8"))
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
             self.scorer().score_result(self.result())
-        self.assertEqual(evaluate.call_args_list[0].args[0], ["acute\u2028bronchitis"])
-        self.assertEqual(evaluate.call_args_list[1].args[0], ["Rest\u2029then drink fluids"])
+        for index in range(0, 6, 2):
+            self.assertEqual(evaluate.call_args_list[index].args[0], ["acute\u2028bronchitis"])
+            self.assertEqual(evaluate.call_args_list[index + 1].args[0], ["Rest\u2029then drink fluids"])
 
-    def test_exact_plan_sentinel_skips_even_when_generation_is_missing(self):
-        scorer = self.scorer(presenting_evidence_only=False)
-        result = self.result("patient-b", plan=None)
+    def test_generated_plan_items_keep_commas_duplicates_order_and_raw_output(self):
+        plan = ["Follow-up, if worse", "  First treatment\n", "Follow-up, if worse"]
+        result = self.result(condition="Diagnosis café", plan=plan,
+                             assessment_plan_raw='{"predictions":[{"condition":"Diagnosis café","plan":["raw"]}]}')
+        original = deepcopy(result)
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
-            scorer.score_result(result)
-        self.assertEqual(evaluate.call_count, 1)
-        self.assert_unscored(result["evaluation"]["plan"], "skipped_no_recorded_plan")
+            self.scorer().score_result(result)
+        for index in (1, 3, 5):
+            self.assertEqual(evaluate.call_args_list[index].args,
+                             (["Rest,  Drink fluids "],
+                              ["Follow-up, if worse,   First treatment\n, Follow-up, if worse"]))
+        self.assertEqual({key: result[key] for key in original}, original)
+        self.assertIs(result["predictions"][0]["plan"], plan)
+        self.assertEqual(result["evaluation"][0]["plan"]["status"], "scored")
+
+    def test_old_top_level_fields_are_never_a_prediction_fallback(self):
+        result = self.result(assessment="LEGACY ASSESSMENT", condition="IGNORED", plan=["IGNORED"])
+        del result["predictions"]
+        result.update(condition="LEGACY CONDITION", plan=["LEGACY PLAN"])
+        with patch.object(Evaluator, "evaluate_metrics") as evaluate:
+            self.scorer().score_result(result)
+        evaluate.assert_not_called()
+        for entry in result["evaluation"]:
+            for field in ("condition", "plan"):
+                self.assert_unscored(entry[field], "missing_generation")
+        self.assertEqual(result["assessment"], "LEGACY ASSESSMENT")
+        self.assertEqual(result["condition"], "LEGACY CONDITION")
+        self.assertEqual(result["plan"], ["LEGACY PLAN"])
+
+    def test_exact_plan_sentinel_skips_all_ranked_plans_even_when_generation_missing(self):
+        scorer = self.scorer(presenting_evidence_only=False)
+        for predictions, call_count in ((None, 0), ([{"condition": "D", "plan": None}] * 3, 3)):
+            with self.subTest(predictions=predictions):
+                result = self.result("patient-b", predictions=predictions)
+                with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+                    scorer.score_result(result)
+                self.assertEqual(evaluate.call_count, call_count)
+                for entry in result["evaluation"]:
+                    self.assert_unscored(entry["plan"], "skipped_no_recorded_plan")
 
     def test_similar_sentinel_strings_are_regular_plan_references(self):
         for plan in (["None recorded"], ["none recorded "], ["none recorded", "Rest"]):
@@ -210,8 +276,10 @@ class PatientScorerTests(unittest.TestCase):
                 self.write_labels(self.labels)
                 with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
                     result = self.scorer().score_result(self.result())
-                self.assertEqual(result["evaluation"]["plan"]["status"], "scored")
-                self.assertEqual(evaluate.call_args_list[1].args[0], [", ".join(plan)])
+                self.assertEqual(evaluate.call_count, 6)
+                for index, entry in enumerate(result["evaluation"]):
+                    self.assertEqual(entry["plan"]["status"], "scored")
+                    self.assertEqual(evaluate.call_args_list[index * 2 + 1].args[0], [", ".join(plan)])
 
     def test_empty_and_whitespace_only_reference_take_priority_over_missing_generation(self):
         for plan in ([], [""], [" \n"]):
@@ -220,41 +288,114 @@ class PatientScorerTests(unittest.TestCase):
                 self.write_labels(self.labels)
                 with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
                     result = self.scorer().score_result(self.result(plan=None))
-                self.assertEqual(evaluate.call_count, 1)
-                self.assert_unscored(result["evaluation"]["plan"], "missing_reference")
+                self.assertEqual(evaluate.call_count, 3)
+                for entry in result["evaluation"]:
+                    self.assert_unscored(entry["plan"], "missing_reference")
 
-    def test_missing_generation_is_reported_per_field_without_calling_evaluator(self):
+    def test_generated_plan_limit_does_not_truncate_long_reference_plans(self):
+        self.labels[0]["plan"] = ["Gold one", "Gold two", "Gold three", "Gold four"]
+        self.write_labels(self.labels)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            result = self.scorer().score_result(self.result(plan=["Generated one", "Generated two", "Generated three"]))
+        self.assertEqual(evaluate.call_count, 6)
+        for index, entry in enumerate(result["evaluation"]):
+            self.assertEqual(evaluate.call_args_list[index * 2 + 1].args,
+                             (["Gold one, Gold two, Gold three, Gold four"],
+                              ["Generated one, Generated two, Generated three"]))
+            self.assertEqual(entry["plan"]["status"], "scored")
+
+    def test_missing_generation_is_reported_per_field_and_rank_without_metric_calls(self):
         scorer = self.scorer()
-        for value in (None, "", " \n"):
-            with self.subTest(value=value), patch.object(Evaluator, "evaluate_metrics") as evaluate:
-                result = scorer.score_result(self.result(assessment=value, plan=value))
+        for condition, plan in ((None, None), ("", []), (" \n", [" \n"]), (None, [""])):
+            with self.subTest(condition=condition, plan=plan), patch.object(Evaluator, "evaluate_metrics") as evaluate:
+                result = scorer.score_result(self.result(condition=condition, plan=plan))
                 evaluate.assert_not_called()
-                for field in ("condition", "plan"):
-                    self.assert_unscored(result["evaluation"][field], "missing_generation")
+                for entry in result["evaluation"]:
+                    for field in ("condition", "plan"):
+                        self.assert_unscored(entry[field], "missing_generation")
         result = {"id": "patient-a", "status": "failed_incomplete"}
         scorer.score_result(result)
         self.assertEqual(result["status"], "failed_incomplete")
+        for entry in result["evaluation"]:
+            for field in ("condition", "plan"):
+                self.assert_unscored(entry[field], "missing_generation")
 
-    def test_nonstring_generation_error_does_not_block_other_field(self):
+    def test_wrong_prediction_containers_and_counts_are_errors_not_truncated_or_coerced(self):
+        pair = {"condition": "D", "plan": ["P"]}
+        for predictions in ("text", {}, True, 1, [], [pair], [pair] * 2, [pair] * 4, (pair,) * 3):
+            with self.subTest(predictions=predictions), patch.object(Evaluator, "evaluate_metrics") as evaluate:
+                result = self.scorer().score_result(self.result(predictions=predictions))
+                evaluate.assert_not_called()
+                for entry in result["evaluation"]:
+                    for field in ("condition", "plan"):
+                        self.assert_unscored(entry[field], "error")
+                        self.assertEqual(entry[field]["error"]["type"], "TypeError")
+
+    def test_wrong_pair_structure_only_blocks_its_own_rank(self):
+        for pair in (None, [], "D", 1, {"condition": "D", "plan": ["P"], "extra": "bad"}):
+            with self.subTest(pair=pair), patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+                result = self.scorer().score_result(self.result(predictions=[
+                    {"condition": "D1", "plan": ["P1"]}, pair, {"condition": "D3", "plan": ["P3"]},
+                ]))
+                self.assertEqual(evaluate.call_count, 4)
+                for field in ("condition", "plan"):
+                    self.assertEqual(result["evaluation"][0][field]["status"], "scored")
+                    self.assert_unscored(result["evaluation"][1][field], "error")
+                    self.assertEqual(result["evaluation"][2][field]["status"], "scored")
+
+    def test_missing_pair_fields_are_independent_and_do_not_shift_ranks(self):
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
-            result = self.scorer().score_result(self.result(assessment={"diagnosis": "A"}))
-        self.assertEqual(evaluate.call_count, 1)
-        self.assert_unscored(result["evaluation"]["condition"], "error")
-        self.assertEqual(result["evaluation"]["condition"]["error"]["type"], "TypeError")
-        self.assertEqual(result["evaluation"]["plan"]["status"], "scored")
+            result = self.scorer().score_result(self.result(predictions=[
+                {"condition": "D1"}, {"plan": ["P2"]}, {},
+            ]))
+        self.assertEqual([call.args[1] for call in evaluate.call_args_list], [["D1"], ["P2"]])
+        self.assertEqual(result["evaluation"][0]["condition"]["status"], "scored")
+        self.assert_unscored(result["evaluation"][0]["plan"], "missing_generation")
+        self.assert_unscored(result["evaluation"][1]["condition"], "missing_generation")
+        self.assertEqual(result["evaluation"][1]["plan"]["status"], "scored")
+        for field in ("condition", "plan"):
+            self.assert_unscored(result["evaluation"][2][field], "missing_generation")
 
-    def test_each_metric_failure_leaves_nulls_and_attempts_the_other_field(self):
-        with patch.object(Evaluator, "evaluate_metrics", side_effect=[RuntimeError("model failed"), self.metrics]):
-            result = self.scorer().score_result(self.result())
-        self.assert_unscored(result["evaluation"]["condition"], "error")
-        self.assertEqual(result["evaluation"]["condition"]["error"],
-                         {"type": "RuntimeError", "message": "model failed"})
-        self.assertEqual(result["evaluation"]["plan"]["metrics"], self.metrics)
-        self.assertEqual(result["status"], "completed")
-        with patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics, OSError("cache missing")]):
-            result = self.scorer().score_result(self.result())
-        self.assertEqual(result["evaluation"]["condition"]["status"], "scored")
-        self.assert_unscored(result["evaluation"]["plan"], "error")
+    def test_nonstring_condition_error_does_not_block_other_fields_or_ranks(self):
+        for condition in ({"diagnosis": "A"}, ["A"], 1, True):
+            with self.subTest(condition=condition):
+                predictions = [{"condition": "D", "plan": ["P"]} for _ in range(3)]
+                predictions[1]["condition"] = condition
+                with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+                    result = self.scorer().score_result(self.result(predictions=predictions))
+                self.assertEqual(evaluate.call_count, 5)
+                self.assert_unscored(result["evaluation"][1]["condition"], "error")
+                self.assertEqual(result["evaluation"][1]["condition"]["error"]["type"], "TypeError")
+                self.assertEqual(result["evaluation"][1]["plan"]["status"], "scored")
+
+    def test_invalid_plan_types_and_overlong_lists_are_rank_local_errors(self):
+        for plan in ("P", "", " \n", 1, True, {}, ("P",), [None], [1], [True], ["P", {}], ["P"] * 4):
+            with self.subTest(plan=plan):
+                predictions = [{"condition": "D", "plan": ["P"]} for _ in range(3)]
+                predictions[1]["plan"] = plan
+                with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+                    result = self.scorer().score_result(self.result(predictions=predictions))
+                self.assertEqual(evaluate.call_count, 5)
+                self.assertEqual(result["evaluation"][1]["condition"]["status"], "scored")
+                self.assert_unscored(result["evaluation"][1]["plan"], "error")
+                self.assertEqual(result["evaluation"][1]["plan"]["error"]["type"], "TypeError")
+
+    def test_each_metric_failure_leaves_nulls_and_attempts_other_fields_and_ranks(self):
+        for position in range(6):
+            with self.subTest(position=position):
+                effects = [self.metrics] * 6
+                effects[position] = RuntimeError("model failed")
+                with patch.object(Evaluator, "evaluate_metrics", side_effect=effects) as evaluate:
+                    result = self.scorer().score_result(self.result())
+                self.assertEqual(evaluate.call_count, 6)
+                for index, entry in enumerate(result["evaluation"]):
+                    for offset, field in enumerate(("condition", "plan")):
+                        if index * 2 + offset == position:
+                            self.assert_unscored(entry[field], "error")
+                            self.assertEqual(entry[field]["error"], {"type": "RuntimeError", "message": "model failed"})
+                        else:
+                            self.assertEqual(entry[field]["metrics"], self.metrics)
+                self.assertEqual(result["status"], "completed")
 
     def test_invalid_metric_shapes_and_values_are_saved_as_errors(self):
         bad = [None, [], {}, {**self.metrics, "extra": 0},
@@ -263,11 +404,14 @@ class PatientScorerTests(unittest.TestCase):
                 (True, False, None, "0.4", float("nan"), float("inf"), -float("inf"), 1j)]
         for metrics in bad:
             with self.subTest(metrics=metrics):
-                with patch.object(Evaluator, "evaluate_metrics", side_effect=[metrics, self.metrics]) as evaluate:
+                with patch.object(Evaluator, "evaluate_metrics", side_effect=[metrics] + [self.metrics] * 5) as evaluate:
                     result = self.scorer().score_result(self.result())
-                self.assertEqual(evaluate.call_count, 2)
-                self.assert_unscored(result["evaluation"]["condition"], "error")
-                self.assertEqual(result["evaluation"]["plan"]["status"], "scored")
+                self.assertEqual(evaluate.call_count, 6)
+                self.assert_unscored(result["evaluation"][0]["condition"], "error")
+                for entry in result["evaluation"][1:]:
+                    for field in ("condition", "plan"):
+                        self.assertEqual(entry[field]["status"], "scored")
+                self.assertEqual(result["evaluation"][0]["plan"]["status"], "scored")
                 json.dumps(result, allow_nan=False)
 
     def test_numpy_numbers_and_out_of_unit_interval_values_are_preserved_as_floats(self):
@@ -275,31 +419,32 @@ class PatientScorerTests(unittest.TestCase):
         metrics["BLEU"] = np.int64(2)
         with patch.object(Evaluator, "evaluate_metrics", return_value=metrics):
             result = self.scorer().score_result(self.result())
-        self.assertEqual(result["evaluation"]["condition"]["metrics"]["BLEU"], 2.0)
-        self.assertEqual(result["evaluation"]["plan"]["metrics"]["BERTScore_F1"], -0.25)
-        self.assertTrue(all(type(value) is float for value in result["evaluation"]["plan"]["metrics"].values()))
+        for entry in result["evaluation"]:
+            self.assertEqual(entry["condition"]["metrics"]["BLEU"], 2.0)
+            self.assertEqual(entry["plan"]["metrics"]["BERTScore_F1"], -0.25)
+            for field in ("condition", "plan"):
+                self.assertTrue(all(type(value) is float for value in entry[field]["metrics"].values()))
         json.dumps(result, allow_nan=False)
 
-    def test_interrupt_marks_current_field_and_propagates(self):
+    def test_interrupt_marks_only_current_field_and_preserves_prior_and_pending_ranks(self):
         for exception in (KeyboardInterrupt("cancelled"), SystemExit(4)):
-            with self.subTest(exception=exception):
-                result = self.result()
-                with patch.object(Evaluator, "evaluate_metrics", side_effect=exception) as evaluate:
-                    with self.assertRaises(type(exception)):
-                        self.scorer().score_result(result)
-                self.assertEqual(evaluate.call_count, 1)
-                self.assert_unscored(result["evaluation"]["condition"], "interrupted")
-                self.assert_unscored(result["evaluation"]["plan"], "pending")
-                self.assertEqual(result["status"], "completed")
-                json.dumps(result, allow_nan=False)
-
-    def test_plan_interrupt_keeps_completed_condition(self):
-        result = self.result()
-        with patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics, KeyboardInterrupt()]):
-            with self.assertRaises(KeyboardInterrupt):
-                self.scorer().score_result(result)
-        self.assertEqual(result["evaluation"]["condition"]["status"], "scored")
-        self.assert_unscored(result["evaluation"]["plan"], "interrupted")
+            for position in range(6):
+                with self.subTest(exception=exception, position=position):
+                    result = self.result()
+                    effects = [self.metrics] * position + [exception]
+                    with patch.object(Evaluator, "evaluate_metrics", side_effect=effects) as evaluate:
+                        with self.assertRaises(type(exception)):
+                            self.scorer().score_result(result)
+                    self.assertEqual(evaluate.call_count, position + 1)
+                    for index, entry in enumerate(result["evaluation"]):
+                        for offset, field in enumerate(("condition", "plan")):
+                            metric_position = index * 2 + offset
+                            if metric_position < position:
+                                self.assertEqual(entry[field]["status"], "scored")
+                            else:
+                                self.assert_unscored(entry[field], "interrupted" if metric_position == position else "pending")
+                    self.assertEqual(result["status"], "completed")
+                    json.dumps(result, allow_nan=False)
 
     def test_unselected_and_unknown_results_are_rejected(self):
         scorer = self.scorer()
@@ -320,8 +465,13 @@ class PatientScorerTests(unittest.TestCase):
         self.assertEqual(metadata["input_patient_count"], 2)
         self.assertEqual(metadata["selected_patient_count"], 1)
         self.assertTrue(metadata["presenting_evidence_only"])
-        self.assertEqual(metadata["settings"]["aggregation"], "per_patient_per_field_singleton")
+        self.assertEqual(metadata["settings"]["aggregation"], "per_patient_per_rank_per_field_singleton")
         self.assertEqual(metadata["settings"]["lang"], "en")
+        self.assertEqual(metadata["settings"]["prediction_count"], 3)
+        self.assertEqual(metadata["settings"]["plan_item_limit"], 3)
+        self.assertIsNone(metadata["settings"]["rank_weighting"])
+        self.assertEqual(metadata["settings"]["generated_plan"],
+                         "join original generated items with comma and space")
         self.assertNotIn("model_revision", metadata)
         self.assertNotIn("subjective", json.dumps(metadata))
         json.dumps(metadata, allow_nan=False)
@@ -350,8 +500,8 @@ class PatientScorerTests(unittest.TestCase):
             self.assertEqual(len(references), 1)
             return bert_f1, bert_f1, bert_f1
         with patch("med_copilot.upstream.evaluate_metrics.bert_score", side_effect=bert) as bert_call:
-            result = self.scorer().score_result(self.result(assessment=candidate_a, plan=candidate_p))
-        self.assertEqual(bert_call.call_count, 2)
+            result = self.scorer().score_result(self.result(condition=candidate_a, plan=[candidate_p]))
+        self.assertEqual(bert_call.call_count, 6)
         scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
         for field, reference, candidate in (("condition", reference_a, candidate_a),
                                              ("plan", reference_p, candidate_p)):
@@ -364,8 +514,9 @@ class PatientScorerTests(unittest.TestCase):
                 "ROUGE-L": expected_rouge["rougeL"].fmeasure,
                 "BERTScore_F1": float(bert_f1.mean()),
             }
-            self.assertEqual(result["evaluation"][field]["status"], "scored")
-            self.assertEqual(result["evaluation"][field]["metrics"], expected)
+            for entry in result["evaluation"]:
+                self.assertEqual(entry[field]["status"], "scored")
+                self.assertEqual(entry[field]["metrics"], expected)
 
     def test_known_lexical_scores_preserve_short_bleu_and_meteor_penalty(self):
         try:
@@ -378,10 +529,10 @@ class PatientScorerTests(unittest.TestCase):
         with patch("med_copilot.upstream.evaluate_metrics.bert_score",
                    return_value=(bert_values, bert_values, bert_values)) as bert:
             result = self.scorer().score_result(
-                self.result(assessment="acute bronchitis", plan="one two three four"),
+                self.result(condition="acute bronchitis", plan=["one two three four"]),
             )
-        condition_metrics = result["evaluation"]["condition"]["metrics"]
-        plan_metrics = result["evaluation"]["plan"]["metrics"]
+        condition_metrics = result["evaluation"][0]["condition"]["metrics"]
+        plan_metrics = result["evaluation"][0]["plan"]["metrics"]
         self.assertEqual(condition_metrics["BLEU"], 0.0)
         self.assertEqual(condition_metrics["METEOR"], 0.9375)
         self.assertAlmostEqual(plan_metrics["BLEU"], 1.0)
@@ -389,8 +540,11 @@ class PatientScorerTests(unittest.TestCase):
         for metrics in (condition_metrics, plan_metrics):
             self.assertEqual([metrics[key] for key in ("ROUGE-1", "ROUGE-2", "ROUGE-L")], [1.0] * 3)
             self.assertEqual(metrics["BERTScore_F1"], 0.5)
-        self.assertEqual(bert.call_args_list[0].kwargs, {"lang": "en"})
-        self.assertEqual(bert.call_args_list[1].kwargs, {"lang": "en"})
+        self.assertEqual(bert.call_count, 6)
+        self.assertEqual([call.kwargs for call in bert.call_args_list], [{"lang": "en"}] * 6)
+        for entry in result["evaluation"]:
+            self.assertEqual(entry["condition"]["metrics"], condition_metrics)
+            self.assertEqual(entry["plan"]["metrics"], plan_metrics)
 
 
 class ScoringArgumentTests(unittest.TestCase):

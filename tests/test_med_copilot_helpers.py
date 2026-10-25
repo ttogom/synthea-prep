@@ -30,7 +30,7 @@ HELPERS = ROOT / "scripts/med_copilot_helpers.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot/upstream/create_embeddings.py"
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
 RESULT_FIELDS = [
-    "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "id", "status", "predictions", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
     "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
     "reranked_patient_ids", "model_responses", "evaluation",
@@ -380,7 +380,7 @@ class HelperImportTests(unittest.TestCase):
             "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "git_branch", "git_commit",
             "graphrag_context_json", "guideline_resource_files", "load_patient_records",
             "make_run_name", "new_patient_result", "pacific_now", "pacific_time",
-            "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
+            "parse_condition_plan", "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
             "write_run_json", "model_response_metadata", "reference_patient_identity",
@@ -849,9 +849,17 @@ class PatientOutputHelperTests(unittest.TestCase):
 
     def test_evaluation_starts_null_and_does_not_leak_between_patients(self):
         first = H["new_patient_result"]("first")
-        first["evaluation"] = {"condition": {"status": "scored", "metrics": {"BLEU": 0.0}}}
+        first["evaluation"] = [{"rank": 1, "condition": {"status": "scored", "metrics": {"BLEU": 0.0}}}]
         self.assertIsNone(H["new_patient_result"]("second")["evaluation"])
         self.assertIsNone(H["new_patient_result"]("unstarted", "not_processed")["evaluation"])
+
+    def test_generated_predictions_start_null_including_unstarted_patients(self):
+        for status in (None, "not_processed", "failed_incomplete"):
+            with self.subTest(status=status):
+                result = H["new_patient_result"]("patient", status)
+                self.assertIsNone(result["predictions"])
+                for legacy in ("assessment", "condition", "plan"):
+                    self.assertNotIn(legacy, result)
 
     def test_selected_reference_patient_follows_rerank_scores_not_candidate_order(self):
         corpus = [{"note_id": f"N{row}"} for row in range(4)]
@@ -1010,6 +1018,177 @@ class PatientOutputHelperTests(unittest.TestCase):
                 self.assertEqual(H["run_status"](statuses, stopped=stopped), expected)
 
 
+class ParseConditionPlanTests(unittest.TestCase):
+    def parse(self, payload):
+        return H["parse_condition_plan"](json.dumps(payload, ensure_ascii=False))
+
+    def payload(self):
+        return {"predictions": [
+            {"condition": "A", "plan": ["P"]},
+            {"condition": "B", "plan": []},
+            {"condition": "C", "plan": ["Q", "R", "S"]},
+        ]}
+
+    def test_valid_values_preserve_rank_whitespace_duplicates_and_unicode(self):
+        pair = {"condition": "  acute_bronchitis café\u2028左腕\n\t ",
+                "plan": ["  Rest\nnow  ", "Drink fluids\u2029after lunch", "  Rest\nnow  "]}
+        expected = {"predictions": [pair, {"condition": "Other", "plan": []}, pair]}
+        raw = " \n\t" + json.dumps(expected, ensure_ascii=False) + "\r\n "
+        parsed = H["parse_condition_plan"](raw)
+        self.assertEqual(parsed, expected)
+        self.assertEqual(list(parsed), ["predictions"])
+        self.assertEqual(list(parsed["predictions"][0]), ["condition", "plan"])
+        self.assertEqual(raw, " \n\t" + json.dumps(expected, ensure_ascii=False) + "\r\n ")
+
+    def test_pair_key_order_does_not_change_fields(self):
+        payload = self.payload()
+        payload["predictions"][1] = {"plan": ["Rest"], "condition": "bronchitis"}
+        self.assertEqual(self.parse(payload), payload)
+
+    def test_empty_plan_lists_and_all_lengths_through_three_are_valid(self):
+        for count in range(4):
+            with self.subTest(count=count):
+                payload = self.payload()
+                for pair in payload["predictions"]:
+                    pair["plan"] = [f"Action {index}" for index in range(count)]
+                self.assertEqual(self.parse(payload), payload)
+
+    def test_returned_lists_do_not_leak_mutations_between_calls(self):
+        payload = self.payload()
+        first = self.parse(payload)
+        first["predictions"][1]["plan"].append("changed after parsing")
+        first["predictions"].reverse()
+        self.assertEqual(self.parse(payload), payload)
+
+    def test_root_requires_exactly_the_predictions_key(self):
+        for payload in ({}, {"condition": "A", "plan": ["P"]},
+                        {**self.payload(), "reasoning": "why"},
+                        {"Predictions": self.payload()["predictions"]}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.parse(payload), {"predictions": None})
+
+    def test_predictions_must_be_a_list_of_exactly_three_without_truncation(self):
+        pairs = self.payload()["predictions"]
+        for predictions in (None, False, 3, "A", {}, [], pairs[:1], pairs[:2], pairs + pairs[:1]):
+            with self.subTest(predictions=predictions):
+                self.assertEqual(self.parse({"predictions": predictions}), {"predictions": None})
+
+    def test_missing_pair_fields_are_independently_null_at_each_rank(self):
+        for rank in range(3):
+            for pair, expected in [
+                ({}, {"condition": None, "plan": None}),
+                ({"condition": "A"}, {"condition": "A", "plan": None}),
+                ({"plan": ["P"]}, {"condition": None, "plan": ["P"]}),
+                ({"plan": []}, {"condition": None, "plan": []}),
+            ]:
+                with self.subTest(rank=rank, pair=pair):
+                    payload = self.payload()
+                    payload["predictions"][rank] = pair
+                    parsed = self.parse(payload)
+                    self.assertEqual(parsed["predictions"][rank], expected)
+                    for other in set(range(3)) - {rank}:
+                        self.assertEqual(parsed["predictions"][other], payload["predictions"][other])
+
+    def test_invalid_condition_retains_its_valid_plan_and_other_ranks(self):
+        for condition in (None, False, True, 3, 1.5, [], {}, "", " \n\t", ["A", "B", "C"]):
+            with self.subTest(condition=condition):
+                payload = self.payload()
+                payload["predictions"][1] = {"condition": condition, "plan": ["Rest"]}
+                expected = self.payload()
+                expected["predictions"][1] = {"condition": None, "plan": ["Rest"]}
+                self.assertEqual(self.parse(payload), expected)
+
+    def test_invalid_plan_or_any_invalid_item_retains_its_valid_condition(self):
+        invalid_plans = (None, "Rest", {}, False, 4, 1.5, [None], [False], [2], [[]], [{}],
+                         [""], [" \n\t"], ["Rest", None], ["Rest", ""], ["P"] * 4)
+        for rank in range(3):
+            for plan in invalid_plans:
+                with self.subTest(rank=rank, plan=plan):
+                    payload = self.payload()
+                    payload["predictions"][rank]["plan"] = plan
+                    expected = self.payload()
+                    expected["predictions"][rank]["plan"] = None
+                    self.assertEqual(self.parse(payload), expected)
+
+    def test_nonobject_and_extra_key_pairs_null_only_the_affected_rank(self):
+        invalid_pairs = (None, False, 2, "A", [], ["A", "P"],
+                         {"condition": "A", "plan": ["P"], "reasoning": "why"},
+                         {"Condition": "A", "plan": ["P"]})
+        for rank in range(3):
+            for pair in invalid_pairs:
+                with self.subTest(rank=rank, pair=pair):
+                    payload = self.payload()
+                    payload["predictions"][rank] = pair
+                    expected = self.payload()
+                    expected["predictions"][rank] = {"condition": None, "plan": None}
+                    self.assertEqual(self.parse(payload), expected)
+
+    def test_both_invalid_pair_fields_are_null(self):
+        payload = self.payload()
+        payload["predictions"][0] = {"condition": " ", "plan": [None]}
+        expected = self.payload()
+        expected["predictions"][0] = {"condition": None, "plan": None}
+        self.assertEqual(self.parse(payload), expected)
+
+    def test_nonobject_json_is_globally_invalid(self):
+        for payload in (None, [], ["A", "P"], "condition", 1, 1.5, True, False):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.parse(payload), {"predictions": None})
+
+    def test_malformed_fenced_or_markdown_responses_are_not_recovered(self):
+        valid = json.dumps(self.payload())
+        for response in ("", " \n\t", "I cannot answer this request.",
+                         f"```json\n{valid}\n```", f"```\n{valid}\n```", f"Reply: {valid}",
+                         f"{valid}\nExtra explanation", valid + valid, valid[:-1],
+                         '{"predictions":[{"condition":"A", "plan":["P",]}]}',
+                         "## Assessment\nA\n## Plan\nP", "Assessment:\nA\nPlan:\nP"):
+            with self.subTest(response=response):
+                self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+
+    def test_nontext_including_refusal_none_is_not_decoded_or_coerced(self):
+        for response in (None, False, 12, {}, self.payload(), ["A", "P"],
+                         json.dumps(self.payload()).encode("utf-8")):
+            with self.subTest(response=response):
+                self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+
+    def test_duplicate_json_keys_including_escaped_and_nested_keys_invalidate_every_rank(self):
+        valid_pair = '{"condition":"B","plan":[]}'
+        for pair in (
+            '{"condition":"A","condition":"B","plan":["P"]}',
+            '{"condition":"A","plan":["P"],"plan":["Q"]}',
+            '{"condition":"A","plan":["P"],"pl\\u0061n":["Q"]}',
+            '{"condition":"A","plan":[{"step":"P","step":"Q"}]}',
+            '{"condition":{"name":"A","name":"B"},"plan":["P"]}',
+        ):
+            response = '{"predictions":[' + valid_pair + ',' + valid_pair + ',' + pair + ']}'
+            with self.subTest(response=response):
+                self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+        response = json.dumps(self.payload())[:-1] + ',"predictions":[]}'
+        self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+
+    def test_nonfinite_constants_and_overflow_anywhere_are_globally_invalid(self):
+        valid_pair = '{"condition":"B","plan":[]}'
+        for constant in ("NaN", "Infinity", "-Infinity", "1e309", "-1e9999"):
+            for pair in (
+                '{"condition":' + constant + ',"plan":["P"]}',
+                '{"condition":"A","plan":[' + constant + "]}",
+                '{"condition":"A","plan":[{"extra":' + constant + "}]}",
+            ):
+                response = '{"predictions":[' + valid_pair + ',' + pair + ',' + valid_pair + ']}'
+                with self.subTest(response=response):
+                    self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+
+    def test_none_recorded_remains_verbatim_within_each_rank(self):
+        payload = self.payload()
+        for pair in payload["predictions"]:
+            pair["plan"] = ["none recorded"]
+        self.assertEqual(self.parse(payload), payload)
+
+    def test_excessively_nested_json_is_null_instead_of_interrupting_the_patient(self):
+        response = '{"predictions":' + "[" * 10000 + "]" * 10000 + "}"
+        self.assertEqual(H["parse_condition_plan"](response), {"predictions": None})
+
+
 class RunFileTests(TemporaryRootTestCase):
     def test_write_run_json_replaces_atomically_and_leaves_no_temporary_file(self):
         H["write_run_json"](self.root, {"status": "running", "name": "café"})
@@ -1092,7 +1271,10 @@ class ExperimentRunTests(TemporaryRootTestCase):
 
     def test_save_result_appends_one_physical_line_per_patient(self):
         run = self.start(["a", "b"])
-        first = self.result("a", assessment="line café x", plan="- y")
+        first = self.result("a", predictions=[
+            {"condition": "line café x", "plan": ["- y", "same", "same"]}
+            for _ in range(3)
+        ])
         run.save_result(first)
         _, results, text = self.read(run)
         self.assertEqual(results, [first])
@@ -1106,15 +1288,51 @@ class ExperimentRunTests(TemporaryRootTestCase):
 
     def test_save_result_preserves_null_and_zero_evaluation_values(self):
         run = self.start(["a"])
-        evaluation = {
+        evaluation = [{
+            "rank": rank,
             "condition": {"status": "scored", "metrics": {"BLEU": 0.0}, "error": None},
             "plan": {"status": "skipped_no_recorded_plan", "metrics": {"BLEU": None}, "error": None},
-        }
-        run.save_result(self.result("a", assessment="A", plan="P", evaluation=evaluation))
+        } for rank in range(1, 4)]
+        predictions = [{"condition": "A", "plan": ["P"]} for _ in range(3)]
+        run.save_result(self.result("a", predictions=predictions, evaluation=evaluation))
         saved = self.read(run)[1][0]
         self.assertEqual(saved["evaluation"], evaluation)
-        self.assertEqual((saved["assessment"], saved["plan"]), ("A", "P"))
+        self.assertEqual(saved["predictions"], predictions)
         self.assertNotIn("NaN", self.read(run)[2])
+
+    def test_parsed_ranked_predictions_are_saved_as_strict_nested_json(self):
+        run = self.start(["a", "b"])
+        fields = {"predictions": [
+            {"condition": f" café\u2028pneumonia {rank}\n ",
+             "plan": [" Rest\n ", "Drink fluids\u2029now", " Rest\n "]}
+            for rank in range(3)
+        ]}
+        raw = json.dumps(fields, ensure_ascii=False)
+        evaluation = [{
+            "rank": rank,
+            "condition": {"status": "scored", "metrics": {"BLEU": 0.0}, "error": None},
+            "plan": {"status": "missing_generation", "metrics": {"BLEU": None}, "error": None},
+        } for rank in range(1, 4)]
+        result = self.result("a", assessment_plan_raw=raw, evaluation=evaluation,
+                             **H["parse_condition_plan"](raw))
+        run.save_result(result)
+        saved = self.read(run)[1][0]
+        self.assertEqual({key: saved[key] for key in fields}, fields)
+        self.assertIsInstance(saved["predictions"], list)
+        self.assertEqual(len(saved["predictions"]), 3)
+        for pair in saved["predictions"]:
+            self.assertIsInstance(pair["plan"], list)
+        self.assertEqual(saved["assessment_plan_raw"], raw)
+        self.assertEqual(saved["evaluation"], evaluation)
+        for legacy in ("assessment", "condition", "plan"):
+            self.assertNotIn(legacy, saved)
+        self.assertEqual(self.read(run)[2].count("\n"), 1)
+        self.assertEqual(json.dumps(saved, allow_nan=False, ensure_ascii=False),
+                         json.dumps(result, allow_nan=False, ensure_ascii=False))
+        run.save_result(self.result("b", predictions=[
+            {"condition": "normal", "plan": []} for _ in range(3)
+        ]))
+        self.assertEqual([pair["plan"] for pair in self.read(run)[1][1]["predictions"]], [[], [], []])
 
     def test_save_result_rejects_invalid_status_unknown_and_duplicate_patients(self):
         run = self.start(["a"])
@@ -1133,7 +1351,9 @@ class ExperimentRunTests(TemporaryRootTestCase):
     def test_unserializable_result_is_not_written_and_writing_continues(self):
         run = self.start(["a", "b"])
         with self.assertRaises(ValueError):
-            run.save_result(self.result("a", assessment=float("nan")))
+            run.save_result(self.result("a", predictions=[
+                {"condition": float("nan"), "plan": []} for _ in range(3)
+            ]))
         self.assertTrue(run.results_writable)
         run.save_result(self.result("a"))
         self.assertEqual([record["id"] for record in self.read(run)[1]], ["a"])
@@ -1172,12 +1392,13 @@ class ExperimentRunTests(TemporaryRootTestCase):
     def test_stop_marks_current_failed_keeps_partial_outputs_and_rest_not_processed(self):
         run = self.start(["a", "b", "c"])
         run.save_result(self.result("a"))
-        current = self.result("b", None, guideline_questions=["Q?"], assessment="A only")
+        partial = [{"condition": "A only", "plan": None} for _ in range(3)]
+        current = self.result("b", None, guideline_questions=["Q?"], predictions=partial)
         run.stop(self.finished, current)
         metadata, results, _ = self.read(run)
         self.assertEqual(results, [
             self.result("a"),
-            self.result("b", "failed_incomplete", guideline_questions=["Q?"], assessment="A only"),
+            self.result("b", "failed_incomplete", guideline_questions=["Q?"], predictions=partial),
             self.result("c", "not_processed"),
         ])
         self.assertEqual((metadata["status"], metadata["finished_at"]),

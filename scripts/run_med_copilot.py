@@ -37,6 +37,7 @@ from scripts.med_copilot_observability import capture_graphrag_responses
 from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
 from graphrag.cli.query import run_local_search
 from med_copilot.prompts.diagnosis_plan import (
+    CONDITION_PLAN_RESPONSE_FORMAT,
     KEY_QUESTIONS_TEMPLATE,
     EVALUATE_TEMPLATE_KEYINFO,
 )
@@ -54,7 +55,7 @@ from scripts.med_copilot_helpers import (
     prepare_patient_output_capture,
     reference_data_metadata,
     selected_reference_patient,
-    split_assessment_plan,
+    parse_condition_plan,
     validate_guideline_tables,
 )
 
@@ -146,7 +147,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
     print(key_info)
 
 # %% ------------------------------------------------------------------
-# Generate Assessment / Plan
+# Generate ranked condition / Plan pairs as JSON
 # ---------------------------------------------------------------------
 
     final_prompt = EVALUATE_TEMPLATE_KEYINFO.format(
@@ -173,15 +174,16 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
     final_response = client.chat.completions.create(
         model=model,
         messages=final_messages,
+        response_format=CONDITION_PLAN_RESPONSE_FORMAT,
     )
     result["model_responses"]["assessment_plan"].append(model_response_metadata(final_response))
 
     generated_plan = final_response.choices[0].message.content
     result["assessment_plan_raw"] = generated_plan
-    # Missing, empty, or repeated sections are saved as null; the raw reply keeps them.
-    result.update(split_assessment_plan(generated_plan))
+    # Validate each ranked pair's fields; retain the exact reply for diagnosis.
+    result.update(parse_condition_plan(generated_plan))
 
-    print("\n========== ASSESSMENT AND PLAN ==========\n")
+    print("\n========== RANKED CONDITIONS AND PLANS ==========\n")
     print(generated_plan)
 
 

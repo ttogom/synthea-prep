@@ -58,7 +58,7 @@ LABELS_NAME = "test_sample_labels.jsonl"
 BRANCH = "feature/issue-9"
 SAFE_BRANCH = "feature-issue-9"
 RESULT_FIELDS = [
-    "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "id", "status", "predictions", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
     "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
     "reranked_patient_ids", "model_responses", "evaluation",
@@ -68,6 +68,35 @@ RUN_FIELDS = [
     "reference_data", "evaluation",
 ]
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
+FINAL_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "condition_plan", "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"predictions": {
+                "type": "array", "minItems": 3, "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "condition": {"type": "string"},
+                        "plan": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+                    },
+                    "required": ["condition", "plan"], "additionalProperties": False,
+                },
+            }},
+            "required": ["predictions"], "additionalProperties": False,
+        },
+    },
+}
+
+
+def prediction_pairs(condition="MOCK_DIAGNOSIS", plan=None):
+    """Independent ranked mock answers, preserving each patient's marker."""
+    return [{"condition": condition if rank == 1 else f"{condition} alternative {rank}",
+             "plan": list(["MOCK_FINAL_PLAN"] if plan is None else plan)}
+            for rank in (1, 2, 3)]
+
 LEGACY_OUTPUTS = {
     "top_similar_patient.txt", "questions_for_guidelines_db.txt", "answers_from_guidelines_db.txt",
     "graphrag_context.json", "final_prompt.txt", "final_output.txt",
@@ -274,8 +303,8 @@ class PipelineFixture:
         )
         self.questions = '{"Key Questions": ["Question one?", "Question two?"]}'
         self.guideline_text = "GUIDELINE_RESPONSE_ONLY\nGuideline evidence with café."
-        self.final_output = "## Assessment\nMOCK_DIAGNOSIS\n\n## Plan\n1. MOCK_FINAL_PLAN"
-        self.final_sections = {"assessment": "MOCK_DIAGNOSIS", "plan": "1. MOCK_FINAL_PLAN"}
+        self.final_sections = {"predictions": prediction_pairs()}
+        self.final_output = json.dumps(self.final_sections)
         self.candidates = [{"idx": 0, "id": "candidate-one"}, {"idx": 1, "id": "candidate-two"}]
         # The reranker moves the second candidate (corpus row 1) to the top.
         self.rerank_scores = [0.2, 0.9]
@@ -370,7 +399,7 @@ class PipelineFixture:
         def completion(**kwargs):
             fixture.calls.append(kwargs)
             fixture.completion_cwds.append(Path.cwd())
-            stage = "questions" if "response_format" in kwargs else "final"
+            stage = "questions" if kwargs.get("response_format") == {"type": "json_object"} else "final"
             prompt = kwargs["messages"][-1]["content"]
             fixture.fail_at(stage, prompt)
             content = fixture.questions if stage == "questions" else fixture.final_output
@@ -856,7 +885,7 @@ class RunMedCopilotTests(unittest.TestCase):
             {"role": "user", "content": PROMPTS["KEY_QUESTIONS_TEMPLATE"].format(conditions=fixture.conditions)},
         ])
         self.assertEqual(fixture.calls[0]["response_format"], {"type": "json_object"})
-        self.assertNotIn("response_format", fixture.calls[1])
+        self.assertEqual(fixture.calls[1]["response_format"], FINAL_RESPONSE_FORMAT)
         init, search = fixture.retrieval_calls
         self.assertEqual(init[1].to_dict(orient="records"), fixture.corpus)
         self.assertEqual(init[2:], (0.5, fixture.artifacts))
@@ -1282,8 +1311,8 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 1)
         run_dir, run, results = self.read_run()
         self.assertEqual(results, [{
-            **self.expected_result(), "status": "failed_incomplete", "assessment": None,
-            "plan": None, "assessment_plan_raw": None, "guideline_evidence": None,
+            **self.expected_result(), "status": "failed_incomplete", "predictions": None,
+            "assessment_plan_raw": None, "guideline_evidence": None,
             "graphrag_context": None, "assessment_plan_prompts": None,
         }])
         self.assert_run_metadata(run_dir, run, "completed_with_errors")
@@ -1476,7 +1505,7 @@ class RunMedCopilotTests(unittest.TestCase):
                                  "No reference patient available."]:
                     self.assertIn(evidence, final_prompt)
                 self.assertIn("If no reference patient is available", final_prompt)
-                self.assertIn("generate both Assessment and Plan from the patient's Subjective and Objective",
+                self.assertIn("identify the three conditions and their respective plans from the patient's Subjective and Objective",
                               final_prompt)
                 self.assertIn("any relevant additional information", final_prompt)
                 self.assertNotIn("SELECTED_SIMILAR_CASE", final_prompt)
@@ -1560,7 +1589,7 @@ class RunMedCopilotTests(unittest.TestCase):
         run_dir, run, results = self.read_run()
         self.assertEqual(results, [{
             **self.expected_result(reference_text="No reference patient available.", reference=None),
-            "status": "failed_incomplete", "assessment": None, "plan": None,
+            "status": "failed_incomplete", "predictions": None,
             "assessment_plan_raw": None,
         }])
         self.assertIn("No reference patient available.",
@@ -1571,38 +1600,63 @@ class RunMedCopilotTests(unittest.TestCase):
         ])
         self.assert_run_metadata(run_dir, run, "completed_with_errors")
 
-    def test_unusable_assessment_plan_sections_are_null_and_the_raw_reply_is_kept(self):
-        # Format validation is out of scope: a reply that cannot be split still completes,
-        # and expected_result() requires assessment_plan_raw to equal the reply exactly.
+    def test_invalid_ranked_json_keeps_raw_reply_and_independent_pairs_and_fields(self):
+        # Provider replies remain captured even when they violate the requested schema.
         fixture_root = self.fixture.root
-        for name, content, sections in [
-            ("empty", "", (None, None)),
-            ("whitespace", " \n\t", (None, None)),
-            ("no_content", None, (None, None)),
-            ("unrecognized_labels", "Impression:\nDx\nRecommendations:\nRx", (None, None)),
-            ("combined_heading", "## Assessment and Plan\nDx; Rx", (None, None)),
-            ("plain_labels", "Assessment:\nDx\n\nPlan:\nRx", ("Dx", "Rx")),
-            ("assessment_only", "## Assessment\nDx café", ("Dx café", None)),
-            ("empty_plan", "## Assessment\nDx\n## Plan\n \n", ("Dx", None)),
-            ("repeated_assessment", "## Assessment\nA\n## Plan\nRx\n## Assessment\nB",
-             (None, "Rx")),
+        valid = prediction_pairs("Dx", ["Rx"])
+        missing = {"condition": None, "plan": None}
+        cases = [
+            ("empty", "", None), ("whitespace", " \n\t", None), ("no_content", None, None),
+            ("markdown", "## Assessment\nDx\n## Plan\nRx", None),
+            ("malformed", '{"predictions": [', None),
+            ("fenced", '```json\n' + json.dumps({"predictions": valid}) + '\n```', None),
+            ("root_array", json.dumps(valid), None),
+            ("legacy_shape", '{"condition":"Dx","plan":["Rx"]}', None),
+            ("missing_predictions", '{}', None),
+            ("too_few", json.dumps({"predictions": valid[:2]}), None),
+            ("too_many", json.dumps({"predictions": valid + valid[:1]}), None),
+            ("extra_root_key", json.dumps({"predictions": valid, "reason": "why"}), None),
+            ("valid", json.dumps({"predictions": valid}), valid),
+        ]
+        for name, pair, expected in [
+            ("condition_only", {"condition": "Dx café"}, {"condition": "Dx café", "plan": None}),
+            ("plan_only", {"plan": ["Rx"]}, {"condition": None, "plan": ["Rx"]}),
+            ("empty_plan", {"condition": "Dx", "plan": []}, {"condition": "Dx", "plan": []}),
+            ("wrong_condition", {"condition": ["Dx"], "plan": ["Rx"]},
+             {"condition": None, "plan": ["Rx"]}),
+            ("wrong_plan", {"condition": "Dx", "plan": "Rx"}, {"condition": "Dx", "plan": None}),
+            ("wrong_plan_item", {"condition": "Dx", "plan": ["Rx", 1]},
+             {"condition": "Dx", "plan": None}),
+            ("overlong_plan", {"condition": "Dx", "plan": ["Rx"] * 4},
+             {"condition": "Dx", "plan": None}),
+            ("extra_pair_key", {"condition": "Dx", "plan": ["Rx"], "reason": "why"}, missing),
+            ("nonobject_pair", ["Dx", "Rx"], missing),
         ]:
+            cases.append((name, json.dumps({"predictions": [pair, *valid[1:]]}),
+                          [expected, *valid[1:]]))
+        tail = ','.join(json.dumps(pair) for pair in valid[1:])
+        for name, first in [
+            ("duplicate_condition", '{"condition":"A","plan":["Rx"],"condition":"B"}'),
+            ("nonfinite", '{"condition":"Dx","plan":[NaN]}'),
+        ]:
+            cases.append((name, '{"predictions":[' + first + ',' + tail + ']}', None))
+        for name, content, predictions in cases:
             with self.subTest(case=name):
                 self.fixture = PipelineFixture(fixture_root / name)
                 fixture = self.fixture
                 fixture.final_output = content
-                fixture.final_sections = dict(zip(("assessment", "plan"), sections))
+                fixture.final_sections = {"predictions": predictions}
                 runner = self.load_runner()
                 with fixture.runtime():
                     self.assertEqual(runner["main"](), "completed")
                 self.assert_outputs()
 
-    def test_raw_reply_is_saved_exactly_alongside_its_sections(self):
+    def test_raw_json_and_exact_ranked_pairs_survive_unicode_and_whitespace(self):
         fixture = self.fixture
-        fixture.final_output = ("Here is the note.\r\n\r\n**Assessment (A):**\r\n  Viral URI caf\u00e9\u2028"
-                                "likely  \r\n\r\nPlan:\r\n1. Rest\t\r\n\r\n")
-        fixture.final_sections = {"assessment": "Viral URI caf\u00e9\u2028likely",
-                                  "plan": "1. Rest"}
+        fixture.final_sections = {"predictions": prediction_pairs(
+            "  Viral URI café\u2028likely  ", [" Rest\t", "follow-up\r\nsoon", " Rest\t"])}
+        fixture.final_output = " \r\n" + json.dumps(fixture.final_sections, ensure_ascii=False,
+                                                   indent=2) + "\r\n\t"
         runner = self.load_runner()
         with fixture.runtime():
             self.assertEqual(runner["main"](), "completed")
@@ -1663,13 +1717,13 @@ class RunMedCopilotTests(unittest.TestCase):
     def test_patient_stage_errors_are_isolated_and_keep_partial_outputs(self):
         fixture_root = self.fixture.root
         unavailable = {
-            "retrieval": RESULT_FIELDS[2:10], "keywords": RESULT_FIELDS[2:10],
-            "reranking": RESULT_FIELDS[2:10],
-            "questions": ["assessment", "plan", "assessment_plan_raw", "guideline_questions",
+            "retrieval": RESULT_FIELDS[2:9], "keywords": RESULT_FIELDS[2:9],
+            "reranking": RESULT_FIELDS[2:9],
+            "questions": ["predictions", "assessment_plan_raw", "guideline_questions",
                           "guideline_evidence", "graphrag_context", "assessment_plan_prompts"],
-            "graphrag": ["assessment", "plan", "assessment_plan_raw", "guideline_evidence",
+            "graphrag": ["predictions", "assessment_plan_raw", "guideline_evidence",
                          "graphrag_context", "assessment_plan_prompts"],
-            "final": ["assessment", "plan", "assessment_plan_raw"],
+            "final": ["predictions", "assessment_plan_raw"],
         }
         for stage, expected_calls in [("retrieval", 0), ("keywords", 0), ("reranking", 0),
                                       ("questions", 1), ("graphrag", 1), ("final", 2)]:
@@ -1768,7 +1822,8 @@ class RunMedCopilotTests(unittest.TestCase):
             if stage == "questions":
                 return json.dumps({"Key Questions": [f"{marker} question?"]})
             if stage == "final":
-                return f"## Assessment\n{marker} diagnosis café\n\n## Plan\n{marker} plan end"
+                return json.dumps({"predictions": prediction_pairs(
+                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False)
             return (f"{marker} guideline evidence\nline two",
                     {"sources": pd.DataFrame({"id": [marker], "text": [f"{marker} source\n"]})})
 
@@ -1797,9 +1852,9 @@ class RunMedCopilotTests(unittest.TestCase):
                 **self.expected_capture(),
                 "id": record["id"],
                 "status": "completed",
-                "assessment": f"{marker} diagnosis café",
-                "plan": f"{marker} plan end",
-                "assessment_plan_raw": f"## Assessment\n{marker} diagnosis café\n\n## Plan\n{marker} plan end",
+                "predictions": prediction_pairs(f"{marker} diagnosis café", [f"{marker} plan end"]),
+                "assessment_plan_raw": json.dumps({"predictions": prediction_pairs(
+                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False),
                 "selected_reference_patient": fixture.reference,
                 "guideline_questions": [f"{marker} question?"],
                 "guideline_evidence": evidence,
@@ -1815,7 +1870,7 @@ class RunMedCopilotTests(unittest.TestCase):
             serialized = json.dumps(result, ensure_ascii=False)
             for other in others:
                 self.assertNotIn(other, serialized)
-        final_calls = [call for call in fixture.calls if "response_format" not in call]
+        final_calls = [call for call in fixture.calls if call.get("response_format") == FINAL_RESPONSE_FORMAT]
         for call, result in zip(final_calls, results):
             self.assertEqual(call["messages"][-1]["content"], result["assessment_plan_prompts"]["user"])
         self.assert_no_legacy_outputs()
@@ -1838,10 +1893,10 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(failed["guideline_questions"], ["MARKER_BRAVO question?"])
         self.assertEqual(failed["selected_reference_patient"], fixture.reference)
         for field in ("guideline_evidence", "graphrag_context", "assessment_plan_prompts",
-                      "assessment", "plan", "assessment_plan_raw"):
+                      "predictions", "assessment_plan_raw"):
             self.assertIsNone(failed[field])
-        self.assertIn("MARKER_CHARLIE", results[2]["assessment"])
-        self.assertIn("MARKER_CHARLIE", results[2]["plan"])
+        self.assertIn("MARKER_CHARLIE", results[2]["predictions"][0]["condition"])
+        self.assertIn("MARKER_CHARLIE", results[2]["predictions"][0]["plan"][0])
         self.assertIn(f"Patient {records[1]['id']} failed", fixture.stderr.getvalue())
 
     def test_all_patients_failing_still_finishes_the_batch(self):
@@ -1885,7 +1940,9 @@ class RunMedCopilotTests(unittest.TestCase):
             (records[0]["id"], "completed"), (records[1]["id"], "failed_incomplete"),
             (records[2]["id"], "not_processed"),
         ], reference_data=self.expected_reference_data())
-        self.assertEqual([results[1][field] for field in RESULT_FIELDS[2:5]], [None] * 3)
+        for field in ("predictions", "assessment_plan_raw"):
+            self.assertIsNone(results[1][field])
+        self.assertEqual(results[1]["selected_reference_patient"], fixture.reference)
         self.assertIn("MARKER_BRAVO", results[1]["assessment_plan_prompts"]["user"])
         self.assertEqual(results[2], {"id": records[2]["id"], "status": "not_processed",
                                       **dict.fromkeys(RESULT_FIELDS[2:]),
@@ -1916,7 +1973,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(len(fixture.calls), 4)
         results = self.assert_stopped_run([(records[0]["id"], "completed")],
                                           reference_data=self.expected_reference_data())
-        self.assertIn("MARKER_ALPHA", results[0]["assessment"])
+        self.assertIn("MARKER_ALPHA", results[0]["predictions"][0]["condition"])
 
     def test_run_json_is_running_until_the_batch_finishes(self):
         fixture = self.fixture
@@ -2001,6 +2058,7 @@ class RunMedCopilotTests(unittest.TestCase):
         fixture = self.fixture
         fixture.patient.update({
             "assessment": "UNUSED_TARGET_ASSESSMENT",
+            "condition": "UNUSED_TARGET_CONDITION",
             "diagnosis": "UNUSED_TARGET_DIAGNOSIS",
             "plan": "UNUSED_TARGET_PLAN",
             "label": {"description": "UNUSED_TARGET_LABEL"},
@@ -2204,17 +2262,32 @@ class RunMedCopilotTests(unittest.TestCase):
         for evidence in [self.fixture.conditions, self.fixture.results[0], self.fixture.guideline_text]:
             self.assertIn(evidence, rendered)
         self.assertIn("Assessment: REFERENCE_DIAGNOSIS", rendered)
-        self.assertIn("Markdown formatting", rendered)
         for requirement in [
-            "Assessment (A), including the most likely diagnosis, and Plan (P)",
+            "top 3 most likely conditions", "ranked from most to least likely",
+            "separate plan of at most 3 items for each condition",
             "using the Subjective and Objective as context",
-            "Plan consistent with the Assessment",
-            "investigations, treatment, and follow-up", "## Assessment", "## Plan",
-            "Do NOT output JSON",
+            "tailor its own plan", "investigations, treatment, and follow-up",
+            "ONLY one valid JSON object", 'single key "predictions"',
+            "exactly three condition/plan pairs", "descending likelihood order",
+            "Give distinct conditions", "array position determines rank",
+            'Each "condition" must be a single concise diagnosis name',
+            'Each "plan" must be a JSON array containing at most three',
+            "one action per item", "empty array",
+            "Do not include Markdown", "code fences", "any additional keys or text",
         ]:
             self.assertIn(requirement, rendered)
-        self.assertLess(rendered.index("Follow the style of the example below:"),
+        self.assertLess(rendered.index("clinical reference evidence:"),
                         rendered.index(self.fixture.results[0]))
+        output_example, _ = json.JSONDecoder().raw_decode(rendered[rendered.index('{\n  "predictions"'):])
+        self.assertEqual(set(output_example), {"predictions"})
+        self.assertEqual(len(output_example["predictions"]), 3)
+        for pair in output_example["predictions"]:
+            self.assertEqual(set(pair), {"condition", "plan"})
+            self.assertIsInstance(pair["condition"], str)
+            self.assertIsInstance(pair["plan"], list)
+            self.assertLessEqual(len(pair["plan"]), 3)
+            self.assertTrue(all(isinstance(item, str) for item in pair["plan"]))
+        self.assertNotIn("Do NOT output JSON", rendered)
         self.assertLess(rendered.index("Now, here is the patient's conditions:"),
                         rendered.index(self.fixture.conditions))
         self.assertLess(rendered.index("Additional Information"),
@@ -2257,7 +2330,8 @@ class RunMedCopilotTests(unittest.TestCase):
         fixture = self.fixture
         fixture.prompts = {name: f"PROJECT_{name} café\n{value}" for name, value in PROMPTS.items()}
         fixture.prompt_module.write_text(
-            "\n".join(f"{name} = {value!r}" for name, value in fixture.prompts.items()),
+            "\n".join(f"{name} = {value!r}" for name, value in fixture.prompts.items())
+            + f"\nCONDITION_PLAN_RESPONSE_FORMAT = {FINAL_RESPONSE_FORMAT!r}\n",
             encoding="utf-8",
         )
         with fixture.runtime():
@@ -2410,7 +2484,7 @@ class RunMedCopilotTests(unittest.TestCase):
         harness.embedding_create.assert_awaited_once()
         prompt = fixture.calls[-1]["messages"][-1]["content"]
         self.assertIn(fixture.results[0], prompt)
-        for field in RESULT_FIELDS[10:]:
+        for field in RESULT_FIELDS[RESULT_FIELDS.index("keyword_extraction_raw"):]:
             self.assertNotIn(field, prompt)
         self.assertNotIn(raw, prompt)
         self.assertEqual(fixture.graph_calls[0][0]["streaming"], False)
@@ -3251,31 +3325,37 @@ class ScoringIntegrationTests(unittest.TestCase):
                     self.assertEqual(record["status"], "completed")
                     self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
                     self.assert_field(record, "condition", "scored")
-                    expected_calls.append(([label["condition"].replace("_", " ")],
-                                           [fixture.final_sections["assessment"]], "en"))
-                    if label["plan"] == ["none recorded"]:
-                        self.assert_field(record, "plan", "skipped_no_recorded_plan")
-                    else:
-                        self.assert_field(record, "plan", "scored")
-                        expected_calls.append(([", ".join(label["plan"])],
-                                               [fixture.final_sections["plan"]], "en"))
+                    for pair in fixture.final_sections["predictions"]:
+                        expected_calls.append(([label["condition"].replace("_", " ")],
+                                               [pair["condition"]], "en"))
+                        if label["plan"] == ["none recorded"]:
+                            self.assert_field(record, "plan", "skipped_no_recorded_plan")
+                        else:
+                            self.assert_field(record, "plan", "scored")
+                            expected_calls.append(([", ".join(label["plan"])],
+                                                   [", ".join(pair["plan"])], "en"))
                 self.assertEqual(fixture.scoring_calls, expected_calls)
                 self.assertEqual(len(fixture.calls), 2 * expected_count)
                 self.assertEqual(fixture.input_path.read_bytes(), source_input)
                 self.assertEqual(fixture.labels_path.read_bytes(), source_labels)
 
-    def assert_field(self, record, field, status, error_type=None):
-        score = record["evaluation"][field]
-        self.assertEqual(set(score), {"status", "metrics", "error"})
-        self.assertEqual(score["status"], status)
-        self.assertEqual(set(score["metrics"]), set(METRIC_NAMES))
-        self.assertEqual(score["metrics"], self.fixture.metric_values if status == "scored"
-                         else dict.fromkeys(METRIC_NAMES))
-        if error_type is None:
-            self.assertIsNone(score["error"])
-        else:
-            self.assertEqual(score["error"]["type"], error_type)
-        return score
+    def assert_field(self, record, field, status, error_type=None, rank=None):
+        self.assertIsInstance(record["evaluation"], list)
+        self.assertEqual([entry["rank"] for entry in record["evaluation"]], [1, 2, 3])
+        entries = record["evaluation"] if rank is None else [record["evaluation"][rank - 1]]
+        for entry in entries:
+            self.assertEqual(set(entry), {"rank", "condition", "plan"})
+            score = entry[field]
+            self.assertEqual(set(score), {"status", "metrics", "error"})
+            self.assertEqual(score["status"], status)
+            self.assertEqual(set(score["metrics"]), set(METRIC_NAMES))
+            self.assertEqual(score["metrics"], self.fixture.metric_values if status == "scored"
+                             else dict.fromkeys(METRIC_NAMES))
+            if error_type is None:
+                self.assertIsNone(score["error"])
+            else:
+                self.assertEqual(score["error"]["type"], error_type)
+        return entries[-1][field]
 
     def assert_no_generation(self):
         fixture = self.fixture
@@ -3297,15 +3377,15 @@ class ScoringIntegrationTests(unittest.TestCase):
         record = records[0]
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
-        self.assertEqual(record["assessment"], fixture.final_sections["assessment"])
-        self.assertEqual(record["plan"], fixture.final_sections["plan"])
-        self.assertEqual(set(record["evaluation"]), {"condition", "plan"})
+        self.assertEqual(record["predictions"], fixture.final_sections["predictions"])
+        self.assertEqual([entry["rank"] for entry in record["evaluation"]], [1, 2, 3])
         self.assert_field(record, "condition", "scored")
         self.assert_field(record, "plan", "scored")
-        self.assertEqual(fixture.scoring_calls, [
-            (["GOLD ONLY condition"], ["MOCK_DIAGNOSIS"], "en"),
-            (["GOLD_ONLY drug, GOLD_ONLY follow-up"], ["1. MOCK_FINAL_PLAN"], "en"),
-        ])
+        self.assertEqual(fixture.scoring_calls, [call
+            for pair in fixture.final_sections["predictions"] for call in (
+                (["GOLD ONLY condition"], [pair["condition"]], "en"),
+                (["GOLD_ONLY drug, GOLD_ONLY follow-up"], [", ".join(pair["plan"])], "en"),
+            )])
         # Retrieved case A/P is evidence, never the target patient's answer key.
         self.assertEqual(record["selected_reference_patient"], fixture.reference)
         self.assertIn("REFERENCE_DIAGNOSIS", record["assessment_plan_prompts"]["user"])
@@ -3328,7 +3408,7 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertEqual(evaluation["label_count"], 1)
         self.assertEqual(set(evaluation["metric_packages"]),
                          {"sacrebleu", "nltk", "rouge-score", "bert-score", "transformers", "torch"})
-        self.assertEqual(evaluation["settings"]["aggregation"], "per_patient_per_field_singleton")
+        self.assertEqual(evaluation["settings"]["aggregation"], "per_patient_per_rank_per_field_singleton")
         self.assertEqual(fixture.input_path.read_bytes(), input_bytes)
         self.assertEqual(fixture.labels_path.read_bytes(), label_bytes)
         self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"})
@@ -3346,7 +3426,7 @@ class ScoringIntegrationTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "completed")
         _, run, records = self.read_run()
         self.assertEqual([record["id"] for record in records], ["FIRST", "LAST"])
-        self.assertEqual([call[0] for call in fixture.scoring_calls[::2]],
+        self.assertEqual([call[0] for call in fixture.scoring_calls[::6]],
                          [["first condition"], ["last condition"]])
         self.assertEqual(len(fixture.calls), 4)
         self.assertNotIn("S_EXCLUDED", json.dumps(fixture.calls))
@@ -3356,6 +3436,83 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertEqual(run["evaluation"]["selected_patient_ids"], ["FIRST", "LAST"])
         self.assertEqual(run["evaluation"]["excluded_patient_ids"], ["EXCLUDED"])
         self.assertEqual(run["evaluation"]["label_count"], 4)
+
+    def test_three_ranked_pairs_roundtrip_and_each_plan_scores_exact_joined_items(self):
+        fixture = self.fixture
+        expected = [
+            {"condition": "  FIRST_DIAGNOSIS café  ",
+             "plan": ["Rx, 0.5 mg", "Follow-up\nsoon", "Rx, 0.5 mg"]},
+            {"condition": "SECOND_DIAGNOSIS", "plan": ["Other investigation"]},
+            {"condition": "THIRD_DIAGNOSIS", "plan": ["  café  ", "Last item"]},
+        ]
+        fixture.final_output = " \r\n" + json.dumps({"predictions": expected}, ensure_ascii=False,
+                                                      indent=2) + "\t "
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        record = self.read_run()[2][0]
+        self.assertEqual(fixture.calls[-1]["response_format"], FINAL_RESPONSE_FORMAT)
+        self.assertEqual(record["predictions"], expected)
+        self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
+        for legacy in ("assessment", "condition", "plan"):
+            self.assertNotIn(legacy, record)
+        self.assertEqual(fixture.scoring_calls, [call for pair in expected for call in (
+            (["GOLD ONLY condition"], [pair["condition"]], "en"),
+            (["GOLD_ONLY drug, GOLD_ONLY follow-up"], [", ".join(pair["plan"])], "en"),
+        )])
+        self.assert_field(record, "condition", "scored")
+        self.assert_field(record, "plan", "scored")
+
+    def test_ranked_pairs_keep_each_unweighted_metric_result_and_separate_plan(self):
+        fixture = self.fixture
+        pairs = [{"condition": f"DIAGNOSIS_{rank}", "plan": [f"PLAN_{rank}"]}
+                 for rank in (1, 2, 3)]
+        fixture.final_output = json.dumps({"predictions": pairs})
+        values = {text: {name: position / 10 for name in METRIC_NAMES}
+                  for position, text in enumerate(
+                      ["DIAGNOSIS_1", "PLAN_1", "DIAGNOSIS_2", "PLAN_2", "DIAGNOSIS_3", "PLAN_3"], 1)}
+        def evaluate(references, candidates, lang):
+            self.assertEqual(lang, "en")
+            self.assertEqual(references, ["GOLD ONLY condition"] if candidates[0].startswith("DIAGNOSIS")
+                             else ["GOLD_ONLY drug, GOLD_ONLY follow-up"])
+            return values[candidates[0]].copy()
+        fixture.scoring_reply = evaluate
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        _, run, records = self.read_run()
+        [record] = records
+        self.assertEqual(record["predictions"], pairs)
+        self.assertEqual(len(fixture.scoring_calls), 6)
+        for rank, (pair, entry) in enumerate(zip(pairs, record["evaluation"]), 1):
+            self.assertEqual(set(entry), {"rank", "condition", "plan"})
+            self.assertEqual(entry["rank"], rank)
+            self.assertEqual(entry["condition"]["metrics"], values[pair["condition"]])
+            self.assertEqual(entry["plan"]["metrics"], values[pair["plan"][0]])
+            for field in ("condition", "plan"):
+                self.assertEqual(entry[field]["status"], "scored")
+                self.assertIsNone(entry[field]["error"])
+        self.assertIsNone(run["evaluation"]["settings"]["rank_weighting"])
+        self.assertEqual(run["evaluation"]["settings"]["prediction_count"], 3)
+        self.assertEqual(run["evaluation"]["settings"]["plan_item_limit"], 3)
+
+    def test_one_second_rank_metric_failure_keeps_other_fields_and_ranks(self):
+        fixture = self.fixture
+        def evaluate(references, candidates, lang):
+            if candidates == ["MOCK_DIAGNOSIS alternative 2"]:
+                raise RuntimeError("only the second condition failed")
+            return fixture.metric_values.copy()
+        fixture.scoring_reply = evaluate
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        [record] = self.read_run()[2]
+        self.assert_field(record, "plan", "scored")
+        self.assert_field(record, "condition", "scored", rank=1)
+        self.assert_field(record, "condition", "error", "RuntimeError", rank=2)
+        self.assert_field(record, "condition", "scored", rank=3)
+        self.assertEqual(record["predictions"], fixture.final_sections["predictions"])
+        self.assertEqual(len(fixture.scoring_calls), 6)
 
     def test_false_flag_includes_no_evidence_records_and_explicit_true_filters_them(self):
         root = self.fixture.root
@@ -3441,19 +3598,20 @@ class ScoringIntegrationTests(unittest.TestCase):
                     runner["main"]()
                 self.assert_no_generation()
 
-    def test_exact_no_recorded_sentinel_skips_only_plan_and_preserves_raw_and_status(self):
+    def test_exact_no_recorded_sentinel_skips_all_three_plans_and_preserves_raw_and_status(self):
         fixture = self.fixture
-        fixture.final_output = "  ## Assessment\nAssessment café\n\n## Plan\nGenerated real treatment\n  "
+        pairs = prediction_pairs("Condition café", ["Generated real treatment"])
+        fixture.final_output = '  ' + json.dumps({"predictions": pairs}) + '\n  '
         fixture.write_labels([self.label(fixture.patient_id, plan=["none recorded"])])
         runner = self.load_runner()
         with fixture.runtime():
             self.assertEqual(runner["main"](), "completed")
         record = self.read_run()[2][0]
         self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
-        self.assertEqual(record["plan"], "Generated real treatment")
+        self.assertEqual(record["predictions"], pairs)
         self.assert_field(record, "condition", "scored")
         self.assert_field(record, "plan", "skipped_no_recorded_plan")
-        self.assertEqual(len(fixture.scoring_calls), 1)
+        self.assertEqual(len(fixture.scoring_calls), 3)
 
     def test_nonexact_sentinel_and_record_artifacts_are_scored_as_recorded_without_cleaning(self):
         fixture = self.fixture
@@ -3467,18 +3625,57 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertEqual(fixture.scoring_calls[1][0],
                          ["none recorded, management (record artifact)"])
 
-    def test_missing_or_repeated_generated_sections_are_independent_and_do_not_fail_generation(self):
+    def test_invalid_or_partial_ranked_json_scores_other_fields_and_ranks_without_failure(self):
         root = self.fixture.root
-        examples = [
-            ("only_a", "## Assessment\nA", "scored", "missing_generation"),
-            ("only_p", "## Plan\nP", "missing_generation", "scored"),
-            ("repeated_a", "## Assessment\nA\n## Plan\nP\n## Assessment\nA2",
-             "missing_generation", "scored"),
-            ("no_sections", "No recognized headings", "missing_generation", "missing_generation"),
-            ("null_reply", None, "missing_generation", "missing_generation"),
-            ("nonstring_reply", 123, "missing_generation", "missing_generation"),
-        ]
-        for case, response, condition_status, plan_status in examples:
+        valid = prediction_pairs("A", ["P"])
+        # First-rank field errors must not erase either valid lower-ranked answer.
+        for case, pair, condition_status, plan_status in [
+            ("only_condition", {"condition": "A"}, "scored", "missing_generation"),
+            ("only_plan", {"plan": ["P"]}, "missing_generation", "scored"),
+            ("wrong_condition", {"condition": ["A"], "plan": ["P"]}, "missing_generation", "scored"),
+            ("wrong_plan", {"condition": "A", "plan": "P"}, "scored", "missing_generation"),
+            ("empty_plan", {"condition": "A", "plan": []}, "scored", "missing_generation"),
+            ("overlong_plan", {"condition": "A", "plan": ["P"] * 4}, "scored", "missing_generation"),
+            ("extra_pair_key", {"condition": "A", "plan": ["P"], "reason": "why"},
+             "missing_generation", "missing_generation"),
+            ("nonobject_pair", "A", "missing_generation", "missing_generation"),
+        ]:
+            with self.subTest(case=case):
+                self.fixture = PipelineFixture(root / case)
+                fixture = self.fixture
+                fixture.real_scoring = True
+                fixture.final_output = json.dumps({"predictions": [pair, *valid[1:]]})
+                fixture.write_labels([self.label(fixture.patient_id)])
+                runner = self.load_runner()
+                with fixture.runtime():
+                    self.assertEqual(runner["main"](), "completed")
+                record = self.read_run()[2][0]
+                self.assertEqual(record["status"], "completed")
+                self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
+                self.assert_field(record, "condition", condition_status, rank=1)
+                self.assert_field(record, "plan", plan_status, rank=1)
+                for rank in (2, 3):
+                    self.assert_field(record, "condition", "scored", rank=rank)
+                    self.assert_field(record, "plan", "scored", rank=rank)
+                self.assertEqual(len(fixture.scoring_calls), 4 + (condition_status == "scored")
+                                 + (plan_status == "scored"))
+
+    def test_globally_invalid_json_or_wrong_prediction_count_scores_no_candidates(self):
+        root = self.fixture.root
+        valid = prediction_pairs("A", ["P"])
+        tail = ','.join(json.dumps(pair) for pair in valid[1:])
+        for case, response in [
+            ("too_few", json.dumps({"predictions": valid[:2]})),
+            ("too_many", json.dumps({"predictions": valid + valid[:1]})),
+            ("wrong_predictions_type", '{"predictions":{}}'),
+            ("duplicate_condition", '{"predictions":[{"condition":"A","condition":"B",'
+             '"plan":["P"]},' + tail + ']}'),
+            ("extra_top_key", json.dumps({"predictions": valid, "reason": "why"})),
+            ("malformed_json", '{"predictions":['),
+            ("fenced_json", '```json\n' + json.dumps({"predictions": valid}) + '\n```'),
+            ("nonfinite", '{"predictions":[{"condition":"A","plan":[NaN]},' + tail + ']}'),
+            ("null_reply", None), ("nonstring_reply", 123),
+        ]:
             with self.subTest(case=case):
                 self.fixture = PipelineFixture(root / case)
                 fixture = self.fixture
@@ -3489,10 +3686,11 @@ class ScoringIntegrationTests(unittest.TestCase):
                 with fixture.runtime():
                     self.assertEqual(runner["main"](), "completed")
                 record = self.read_run()[2][0]
-                self.assertEqual(record["status"], "completed")
                 self.assertEqual(record["assessment_plan_raw"], response)
-                self.assert_field(record, "condition", condition_status)
-                self.assert_field(record, "plan", plan_status)
+                self.assertIsNone(record["predictions"])
+                self.assert_field(record, "condition", "missing_generation")
+                self.assert_field(record, "plan", "missing_generation")
+                self.assertEqual(fixture.scoring_calls, [])
 
     def test_empty_reference_plan_is_missing_reference_and_is_not_scored(self):
         fixture = self.fixture
@@ -3503,7 +3701,7 @@ class ScoringIntegrationTests(unittest.TestCase):
         record = self.read_run()[2][0]
         self.assert_field(record, "condition", "scored")
         self.assert_field(record, "plan", "missing_reference")
-        self.assertEqual(len(fixture.scoring_calls), 1)
+        self.assertEqual(len(fixture.scoring_calls), 3)
 
     def test_metric_exception_is_field_local_preserves_generation_and_next_patient_scores(self):
         fixture = self.fixture
@@ -3526,7 +3724,7 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assert_field(records[0], "plan", "scored")
         self.assert_field(records[1], "condition", "scored")
         self.assert_field(records[1], "plan", "scored")
-        self.assertEqual(len(fixture.scoring_calls), 4)
+        self.assertEqual(len(fixture.scoring_calls), 12)
         for record in records:
             self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
             self.assertEqual(len(record["model_responses"]["assessment_plan"]), 1)
@@ -3580,9 +3778,44 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertEqual(run["status"], "failed_incomplete")
         self.assertEqual([record["status"] for record in records], ["failed_incomplete", "not_processed"])
         self.assertEqual(records[0]["assessment_plan_raw"], fixture.final_output)
-        self.assert_field(records[0], "condition", "scored")
-        self.assert_field(records[0], "plan", "interrupted", "KeyboardInterrupt")
+        self.assert_field(records[0], "condition", "scored", rank=1)
+        self.assert_field(records[0], "plan", "interrupted", "KeyboardInterrupt", rank=1)
+        for rank in (2, 3):
+            self.assert_field(records[0], "condition", "pending", rank=rank)
+            self.assert_field(records[0], "plan", "pending", rank=rank)
         self.assertIsNone(records[1]["evaluation"])
+        self.assertEqual(len(fixture.calls), 2)
+
+    def test_second_rank_plan_interruption_preserves_earlier_pair_and_later_pending_scores(self):
+        fixture = self.fixture
+        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
+                                for name in ("FIRST", "UNSTARTED")])
+        fixture.write_labels([self.label("FIRST"), self.label("UNSTARTED")])
+        pairs = [{"condition": f"DIAGNOSIS_{rank}", "plan": [f"PLAN_{rank}"]}
+                 for rank in (1, 2, 3)]
+        fixture.final_output = json.dumps({"predictions": pairs})
+        def evaluate(references, candidates, lang):
+            if candidates == ["PLAN_2"]:
+                raise KeyboardInterrupt()
+            return fixture.metric_values.copy()
+        fixture.scoring_reply = evaluate
+        runner = self.load_runner()
+        with fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        _, run, records = self.read_run()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual([row["status"] for row in records], ["failed_incomplete", "not_processed"])
+        self.assertEqual(records[0]["predictions"], pairs)
+        self.assertEqual(records[0]["assessment_plan_raw"], fixture.final_output)
+        self.assert_field(records[0], "condition", "scored", rank=1)
+        self.assert_field(records[0], "plan", "scored", rank=1)
+        self.assert_field(records[0], "condition", "scored", rank=2)
+        self.assert_field(records[0], "plan", "interrupted", "KeyboardInterrupt", rank=2)
+        self.assert_field(records[0], "condition", "pending", rank=3)
+        self.assert_field(records[0], "plan", "pending", rank=3)
+        self.assertIsNone(records[1]["predictions"])
+        self.assertIsNone(records[1]["evaluation"])
+        self.assertEqual(len(fixture.scoring_calls), 4)
         self.assertEqual(len(fixture.calls), 2)
 
 

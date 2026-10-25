@@ -52,7 +52,7 @@ def _exception_data(exc):
 
 
 class PatientScorer:
-    """Validate gold labels, select a cohort, and score each generated A/P pair.
+    """Validate gold labels, select a cohort, and score three ranked condition/Plan pairs.
 
     Label files may contain additional patient IDs so a shared label file can
     serve several input subsets. Every label row is validated, and every input
@@ -142,10 +142,14 @@ class PatientScorer:
             "label_count": len(self._labels),
             "metric_packages": versions,
             "settings": {
-                "aggregation": "per_patient_per_field_singleton",
+                "aggregation": "per_patient_per_rank_per_field_singleton",
+                "prediction_count": 3,
+                "plan_item_limit": 3,
+                "rank_weighting": None,
                 "lang": "en",
                 "condition_reference": "replace underscores with spaces",
                 "plan_reference": "join original items with comma and space",
+                "generated_plan": "join original generated items with comma and space",
                 "defaults_provenance": "configured defaults for the recorded library versions",
                 "bleu": {
                     "max_ngram_order": 4, "lowercase": False, "tokenize": "13a",
@@ -164,51 +168,68 @@ class PatientScorer:
         }
 
     def score_result(self, result):
-        """Attach independent field scores without changing generation status."""
+        """Score each ranked pair independently, preserving the generated payload."""
         if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
                 or result["id"] not in self._selected_ids):
             raise ValueError("Result must name a selected input patient")
         label = self._labels[result["id"]]
-        result["evaluation"] = {
-            field: _empty_entry("pending") for field in ("condition", "plan")
-        }
+        result["evaluation"] = [
+            {"rank": rank, **{field: _empty_entry("pending") for field in ("condition", "plan")}}
+            for rank in range(1, 4)
+        ]
         references = {
             "condition": label["condition"].replace("_", " "),
             "plan": ", ".join(label["plan"]),
         }
-        for field, candidate_field in (("condition", "assessment"), ("plan", "plan")):
-            if field == "plan" and label["plan"] == ["none recorded"]:
-                result["evaluation"][field] = _empty_entry("skipped_no_recorded_plan")
-                continue
-            reference = references[field]
-            candidate = result.get(candidate_field)
-            if not reference.strip():
-                result["evaluation"][field] = _empty_entry("missing_reference")
-                continue
-            if candidate is None or (isinstance(candidate, str) and not candidate.strip()):
-                result["evaluation"][field] = _empty_entry("missing_generation")
-                continue
-            try:
-                if not isinstance(candidate, str):
-                    raise TypeError(f"Generated {candidate_field} must be a string or null")
-                metrics = Evaluator.evaluate_metrics([reference], [candidate], lang="en")
-                if not isinstance(metrics, dict) or set(metrics) != set(METRIC_NAMES):
-                    raise ValueError("Evaluator must return exactly the six upstream metric keys")
-                values = {}
-                for name in METRIC_NAMES:
-                    value = metrics[name]
-                    if isinstance(value, bool) or not isinstance(value, Real):
-                        raise ValueError(f"Evaluator metric {name} must be a finite real number")
-                    value = float(value)
-                    if not math.isfinite(value):
-                        raise ValueError(f"Evaluator metric {name} must be a finite real number")
-                    values[name] = value
-                result["evaluation"][field] = {
-                    "status": "scored", "metrics": values, "error": None,
-                }
-            except Exception as exc:
-                result["evaluation"][field] = _empty_entry("error", _exception_data(exc))
-            except BaseException as exc:
-                result["evaluation"][field] = _empty_entry("interrupted", _exception_data(exc))
-                raise
+        predictions = result.get("predictions")
+        for index, evaluation in enumerate(result["evaluation"]):
+            for field in ("condition", "plan"):
+                if field == "plan" and label["plan"] == ["none recorded"]:
+                    evaluation[field] = _empty_entry("skipped_no_recorded_plan")
+                    continue
+                reference = references[field]
+                if not reference.strip():
+                    evaluation[field] = _empty_entry("missing_reference")
+                    continue
+                try:
+                    if predictions is None:
+                        candidate = None
+                    else:
+                        if not isinstance(predictions, list) or len(predictions) != 3:
+                            raise TypeError("Generated predictions must be a list of exactly three pairs or null")
+                        prediction = predictions[index]
+                        if not isinstance(prediction, dict) or set(prediction) - {"condition", "plan"}:
+                            raise TypeError("Generated prediction must be a condition/plan object")
+                        candidate = prediction.get(field)
+                    if candidate is None:
+                        evaluation[field] = _empty_entry("missing_generation")
+                        continue
+                    if field == "plan":
+                        if (not isinstance(candidate, list) or len(candidate) > 3
+                                or any(not isinstance(item, str) for item in candidate)):
+                            raise TypeError("Generated plan must be a list of at most three strings or null")
+                        candidate = ", ".join(candidate)
+                    elif not isinstance(candidate, str):
+                        raise TypeError("Generated condition must be a string or null")
+                    if not candidate.strip():
+                        evaluation[field] = _empty_entry("missing_generation")
+                        continue
+                    metrics = Evaluator.evaluate_metrics([reference], [candidate], lang="en")
+                    if not isinstance(metrics, dict) or set(metrics) != set(METRIC_NAMES):
+                        raise ValueError("Evaluator must return exactly the six upstream metric keys")
+                    values = {}
+                    for name in METRIC_NAMES:
+                        value = metrics[name]
+                        if isinstance(value, bool) or not isinstance(value, Real):
+                            raise ValueError(f"Evaluator metric {name} must be a finite real number")
+                        value = float(value)
+                        if not math.isfinite(value):
+                            raise ValueError(f"Evaluator metric {name} must be a finite real number")
+                        values[name] = value
+                    evaluation[field] = {"status": "scored", "metrics": values, "error": None}
+                except Exception as exc:
+                    evaluation[field] = _empty_entry("error", _exception_data(exc))
+                except BaseException as exc:
+                    evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
+                    raise
         return result
