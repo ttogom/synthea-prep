@@ -1,6 +1,6 @@
 # MED-COPILOT patient output schema
 
-Each run appends one JSON object per input patient to `results.jsonl`. JSONL
+Each run appends one JSON object per selected input patient to `results.jsonl`. JSONL
 escaping is ordinary JSON escaping: after `json.loads`, captured strings retain
 their original characters, including whitespace, Unicode, and embedded newlines.
 The keys are written in this order:
@@ -9,8 +9,7 @@ The keys are written in this order:
 |---|---|
 | `id` | Prepared input patient ID. |
 | `status` | `completed`, `failed_incomplete`, or `not_processed`. |
-| `assessment` | Parsed Assessment section, or `null` when unavailable/invalid. |
-| `plan` | Parsed Plan section, or `null` when unavailable/invalid. |
+| `predictions` | Exactly three `{condition, plan}` pairs in descending likelihood order, or `null` when unavailable/structurally invalid. Each condition is a nonblank string or `null`; each Plan is an array of at most three nonblank action strings (including `[]`) or `null`. |
 | `assessment_plan_raw` | Complete final reply, as returned, or `null`. |
 | `selected_reference_patient` | Minimal identity of the reference whose formatted full SOAP example enters final generation, or `null`. |
 | `guideline_questions` | Parsed `Key Questions` list, or `null`; the raw question reply remains the GraphRAG query. |
@@ -22,6 +21,127 @@ The keys are written in this order:
 | `retrieved_patient_ids` | Retained hybrid ranking, normally up to 20 references, before cross-encoder reranking. Each entry contains a minimal identity and its unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
 | `reranked_patient_ids` | Retained cross-encoder ranking, up to five references, containing minimal identity and the preceding scores plus `rerank_score`. Ties preserve hybrid order. When a reference is selected, its identity equals the first entry's identity. |
 | `model_responses` | Provider metadata lists by stage, described below. |
+| `evaluation` | Three ordered `{rank, condition, plan}` score entries, with independent scores for each pair; `null` if generation never reached evaluation. |
+
+## Condition and Plan evaluation
+
+The final API request uses the project-owned `CONDITION_PLAN_RESPONSE_FORMAT`
+JSON schema: a single `predictions` array with exactly three objects, each with
+required `condition: string` and `plan: array[string]` fields. Each Plan has at
+most three items; no additional properties are allowed at either object level.
+The final prompt requests three distinct concise diagnoses ordered from most to
+least likely and a separate Plan tailored to each suspected condition, without
+rationale or Markdown. Array position determines rank; the model does not emit
+rank numbers or weights. Retrieval and guideline questions keep their behavior.
+
+The generated shape is:
+
+```json
+{
+  "predictions": [
+    {"condition": "most likely condition", "plan": ["action", "another action"]},
+    {"condition": "second most likely condition", "plan": ["action"]},
+    {"condition": "third most likely condition", "plan": []}
+  ]
+}
+```
+
+`parse_condition_plan` preserves valid strings, rank order, and Plan items
+verbatim. A missing/blank/nonstring condition becomes `null`. A Plan of the wrong
+type, longer than three items, or containing nonstring/blank items becomes
+`null`; `[]` is valid. An individually invalid field does not erase its valid
+partner or other ranks. A non-object pair or one with unexpected keys becomes
+`{condition: null, plan: null}` at that rank. Malformed JSON, fenced Markdown, a
+non-object root, unexpected top-level keys, duplicate keys or nonfinite numbers
+anywhere, or an incorrectly typed/sized `predictions` array produce
+`predictions: null`. No arrays are truncated and there is no Markdown fallback.
+The exact response stays in `assessment_plan_raw`, and the existing trace names
+`assessment_plan_prompts` and `model_responses.assessment_plan` are retained.
+Generation statuses do not themselves certify response-format validity.
+
+Gold labels are joined to the complete input by exact ID before cohort selection.
+The `--presenting-evidence-only` option defaults to `true`; `false` includes all
+input patients. Only selected IDs are registered in the run. Excluded patients
+have no result row, including when an interruption marks remaining selected
+patients `not_processed`. `run.json.evaluation` records the option, input and
+selected counts, selected/excluded IDs, label and evaluator fingerprints,
+installed metric-library versions and configured settings.
+
+Each prediction is scored separately against the same patient labels:
+`evaluation[i].condition` compares `predictions[i].condition` to the label's
+`condition` with underscores replaced by spaces, and `evaluation[i].plan`
+compares the generated and reference Plan arrays after joining each with
+`", "`. The generated Plan itself stays an array. Each evaluation entry records
+`rank: i + 1`. There is no rank weighting, averaging, maximum, or combined score.
+No additional text cleaning, sorting, deduplication, or comma splitting is
+applied. Labels never enter retrieval or generation prompts. Historical runs
+retain their historical schema; scoring does not fall back to legacy top-level
+`condition`, `assessment`, or `plan` fields.
+
+After scoring starts, `evaluation` contains exactly three entries with ranks
+1–3, even when predictions are unavailable. One entry has the following shape;
+all six metric keys are always present in each field:
+
+```json
+{
+  "rank": 1,
+  "condition": {
+    "status": "scored",
+    "metrics": {
+      "BLEU": 0.0,
+      "METEOR": 0.5,
+      "ROUGE-1": 0.6,
+      "ROUGE-2": 0.3,
+      "ROUGE-L": 0.6,
+      "BERTScore_F1": 0.8
+    },
+    "error": null
+  },
+  "plan": {
+    "status": "skipped_no_recorded_plan",
+    "metrics": {
+      "BLEU": null,
+      "METEOR": null,
+      "ROUGE-1": null,
+      "ROUGE-2": null,
+      "ROUGE-L": null,
+      "BERTScore_F1": null
+    },
+    "error": null
+  }
+}
+```
+
+Each entry's status is one of:
+
+- `scored`: the unchanged upstream helper returned six finite numeric scores.
+- `skipped_no_recorded_plan`: the original Plan label is exactly
+  `["none recorded"]`; no Plan metric call is made. Other spellings, whitespace,
+  or lists with additional items do not trigger this sentinel rule.
+- `missing_reference`: the joined Plan is empty or whitespace-only.
+- `missing_generation`: the generated condition is null/blank, or the generated
+  Plan is null or joins to empty/whitespace-only text (including `[]`).
+- `error`: scoring or score validation failed. `error` contains `{type, message}`.
+- `interrupted`: scoring raised a fatal interruption, recorded before re-raising.
+- `pending`: the field/rank was not attempted before an interruption.
+
+Except for `scored`, all six metric values are `null`. Condition scoring is
+independent of the skipped Plan sentinel, which skips every rank's Plan. An
+ordinary error in one field/rank does not discard successful scores elsewhere,
+predictions, prompts, or evidence, and
+does not change the generation status or exit code. Interruptions retain the
+existing stopped-run semantics. Null/blank references are not replaced with
+empty strings or zeros. When both are unavailable, missing-reference status takes
+precedence over missing-generation; the exact Plan sentinel takes precedence over
+either.
+
+Every invocation compares singleton lists, separately for condition and Plan at
+each rank. Rank order is preserved for future analysis without weighting.
+BLEU uses corpus statistics for that singleton; METEOR and ROUGE/BERTScore F1
+retain the upstream reductions. These are not cohort-level scores, and averaging
+per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
+probability. Encoder truncation, upstream import-time NLTK download attempts,
+and per-call BERTScore model initialization remain upstream behavior.
 
 Both ranked lists are `null` until their order is known and `[]` if their stage
 completes with an empty ranking. An empty hybrid ranking skips reranking, so

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -23,17 +24,17 @@ OPTIONAL_GUIDELINE_TABLES = ("covariates",)
 GUIDELINE_VECTOR_EMBEDDING = "entity-description"
 PATIENT_STATUSES = ("completed", "failed_incomplete", "not_processed")
 PATIENT_RESULT_FIELDS = (
-    "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
+    "predictions", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
     "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
-    "reranked_patient_ids", "model_responses",
+    "reranked_patient_ids", "model_responses", "evaluation",
 )
 MODEL_RESPONSE_STAGES = (
     "keyword_extraction", "guideline_questions", "guideline_query_embedding",
     "guideline_evidence", "assessment_plan",
 )
-# A line naming one generated section: the Markdown heading the final prompt
-# requests ("## Assessment", "## Plan") or a standalone label ("Assessment:",
+# Legacy Markdown-parser compatibility: a line naming one generated section,
+# such as "## Assessment", "## Plan", or a standalone label ("Assessment:",
 # "**Plan**") like the reference patient's. Heading level, case, bold, an
 # "(A)"/"(P)" suffix, a colon, and closing hashes are tolerated; a label without
 # "#" needs a colon or bold, and nothing else may share the line.
@@ -358,6 +359,65 @@ def parse_guideline_questions(response):
     if not isinstance(questions, list) or not all(isinstance(q, str) for q in questions):
         return None
     return questions
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError("Nonfinite JSON constant")
+
+
+def _finite_json_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("Nonfinite JSON number")
+    return result
+
+
+def parse_condition_plan(response):
+    """Parse three ranked condition/Plan pairs, retaining valid fields by rank.
+
+    The root must contain only a predictions list of exactly three pairs.
+    Malformed JSON, duplicate keys, and nonfinite numbers invalidate the reply.
+    Each pair accepts only condition and plan keys; otherwise both fields in
+    that rank are null. Valid fields survive an invalid partner unchanged.
+    Plans accept zero to three nonblank strings. No list is truncated.
+    """
+    missing = {"predictions": None}
+    if not isinstance(response, str):
+        return missing
+    try:
+        payload = json.loads(
+            response, object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant, parse_float=_finite_json_float,
+        )
+    except (TypeError, ValueError, RecursionError):
+        return missing
+    if not isinstance(payload, dict) or set(payload) != {"predictions"}:
+        return missing
+    predictions = payload["predictions"]
+    if not isinstance(predictions, list) or len(predictions) != 3:
+        return missing
+    parsed = []
+    for pair in predictions:
+        if not isinstance(pair, dict) or set(pair) - {"condition", "plan"}:
+            parsed.append({"condition": None, "plan": None})
+            continue
+        condition, plan = pair.get("condition"), pair.get("plan")
+        parsed.append({
+            "condition": condition if isinstance(condition, str) and condition.strip() else None,
+            "plan": plan if isinstance(plan, list) and len(plan) <= 3 and all(
+                isinstance(item, str) and item.strip() for item in plan
+            ) else None,
+        })
+    return {"predictions": parsed}
 
 
 def split_assessment_plan(response):
