@@ -1,6 +1,6 @@
 # MED-COPILOT patient output schema
 
-Each run appends one JSON object per input patient to `results.jsonl`. JSONL
+Each run appends one JSON object per selected input patient to `results.jsonl`. JSONL
 escaping is ordinary JSON escaping: after `json.loads`, captured strings retain
 their original characters, including whitespace, Unicode, and embedded newlines.
 The keys are written in this order:
@@ -22,6 +22,83 @@ The keys are written in this order:
 | `retrieved_patient_ids` | Retained hybrid ranking, normally up to 20 references, before cross-encoder reranking. Each entry contains a minimal identity and its unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
 | `reranked_patient_ids` | Retained cross-encoder ranking, up to five references, containing minimal identity and the preceding scores plus `rerank_score`. Ties preserve hybrid order. When a reference is selected, its identity equals the first entry's identity. |
 | `model_responses` | Provider metadata lists by stage, described below. |
+| `evaluation` | Independent `condition` and `plan` score entries, or `null` if generation never reached evaluation. |
+
+## Condition and Plan evaluation
+
+Gold labels are joined to the complete input by exact ID before cohort selection.
+The `--presenting-evidence-only` option defaults to `true`; `false` includes all
+input patients. Only selected IDs are registered in the run. Excluded patients
+have no result row, including when an interruption marks remaining selected
+patients `not_processed`. `run.json.evaluation` records the option, input and
+selected counts, selected/excluded IDs, label and evaluator fingerprints,
+installed metric-library versions and configured settings.
+
+The generated field remains named `assessment`. Its score entry is named
+`condition` to match the label. The references are the label's `condition` with
+underscores replaced by spaces, and the original Plan items joined with `", "`.
+No additional text cleaning is applied to either field. Labels never enter
+retrieval or generation prompts.
+
+An evaluated patient has the following shape; all six metric keys are always
+present in each entry:
+
+```json
+{
+  "condition": {
+    "status": "scored",
+    "metrics": {
+      "BLEU": 0.0,
+      "METEOR": 0.5,
+      "ROUGE-1": 0.6,
+      "ROUGE-2": 0.3,
+      "ROUGE-L": 0.6,
+      "BERTScore_F1": 0.8
+    },
+    "error": null
+  },
+  "plan": {
+    "status": "skipped_no_recorded_plan",
+    "metrics": {
+      "BLEU": null,
+      "METEOR": null,
+      "ROUGE-1": null,
+      "ROUGE-2": null,
+      "ROUGE-L": null,
+      "BERTScore_F1": null
+    },
+    "error": null
+  }
+}
+```
+
+Each entry's status is one of:
+
+- `scored`: the unchanged upstream helper returned six finite numeric scores.
+- `skipped_no_recorded_plan`: the original Plan label is exactly
+  `["none recorded"]`; no Plan metric call is made. Other spellings, whitespace,
+  or lists with additional items do not trigger this sentinel rule.
+- `missing_reference`: the joined Plan is empty or whitespace-only.
+- `missing_generation`: the parsed generated section is null or blank.
+- `error`: scoring or score validation failed. `error` contains `{type, message}`.
+- `interrupted`: scoring raised a fatal interruption, recorded before re-raising.
+- `pending`: the field was not attempted before an interruption in the other field.
+
+Except for `scored`, all six metric values are `null`. Condition scoring is
+independent of the skipped Plan sentinel. An ordinary error in one field does not
+discard successful scores in the other, predictions, prompts, or evidence, and
+does not change the generation status or exit code. Interruptions retain the
+existing stopped-run semantics. Null/blank references are not replaced with
+empty strings or zeros. When both are unavailable, missing-reference status takes
+precedence over missing-generation; the exact Plan sentinel takes precedence over
+either.
+
+Every invocation compares singleton lists, separately for condition and Plan.
+BLEU uses corpus statistics for that singleton; METEOR and ROUGE/BERTScore F1
+retain the upstream reductions. These are not cohort-level scores, and averaging
+per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
+probability. Encoder truncation, upstream import-time NLTK download attempts,
+and per-call BERTScore model initialization remain upstream behavior.
 
 Both ranked lists are `null` until their order is known and `[]` if their stage
 completes with an empty ranking. An empty hybrid ranking skips reranking, so

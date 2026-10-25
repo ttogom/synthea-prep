@@ -33,7 +33,7 @@ RESULT_FIELDS = [
     "id", "status", "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
     "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
-    "reranked_patient_ids", "model_responses",
+    "reranked_patient_ids", "model_responses", "evaluation",
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
@@ -847,6 +847,12 @@ class PatientOutputHelperTests(unittest.TestCase):
                                                         "model_responses": {stage: [] for stage in H["MODEL_RESPONSE_STAGES"]}})
         self.assertEqual(H["new_patient_result"]("p", "not_processed")["status"], "not_processed")
 
+    def test_evaluation_starts_null_and_does_not_leak_between_patients(self):
+        first = H["new_patient_result"]("first")
+        first["evaluation"] = {"condition": {"status": "scored", "metrics": {"BLEU": 0.0}}}
+        self.assertIsNone(H["new_patient_result"]("second")["evaluation"])
+        self.assertIsNone(H["new_patient_result"]("unstarted", "not_processed")["evaluation"])
+
     def test_selected_reference_patient_follows_rerank_scores_not_candidate_order(self):
         corpus = [{"note_id": f"N{row}"} for row in range(4)]
         candidates = [{"idx": 3, "rerank_score": 0.1}, {"idx": 0, "rerank_score": 0.7},
@@ -1097,6 +1103,18 @@ class ExperimentRunTests(TemporaryRootTestCase):
         self.assertEqual([record["id"] for record in results], ["a", "b"])
         self.assertEqual(text.count("\n"), 2)
         self.assertEqual(run.statuses, ["completed", "failed_incomplete"])
+
+    def test_save_result_preserves_null_and_zero_evaluation_values(self):
+        run = self.start(["a"])
+        evaluation = {
+            "condition": {"status": "scored", "metrics": {"BLEU": 0.0}, "error": None},
+            "plan": {"status": "skipped_no_recorded_plan", "metrics": {"BLEU": None}, "error": None},
+        }
+        run.save_result(self.result("a", assessment="A", plan="P", evaluation=evaluation))
+        saved = self.read(run)[1][0]
+        self.assertEqual(saved["evaluation"], evaluation)
+        self.assertEqual((saved["assessment"], saved["plan"]), ("A", "P"))
+        self.assertNotIn("NaN", self.read(run)[2])
 
     def test_save_result_rejects_invalid_status_unknown_and_duplicate_patients(self):
         run = self.start(["a"])

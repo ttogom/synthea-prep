@@ -26,7 +26,7 @@ PATIENT_RESULT_FIELDS = (
     "assessment", "plan", "assessment_plan_raw", "selected_reference_patient",
     "guideline_questions", "guideline_evidence", "graphrag_context", "assessment_plan_prompts",
     "keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids",
-    "reranked_patient_ids", "model_responses",
+    "reranked_patient_ids", "model_responses", "evaluation",
 )
 MODEL_RESPONSE_STAGES = (
     "keyword_extraction", "guideline_questions", "guideline_query_embedding",

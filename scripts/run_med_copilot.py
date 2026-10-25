@@ -24,7 +24,9 @@ PATIENT_CORPUS = UPSTREAM / "soap_with_metadata.json"
 # S/O-only artifacts are separate from the upstream S/O/A cache.
 PATIENT_RETRIEVAL_ARTIFACTS_DIR = MED / "data" / "patient_retrieval_so"
 # Prepared S/O input for the experiment.
-PATIENT_INPUT = ROOT / "experiments" / "input" / "patient_records_so.jsonl"
+PATIENT_INPUT = ROOT / "experiments" / "input" / "test_sample_so.jsonl"
+# Matching experiment labels stay outside all retrieval and generation inputs.
+PATIENT_LABELS = ROOT / "experiments" / "input" / "test_sample_labels.jsonl"
 
 # Apple-Silicon compatibility: initialize BioClinicalBERT before importing
 # create_embeddings, whose imports load FAISS.
@@ -32,6 +34,7 @@ _preloaded_bioclinicalbert = SentenceTransformer("emilyalsentzer/Bio_ClinicalBER
 
 from scripts.med_copilot_retrieval import HybridRetriever, CrossEncoderReranker, matching_text
 from scripts.med_copilot_observability import capture_graphrag_responses
+from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
 from graphrag.cli.query import run_local_search
 from med_copilot.prompts.diagnosis_plan import (
     KEY_QUESTIONS_TEMPLATE,
@@ -182,16 +185,19 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
     print(generated_plan)
 
 
-def main():
+def main(argv=None):
 # %% ------------------------------------------------------------------
 #  Load input patient records in Subjective / Objective format
 # ---------------------------------------------------------------------
+    args = parse_scoring_args(argv)
     started_at = pacific_now()
     branch = git_branch(ROOT)
     commit = git_commit(ROOT)
 
     # Load and validate all patient records before creating a run.
     patients = load_patient_records(PATIENT_INPUT)
+    scorer = PatientScorer(PATIENT_LABELS, patients, args.presenting_evidence_only)
+    patients = scorer.patients
 
     run = ExperimentRun.start(
         EXPERIMENT_OUTPUT, root=ROOT, input_path=PATIENT_INPUT, started_at=started_at,
@@ -201,6 +207,7 @@ def main():
 
     current = None
     try:
+        run.update(evaluation=scorer.metadata(ROOT))
 # %% ------------------------------------------------------------------
 # Shared resources: similar-patient retriever, reranker, guideline tables
 # ---------------------------------------------------------------------
@@ -247,6 +254,7 @@ def main():
             try:
                 process_patient(patient, current, corpus_records, retriever, reranker,
                                 guideline_output)
+                scorer.score_result(current)
                 current["status"] = "completed"
             except Exception:
                 current["status"] = "failed_incomplete"
