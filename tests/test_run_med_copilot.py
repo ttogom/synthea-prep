@@ -113,10 +113,7 @@ vector_store:
 HELPER_NAMESPACE = runpy.run_path(str(HELPERS))
 SHA256_BUNDLE = HELPER_NAMESPACE["sha256_bundle"]
 PACIFIC_TIME = HELPER_NAMESPACE["pacific_time"]
-PROMPT_NAMES = {
-    "KEY_QUESTIONS_TEMPLATE", "EVALUATE_TEMPLATE_KEYINFO",
-    "PATIENT_CASE_TEMPLATE", "PATIENT_CASE_SYSTEM_TEMPLATE",
-}
+PROMPT_NAMES = {"KEY_QUESTIONS_TEMPLATE", "EVALUATE_TEMPLATE_KEYINFO"}
 def prompt_literals(path):
     # Extract only literals: importing the frozen upstream is unnecessary.
     return {
@@ -2307,24 +2304,28 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertTrue(all(isinstance(question, str) and question.strip()
                             for question in example["Key Questions"]))
 
-    def test_normalization_prompts_request_so_without_diagnostic_interpretation(self):
-        for name in ["PATIENT_CASE_TEMPLATE", "PATIENT_CASE_SYSTEM_TEMPLATE"]:
-            with self.subTest(prompt=name):
-                prompt = " ".join(PROMPTS[name].lower().split())
-                self.assertIn("only subjective and objective", prompt)
-        system_prompt = PROMPTS["PATIENT_CASE_SYSTEM_TEMPLATE"]
-        instructions = " ".join(system_prompt.lower().split())
-        self.assertIn("valid json", instructions)
-        self.assertIn("do not infer diagnoses", instructions)
-        self.assertIn("diagnostic interpretations", instructions)
-        self.assertIn("treatment recommendations", instructions)
-        self.assertIn("only facts explicitly stated in the patient record", instructions)
-        for detail in ["measurements", "units", "chronology", "relevant negatives", "uncertainty"]:
-            self.assertIn(detail, PROMPTS["PATIENT_CASE_TEMPLATE"])
-        format_example = system_prompt[system_prompt.index("{"):system_prompt.rindex("}") + 1]
-        schema_example = json.loads(format_example)
-        self.assertEqual(set(schema_example), {"subjective", "objective"})
-        self.assertTrue(all(isinstance(value, str) for value in schema_example.values()))
+    def test_prepared_so_runs_without_normalization_prompts_or_calls(self):
+        fixture = self.fixture
+        # Only the active question/final prompts and response schema are needed.
+        fixture.prompt_module.write_text(
+            "\n".join(f"{name} = {value!r}" for name, value in fixture.prompts.items())
+            + f"\nCONDITION_PLAN_RESPONSE_FORMAT = {FINAL_RESPONSE_FORMAT!r}\n",
+            encoding="utf-8",
+        )
+        original_input = fixture.input_path.read_bytes()
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+            self.assertEqual(Path.cwd(), fixture.caller)
+        self.assertEqual(len(fixture.calls), 2)
+        self.assertEqual(fixture.calls[0]["messages"][-1]["content"],
+                         fixture.prompts["KEY_QUESTIONS_TEMPLATE"].format(
+                             conditions=fixture.conditions))
+        self.assertEqual(fixture.calls[1]["messages"][-1]["content"], self.expected_prompt())
+        self.assertEqual(fixture.retrieval_calls[1][1], fixture.conditions)
+        self.assertEqual(fixture.rerank_calls[1][1], fixture.conditions)
+        self.assertEqual(fixture.input_path.read_bytes(), original_input)
+        self.assert_outputs()
 
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture
