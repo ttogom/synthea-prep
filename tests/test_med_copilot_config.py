@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.med_copilot_config import (
-    ExperimentConfig, configured_model_credentials, confirm_experiment, read_yaml_config,
+    PATH_SETTINGS, PIPELINE_DEFAULTS, ExperimentConfig, configured_model_credentials, confirm_experiment, read_yaml_config,
 )
 
 
@@ -68,6 +68,9 @@ class ExperimentConfigTests(unittest.TestCase):
             "config_sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
             "model_config": "configs/condition_plan_models.yaml", "selected_models": ["llama", "mini"],
             "temperature": 0.35, "max_retries": 5, "max_patients": None,
+            **{key: str(ROOT / value) if key in PATH_SETTINGS else value for key, value in PIPELINE_DEFAULTS.items()},
+            **{key: metadata[key] for key in ("selected_variants", "patient_input", "patient_labels",
+                                              "presenting_evidence_only", "exclude_none_recorded_plans")},
         })
         metadata["selected_models"].clear()
         self.assertEqual(config.metadata(self.root)["selected_models"], ["llama", "mini"])
@@ -296,21 +299,18 @@ class ExperimentConfirmationTests(unittest.TestCase):
         original = deepcopy(self.metadata)
         with redirect_stdout(StringIO()) as stdout, patch("builtins.input", return_value="yes") as prompt:
             self.assertTrue(confirm_experiment(self.experiment, self.metadata, self.root))
-        prompt.assert_called_once_with("Is this correct? Start the run? [y/N]: ")
-        self.assertEqual(stdout.getvalue(), "\n========== EXPERIMENT CONFIGURATION ==========\n\n"
-            "Experiment: experiments/configs/experiment.yaml\n"
-            "Model definitions: experiments/configs/condition_plan_models.yaml\n\n"
-            "Selected models:\n"
-            "  1. mini (openai/gpt-4o-mini)\n     API key configured: OPENAI_API_KEY\n"
-            "  2. local (openai/llama)\n     API key not required (unauthenticated endpoint)\n"
-            "  3. azure (azure/my-deployment)\n     Authentication: Azure managed identity\n\n"
-            "To change the selection, edit selected_models in\n"
-            "experiments/configs/experiment.yaml and restart the script.\n\n"
-            "These are the models selected for this experiment run.\n"
-            "Confirmed. Starting experiment run.\n")
+        prompt.assert_called_once_with("Is this configuration correct? Start the run? [y/N]: ")
+        text = stdout.getvalue()
+        for expected in ("Selected models:", "Run settings:", "Evidence variants:", "Dataset and cohort:",
+                         "temperature: 0.25", "max_retries: 7", "max_patients: null",
+                         "mini (openai/gpt-4o-mini)", "local (openai/llama)", "azure (azure/my-deployment)",
+                         "API key configured: OPENAI_API_KEY", "API key not required", "Azure managed identity",
+                         "exclude_none_recorded_plans: false", '- Excluded label plan value is exactly ["none recorded"]',
+                         "edit experiments/configs/experiment.yaml and restart"):
+            self.assertIn(expected, text)
         self.assertEqual(self.metadata, original)
-        self.assertNotIn("temperature", stdout.getvalue())
-        self.assertNotIn("max_retries", stdout.getvalue())
+        self.assertIn("temperature", stdout.getvalue())
+        self.assertIn("max_retries", stdout.getvalue())
         self.assertNotIn("GRAPHRAG_API_KEY", stdout.getvalue())
 
     def test_only_y_and_yes_are_affirmative(self):
@@ -326,6 +326,166 @@ class ExperimentConfirmationTests(unittest.TestCase):
             self.assertIn("Run cancelled. No experiment output was created.", stdout.getvalue())
             self.assertNotIn("Starting experiment", stdout.getvalue())
         self.assertEqual(sorted(file.name for file in self.experiment.config_path.parent.iterdir()), ["experiment.yaml"])
+
+
+class VariantConfigTests(unittest.TestCase):
+    setUp = ExperimentConfigTests.setUp
+    write = ExperimentConfigTests.write
+
+    def test_defaults_selection_flags_paths_and_complete_metadata(self):
+        config = ExperimentConfig(self.path)
+        self.assertEqual(config.selected_variants, ["patient_retrieval_guidelines"])
+        self.assertTrue(config.needs_patient_retrieval)
+        self.assertTrue(config.needs_guidelines)
+        self.assertFalse(config.exclude_none_recorded_plans)
+        for variants, retrieval, guidelines in ((["llm_only"], False, False),
+                (["patient_retrieval"], True, False), (["guidelines"], False, True),
+                (["llm_only", "patient_retrieval_guidelines"], True, True)):
+            self.data.update(selected_variants=variants, patient_input="experiments/input/test_sample_so.jsonl",
+                             patient_labels="experiments/input/test_sample_labels.jsonl",
+                             presenting_evidence_only=False, exclude_none_recorded_plans=True)
+            self.write()
+            config = ExperimentConfig(self.path)
+            self.assertEqual((config.needs_patient_retrieval, config.needs_guidelines), (retrieval, guidelines))
+            metadata = config.metadata(ROOT)
+            for key, value in self.data.items():
+                self.assertEqual(metadata[key], value, key)
+            self.assertEqual(config.patient_input, ROOT / self.data["patient_input"])
+            metadata["selected_variants"].clear()
+            self.assertEqual(config.selected_variants, variants)
+
+    def test_invalid_variants_booleans_paths_and_unknown_fields(self):
+        fields = {
+            "selected_variants": [[], ["bogus"], ["llm_only", "llm_only"], "llm_only", [1], [None]],
+            "patient_input": [None, "", "  ", 7, []], "patient_labels": [False, "", {}],
+            "presenting_evidence_only": [None, 0, 1, "true"],
+            "exclude_none_recorded_plans": [None, 0, 1, "false"],
+        }
+        original = dict(self.data)
+        for field, values in fields.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    self.data = {**original, field: value}
+                    self.write()
+                    with self.assertRaisesRegex(ValueError, field):
+                        ExperimentConfig(self.path)
+
+    def test_prompt_provenance_names_actual_project_templates_and_hashes(self):
+        self.data["selected_variants"] = ["llm_only", "guidelines"]
+        self.write()
+        config = ExperimentConfig(self.path)
+        metadata = config.variant_metadata(ROOT)
+        prompt_path = ROOT / "med_copilot/prompts/diagnosis_plan.py"
+        prompts = runpy.run_path(str(prompt_path))
+        self.assertEqual(metadata["prompt_provenance"], {
+            "file": "med_copilot/prompts/diagnosis_plan.py",
+            "sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest()})
+        self.assertEqual(list(metadata["variant_definitions"]), self.data["selected_variants"])
+        for name, entry in metadata["variant_definitions"].items():
+            self.assertEqual(entry["template"], f"VARIANT_TEMPLATES[{name!r}]")
+            self.assertEqual(entry["sha256"], hashlib.sha256(prompts["VARIANT_TEMPLATES"][name].encode()).hexdigest())
+            self.assertFalse(entry["patient_retrieval"])
+            self.assertEqual(entry["guidelines"], name == "guidelines")
+
+    def test_confirmation_counts_align_and_all_effective_settings_are_shown(self):
+        experiment = ExperimentConfig(self.path)
+        metadata = {"models": {"mini": {"api_key_env": "KEY", "config": {"model_provider": "openai", "model": "mini"}}}}
+        cohort = dict(input_patient_count=10, after_presenting_evidence_count=7,
+                      eligible_patient_count=5, selected_patient_count=1)
+        with redirect_stdout(StringIO()) as output, patch("builtins.input", return_value="y"):
+            self.assertTrue(confirm_experiment(experiment, metadata, ROOT, cohort))
+        text = output.getvalue()
+        rows = [line for line in text.splitlines() if any(label in line for label in (
+            "Input patients:", "After presenting-evidence filter:", "After recorded-plan filter:", "Selected after patient limit:"))]
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(len({len(row) for row in rows}), 1)
+        self.assertEqual([int(row.split(":")[-1]) for row in rows], [10, 7, 5, 1])
+        for key in ("temperature", "max_retries", "max_patients", "patient_input", "patient_labels",
+                    "presenting_evidence_only", "exclude_none_recorded_plans"):
+            self.assertIn(key + ":", text)
+        self.assertIn("Planned final requests: 1", text)
+
+
+class PipelineSettingsTests(unittest.TestCase):
+    setUp = ExperimentConfigTests.setUp
+    write = ExperimentConfigTests.write
+
+    def test_legacy_config_gets_all_effective_pipeline_defaults_and_metadata(self):
+        config = ExperimentConfig(self.path)
+        expected = {
+            "guidelines": "med_copilot/data/guidelines",
+            "experiment_output": "experiments/output",
+            "patient_corpus": "med_copilot/upstream/soap_with_metadata.json",
+            "patient_retrieval_artifacts_dir": "med_copilot/data/patient_retrieval_so",
+            "guideline_question_model": "gpt-4o-mini",
+            "patient_embedding_model": "emilyalsentzer/Bio_ClinicalBERT",
+            "patient_keyword_model": "gpt-4o-mini",
+            "patient_reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            "patient_retrieval_alpha": 0.5, "patient_retrieval_top_k": 20,
+            "patient_rerank_top_k": 5, "guideline_community_level": 2,
+            "guideline_response_type": "Multiple Paragraphs", "guideline_verbose": True,
+        }
+        self.assertEqual(PIPELINE_DEFAULTS, expected)
+        for field, value in expected.items():
+            self.assertEqual(config.metadata(ROOT)[field], value)
+            self.assertEqual(getattr(config, field), ROOT / value if field in PATH_SETTINGS else value)
+        self.assertEqual(len(config.metadata(ROOT)), 26)  # 23 effective settings + three provenance fields
+
+    def test_paths_resolve_from_repo_root_and_absolute_paths_are_preserved_from_other_cwd(self):
+        for field in PATH_SETTINGS:
+            self.data[field] = "alternate resources café/" + field
+        self.data["guidelines"] = str(self.root / "external guidelines")
+        self.write()
+        with chdir(self.root):
+            config = ExperimentConfig(self.path)
+        for field in PATH_SETTINGS:
+            self.assertEqual(getattr(config, field), (ROOT / self.data[field]).resolve())
+            self.assertEqual(config.metadata(ROOT)[field], self.data[field])
+        self.assertFalse((ROOT / "alternate resources café").exists())
+
+    def test_every_new_setting_validates_types_and_ranges_before_runtime_initialization(self):
+        bad_values = {field: [None, "", "  ", [], 3, False] for field in (
+            "guidelines", "experiment_output", "patient_corpus", "patient_retrieval_artifacts_dir",
+            "guideline_question_model", "patient_embedding_model", "patient_keyword_model", "patient_reranker_model",
+            "guideline_response_type")}
+        bad_values.update({
+            "patient_retrieval_alpha": [None, "0.5", True, -0.1, 1.1, float("nan"), float("inf"), []],
+            "patient_retrieval_top_k": [None, 0, -1, True, 1.0, "20"],
+            "patient_rerank_top_k": [None, 0, -1, False, 1.0, "5"],
+            "guideline_community_level": [None, -1, True, 1.0, "2"],
+            "guideline_verbose": [None, 0, 1, "false", []],
+        })
+        original = dict(self.data)
+        for field, values in bad_values.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    self.data = {**original, field: value}
+                    self.write()
+                    with self.assertRaisesRegex(ValueError, field):
+                        ExperimentConfig(self.path)
+
+    def test_valid_boundaries_and_free_form_guideline_response_types_are_recorded_exactly(self):
+        for alpha in (0, 0.0, 0.25, 1, 1.0):
+            for response_type in ("Single Paragraph", "Single Sentence", "List of 3-7 Points", "Custom format café"):
+                self.data.update(patient_retrieval_alpha=alpha, patient_retrieval_top_k=1,
+                                 patient_rerank_top_k=50, guideline_community_level=0,
+                                 guideline_verbose=False, guideline_response_type=response_type)
+                self.write()
+                metadata = ExperimentConfig(self.path).metadata(ROOT)
+                for field, value in self.data.items():
+                    self.assertEqual(metadata[field], value)
+
+    def test_new_pipeline_fields_do_not_expand_the_confirmation_display(self):
+        self.data.update(PIPELINE_DEFAULTS)
+        self.write()
+        config = ExperimentConfig(self.path)
+        models = {"models": {"mini": {"api_key_env": "KEY", "config": {"model_provider": "openai", "model": "mini"}}}}
+        with redirect_stdout(StringIO()) as out, patch("builtins.input", return_value="y"):
+            self.assertTrue(confirm_experiment(config, models, ROOT))
+        for field in PIPELINE_DEFAULTS:
+            self.assertNotIn(field + ":", out.getvalue())
+        self.assertIn("patient_input:", out.getvalue())
+        self.assertIn("temperature: 1", out.getvalue())
 
 
 if __name__ == "__main__":

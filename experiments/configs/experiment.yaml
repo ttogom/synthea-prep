@@ -1,16 +1,46 @@
-# Main configuration for a MED-COPILOT experiment.
-#
-# selected_models: Aliases to run in order, defined in condition_plan_models.yaml.
-# temperature: Sampling variability passed to every selected final model (0 to 2).
-# max_retries: Upstream retry limit after the initial failed call; at least 1.
-# max_patients: Run the first N patients after evidence filtering; null runs all.
+# All relative paths resolve from the repository root. API keys stay in .env/the environment.
 
-selected_models:
+# Dataset and cohort.
+patient_input: experiments/input/test_sample_so.jsonl  # Prepared patient S/O records.
+patient_labels: experiments/input/test_sample_labels.jsonl  # Gold labels joined by exact patient ID.
+presenting_evidence_only: true  # Keep patients with presenting evidence in their label.
+exclude_none_recorded_plans: true  # Exclude label plan exactly ["none recorded"].
+max_patients: null  # First N after both filters; null runs every eligible patient.
+
+# Evidence variants — every selected final model runs each selected variant.
+selected_variants:
+  - llm_only                      # Patient S/O only.
+  - patient_retrieval             # S/O + similar-patient example.
+  - guidelines                    # S/O + clinical guideline evidence.
+  - patient_retrieval_guidelines  # S/O + both evidence sources.
+
+# Similar-patient retrieval and reranking.
+patient_corpus: med_copilot/upstream/soap_with_metadata.json  # Reference SOAP cases, separate from experiment inputs.
+patient_retrieval_artifacts_dir: med_copilot/data/patient_retrieval_so  # S/O embedding, FAISS index cache, and matching manifest.
+patient_embedding_model: emilyalsentzer/Bio_ClinicalBERT  # Encoder shared by corpus and query embeddings.
+patient_keyword_model: gpt-4o-mini  # OpenAI model extracting query keywords.
+patient_reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2  # Cross-encoder scoring query/reference pairs.
+patient_retrieval_alpha: 0.5  # Embedding weight; keyword-overlap weight is 1 minus this value.
+patient_retrieval_top_k: 20  # Hybrid candidates sent to the reranker.
+patient_rerank_top_k: 5  # Reranked cases retained; only the first enters the final prompt.
+
+# Clinical guidelines — settings.yaml and output/ are resolved under this root.
+guidelines: med_copilot/data/guidelines  # Indexed GraphRAG guideline project.
+guideline_question_model: gpt-4o-mini  # OpenAI model generating the shared guideline-search questions.
+guideline_community_level: 2  # Nonnegative GraphRAG community hierarchy level.
+# Free-form answer description, not an enum; other examples: Single Paragraph,
+# Single Sentence, List of 3-7 Points, structured bullet list with short explanations.
+guideline_response_type: Multiple Paragraphs  # Requested guideline-answer structure.
+guideline_verbose: false  # Enable GraphRAG diagnostic logging.
+
+# Final conditions and plans — model definitions/credential variable names are in condition_plan_models.yaml.
+selected_models:  # Model aliases, in execution order; tokens stay in .env/the environment.
   - gpt_4o_mini
   - ollama_healthcare
   - ollama_llama3
   - ollama_gemma2_2b
+temperature: 1  # Shared temperature for final model calls.
+max_retries: 3  # Shared upstream retry setting for final model calls.
 
-temperature: 1
-max_retries: 3
-max_patients: 1
+# Results.
+experiment_output: experiments/output  # Parent directory for timestamped runs and the HTML report.

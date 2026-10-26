@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.collate_med_copilot_results import (
-    METRICS, generate_report, load_report_data, main, render_report,
+    METRICS, format_top_rank_summary, generate_report, load_report_data, main, render_report,
 )
 
 
@@ -92,6 +92,155 @@ class ReportTests(unittest.TestCase):
 
     def load(self):
         return load_report_data(self.run, root=self.root)
+
+    def native_v3(self):
+        self.metadata["schema_version"] = 3
+        self.metadata["experiment"] = {"selected_variants": ["llm_only", "guidelines"]}
+        self.metadata["assessment_plan_models"] = {"selected_models": ["mini", "llama"], "models": {
+            "mini": {"config": {"model": "mini"}}, "llama": {"config": {"model": "llama"}},
+        }}
+        self.rows = [{"id": "patient-1", "status": "completed", "variants": {
+            variant: {"status": "completed", "error": None,
+                      "assessment_plan_prompts": {"user": "PRIVATE_PROMPT"},
+                      "assessment_plans": {model: output(value) for model in ("mini", "llama")}}
+            for variant, value in (("llm_only", 0.4), ("guidelines", 0.8))
+        }}]
+
+    def test_v3_normalizes_one_patient_variant_model_matrix_without_duplicate_shared_content(self):
+        self.native_v3()
+        self.write()
+        before = [(self.run / name).read_bytes() for name in ("run.json", "results.jsonl")]
+        data = self.load()
+        self.assertEqual(len(data["patients"]), 1)
+        outputs = data["patients"][0]["outputs"]
+        self.assertEqual([(v["variant"], v["model_id"]) for v in outputs],
+                         [(variant, model) for variant in ("llm_only", "guidelines") for model in ("mini", "llama")])
+        self.assertEqual(len(data["summary"]), 24)  # 2 variants * 2 models * 3 ranks * 2 fields
+        self.assertEqual(len(data["comparisons"]), 12)
+        html = generate_report(self.run, root=self.root).read_text()
+        self.assertIn("Best evidence variant by model", html)
+        self.assertNotIn("PRIVATE_PROMPT", html)
+        self.assertEqual(before, [(self.run / name).read_bytes() for name in ("run.json", "results.jsonl")])
+
+    def test_v3_missing_patients_variants_and_models_remain_explicitly_unprocessed(self):
+        self.native_v3()
+        self.labels.append({"id": "patient-2", "condition": "second", "plan": ["action"]})
+        self.metadata["evaluation"]["selected_patient_ids"].append("patient-2")
+        del self.rows[0]["variants"]["guidelines"]
+        del self.rows[0]["variants"]["llm_only"]["assessment_plans"]["llama"]
+        self.write()
+        data = self.load()
+        self.assertEqual(len(data["patients"]), 2)
+        self.assertEqual(len(data["patients"][1]["outputs"]), 4)
+        outputs = [v for patient in data["patients"] for v in patient["outputs"]]
+        self.assertEqual(sum(v["status"] == "not_processed" for v in outputs), 7)
+        self.assertTrue(all(pair["scores"]["condition"]["metrics"]["BERTScore_F1"] is None
+                            for v in outputs if v["status"] == "not_processed" for pair in v["predictions"]))
+        summary = format_top_rank_summary(data)
+        self.assertIn("Best variant: llm_only", summary)
+        self.assertIn("guidelines: condition: N/A (n=0); plan: N/A (n=0)", summary)
+
+    def test_v3_rejects_invalid_variant_metadata_rows_and_duplicate_patients_cleanly(self):
+        cases = ["bad_selection", "duplicate_selection", "unknown_variant", "invalid_variants", "invalid_slot",
+                 "missing_variants", "duplicate_patient", "invalid_patient", "invalid_selected_patient", "empty_selection"]
+        for case in cases:
+            with self.subTest(case=case):
+                self.native_v3()
+                self.metadata["evaluation"]["selected_patient_ids"] = ["patient-1"]
+                if case == "bad_selection": self.metadata["experiment"]["selected_variants"] = [{}]
+                if case == "duplicate_selection": self.metadata["experiment"]["selected_variants"] = ["llm_only"] * 2
+                if case == "unknown_variant": self.rows[0]["variants"]["bad"] = {}
+                if case == "invalid_variants": self.rows[0]["variants"] = []
+                if case == "invalid_slot": self.rows[0]["variants"]["llm_only"] = {"assessment_plans": []}
+                if case == "missing_variants": del self.rows[0]["variants"]
+                if case == "duplicate_patient": self.rows *= 2
+                if case == "invalid_patient": self.rows[0]["id"] = []
+                if case == "invalid_selected_patient": self.metadata["evaluation"]["selected_patient_ids"] = [{}]
+                if case == "empty_selection": self.metadata["experiment"]["selected_variants"] = []
+                self.write()
+                with self.assertRaises(ValueError): self.load()
+
+    def test_best_variant_uses_only_top_condition_bert_mean_and_plan_statistics_are_separate(self):
+        self.native_v3()
+        self.labels.append({"id": "patient-2", "condition": "second", "plan": ["action"]})
+        self.metadata["evaluation"]["selected_patient_ids"].append("patient-2")
+        later = deepcopy(self.rows[0])
+        later["id"] = "patient-2"
+        self.rows.append(later)
+        for row, value in zip(self.rows, (0.0, 1.0)):
+            baseline = row["variants"]["llm_only"]["assessment_plans"]["mini"]
+            baseline["evaluation"][0]["condition"] = score(value)
+            baseline["evaluation"][0]["plan"] = score(0.9)
+            baseline["evaluation"][1]["condition"] = score(100)  # rank 2 cannot choose the winner
+        self.write()
+        summary = format_top_rank_summary(self.load())
+        mini, llama = summary.split("Model: mini\n", 1)[1].split("Model: llama", 1)
+        self.assertIn("llm_only: condition: 0.5000 (n=2); plan: 0.9000 (n=2)", mini)
+        self.assertIn("Best variant: guidelines", mini)
+        self.assertIn("Top-ranked condition: mean=0.8000, population_sd=0.0000, min=0.8000, max=0.8000, n=2", mini)
+        self.assertIn("Top-ranked plan: mean=0.4000", mini)
+        self.assertIn("Best variant: guidelines", llama)
+
+    def test_summary_zero_missing_scores_ties_and_counts_are_not_conflated(self):
+        self.native_v3()
+        for slot in self.rows[0]["variants"].values():
+            slot["assessment_plans"]["mini"] = output(0)
+            slot["assessment_plans"]["mini"]["evaluation"][0]["plan"] = score(status="skipped_no_recorded_plan")
+            slot["assessment_plans"]["llama"] = {"status": "failed_incomplete", "error": {"type": "Error"}}
+        self.write()
+        summary = format_top_rank_summary(self.load())
+        self.assertIn("llm_only: condition: 0.0000 (n=1); plan: N/A (n=0)", summary)
+        self.assertIn("Best variant: llm_only", summary)
+        self.assertIn("Top-ranked plan: N/A (n=0)", summary)
+        self.assertIn("Best variant: unavailable (no scored top-ranked conditions)", summary)
+        self.metadata["experiment"]["selected_variants"].reverse()
+        self.write()
+        summary = format_top_rank_summary(self.load())
+        self.assertIn("Best variant: guidelines", summary)
+
+    def test_summary_population_spread_and_html_escaping_and_empty_cohort(self):
+        self.native_v3()
+        self.labels.append({"id": "patient-2", "condition": "second", "plan": []})
+        self.metadata["evaluation"]["selected_patient_ids"].append("patient-2")
+        second = deepcopy(self.rows[0])
+        second["id"] = "patient-2"
+        self.rows.append(second)
+        self.metadata["assessment_plan_models"]["selected_models"] = ["<script>mini</script>"]
+        for row, value in zip(self.rows, (0.0, 1.0)):
+            for variant in row["variants"].values():
+                variant["assessment_plans"] = {"<script>mini</script>": output(value)}
+        self.write()
+        data = self.load()
+        summary = format_top_rank_summary(data)
+        self.assertIn("mean=0.5000, population_sd=0.5000, min=0.0000, max=1.0000, n=2", summary)
+        html = render_report(data)
+        self.assertNotIn("Model: <script>mini</script>", html)
+        self.assertIn("Model: &lt;script&gt;mini&lt;/script&gt;", html)
+        self.rows = []
+        self.metadata["evaluation"]["selected_patient_ids"] = []
+        self.write()
+        summary = format_top_rank_summary(self.load())
+        self.assertIn("Model: <script>mini</script>", summary)
+        self.assertIn("Best variant: unavailable", summary)
+        self.assertIn("condition: N/A (n=0)", summary)
+
+    def test_summary_of_large_finite_saved_scores_does_not_overflow(self):
+        self.native_v3()
+        self.labels.append({"id": "patient-2", "condition": "second", "plan": []})
+        self.metadata["evaluation"]["selected_patient_ids"].append("patient-2")
+        second = deepcopy(self.rows[0])
+        second["id"] = "patient-2"
+        self.rows.append(second)
+        for row in self.rows:
+            for variant in row["variants"].values():
+                for model in variant["assessment_plans"]:
+                    variant["assessment_plans"][model] = output(1e308)
+        self.write()
+        summary = format_top_rank_summary(self.load())
+        self.assertIn("Best variant: llm_only", summary)
+        self.assertNotIn("inf", summary)
+        self.assertNotIn("nan", summary)
+        self.assertIn("population_sd=0.0000", summary)
 
     def test_legacy_results_use_only_the_final_response_model_and_preserve_all_pairs(self):
         data = self.load()

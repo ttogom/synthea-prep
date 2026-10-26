@@ -1,9 +1,9 @@
-# MED-COPILOT patient output schema (version 2)
+# MED-COPILOT patient output schema (version 3)
 
 Each run appends one JSON object per selected input patient to `results.jsonl`. JSONL
 escaping is ordinary JSON escaping: after `json.loads`, captured strings retain
 their original characters, including whitespace, Unicode, and embedded newlines.
-`run.json.schema_version` is `2` for multi-model runs. Historical files retain their historical schema. The patient keys are written in this order:
+`run.json.schema_version` is `3` for variant/model runs. Historical files retain their historical schema. The patient keys are written in this order:
 
 | Field | Value |
 |---|---|
@@ -13,18 +13,28 @@ their original characters, including whitespace, Unicode, and embedded newlines.
 | `guideline_questions` | Parsed `Key Questions` list, or `null`; the raw question reply remains the GraphRAG query. |
 | `guideline_evidence` | GraphRAG answer text, or `null`. |
 | `graphrag_context` | Returned context tables as `{columns, index, data}`, or `null`. |
-| `assessment_plan_prompts` | Exact final `{system, user}` messages, captured before the final request, or `null`. |
 | `keyword_extraction_raw` | Exact string from the keyword API response's `choices[0].message.content`, captured before validation. Malformed JSON, duplicates, category structure, empty strings, and whitespace are preserved. `null` means extraction was not attempted or no string content was obtained. |
 | `retrieval_keywords` | Actual keyword list returned by successful extraction: categories flattened in symptoms/diagnoses/medications order, terms trimmed, duplicates removed in first-occurrence order. `[]` means successful extraction with no terms. `null` means no valid list was produced. These are distinct from guideline questions. |
 | `retrieved_patient_ids` | Retained hybrid ranking, normally up to 20 references, before cross-encoder reranking. Each entry contains a minimal identity and its unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
 | `reranked_patient_ids` | Retained cross-encoder ranking, up to five references, containing minimal identity and the preceding scores plus `rerank_score`. Ties preserve hybrid order. When a reference is selected, its identity equals the first entry's identity. |
 | `model_responses` | Shared evidence-stage provider metadata lists, described below. |
-| `assessment_plans` | Model-specific outputs keyed by the selected registry aliases, in selection order. |
+| `evidence_status` | Per-source status/error for `patient_retrieval` and `guidelines`, as described below. |
+| `variants` | Selected variants, in config order; each contains its own prompts and model outputs. |
 
 
 ## Final-model outputs and configuration
 
-Each `assessment_plans[model_id]` contains these fields in order:
+Each `variants[variant_id]` contains:
+
+| Field | Value |
+|---|---|
+| `status` | `not_processed`, `completed`, or `failed_incomplete`; completed only when every selected final model completes generation. |
+| `error` | `{type, message}` for unavailable required evidence, or `null`; model errors remain in their model slots. |
+| `evidence_sources` | `[]`, `["patient_retrieval"]`, `["guidelines"]`, or `["patient_retrieval", "guidelines"]`. Names reference shared patient evidence. |
+| `assessment_plan_prompts` | Exact final `{system, user}` messages before generation, or `null` for an unattempted/blocked variant. |
+| `assessment_plans` | Model slots keyed by selected registry aliases, in selection order. |
+
+Each `variants[variant_id].assessment_plans[model_id]` contains these fields in order:
 
 | Field | Value |
 |---|---|
@@ -35,32 +45,51 @@ Each `assessment_plans[model_id]` contains these fields in order:
 | `model_responses` | List of response metadata objects for this model; empty when no response is obtained. |
 | `evaluation` | Three ordered `{rank, condition, plan}` score entries, or `null` when scoring has not started. |
 
-For example (prediction/evaluation arrays abbreviated here):
+For example (shared capture fields and evaluation arrays omitted here):
 
 ```json
 {
   "id": "prepared-patient-id",
   "status": "failed_incomplete",
-  "assessment_plans": {
-    "gpt_4o_mini": {
-      "status": "completed", "error": null,
-      "predictions": [{"condition": "A", "plan": []}, {"condition": "B", "plan": []}, {"condition": "C", "plan": []}],
-      "assessment_plan_raw": "{...}", "model_responses": [], "evaluation": null
+  "evidence_status": {
+    "patient_retrieval": {"status": "not_requested", "error": null},
+    "guidelines": {"status": "completed", "error": null}
+  },
+  "variants": {
+    "llm_only": {
+      "status": "failed_incomplete", "error": null,
+      "evidence_sources": [],
+      "assessment_plan_prompts": {"system": "You are a clinical expert.", "user": "exact S/O-only prompt"},
+      "assessment_plans": {
+        "gpt_4o_mini": {
+          "status": "completed", "error": null,
+          "predictions": [{"condition": "A", "plan": []}, {"condition": "B", "plan": []}, {"condition": "C", "plan": []}],
+          "assessment_plan_raw": "{...}", "model_responses": [], "evaluation": null
+        },
+        "llama_3_3_70b": {
+          "status": "failed_incomplete",
+          "error": {"type": "RuntimeError", "message": "provider request failed"},
+          "predictions": null, "assessment_plan_raw": null,
+          "model_responses": [], "evaluation": null
+        }
+      }
     },
-    "llama_3_3_70b": {
-      "status": "failed_incomplete",
-      "error": {"type": "RuntimeError", "message": "provider request failed"},
-      "predictions": null, "assessment_plan_raw": null,
-      "model_responses": [], "evaluation": null
+    "guidelines": {
+      "status": "not_processed", "error": null,
+      "evidence_sources": ["guidelines"], "assessment_plan_prompts": null,
+      "assessment_plans": {
+        "gpt_4o_mini": {"status": "not_processed", "error": null, "predictions": null, "assessment_plan_raw": null, "model_responses": [], "evaluation": null},
+        "llama_3_3_70b": {"status": "not_processed", "error": null, "predictions": null, "assessment_plan_raw": null, "model_responses": [], "evaluation": null}
+      }
     }
   }
 }
 ```
 
 The complete patient record also contains all shared fields in the table above.
-Shared retrieval, questions, guideline evidence and rendered final messages are
-computed once per patient. Every selected model gets an independent copy of the
-same messages. Final raw replies, predictions, metadata and scores exist only in
+Required retrieval, questions and guideline evidence are computed once per patient.
+Each selected variant renders its prompt once; every selected model gets an
+independent copy of that variant's exact messages. Final raw replies, predictions, metadata and scores exist only in
 the model slots; no default model is implicitly copied to patient-level fields.
 
 Console presentation is owned by the runner: its `RANKED CONDITIONS AND PLANS`
@@ -74,17 +103,28 @@ failures do not stop sibling models or subsequent patients. Refused/truncated
 responses retain obtained content/metadata but fail generation and are not
 scored. An obtained but malformed JSON reply retains the prior `completed`
 generation semantics and is evaluated as missing generation by field/rank.
-A patient is `completed` only if every selected final model completes; otherwise
+A patient is `completed` only if every selected variant/model generation completes; otherwise
 it is `failed_incomplete`. The existing run-status aggregation/exit code applies.
-A shared evidence-stage failure leaves every final-model slot `not_processed`.
+`evidence_status[source]` has `status` and `error`. Status is `not_requested` when
+no selected variant needs the source, `not_processed` before an attempt,
+`completed` on success (including empty retrieval), or `failed_incomplete` on
+initialization/runtime failure. Errors record type and sanitized message. Only
+dependent variants fail with `EvidenceUnavailable`; their model slots stay
+`not_processed`, prompts stay `null`, and independent variants still run. Empty
+successful retrieval uses the existing no-reference fallback. Guideline calls
+are skipped if their only dependent variant is already blocked by retrieval.
+Source errors preserve all captures obtained before failure.
 An interruption retains earlier replies and any completed scores, marks the
-current patient/run failed, and leaves later slots/patients unattempted. Scoring
+current patient/run failed, and leaves later variant/model/patient slots unattempted. Scoring
 starts after all final generation calls, so a generation interruption can retain
 an earlier reply whose evaluation has not yet started.
 
 All runner configuration files belong in `experiments/configs/`.
 `experiment.yaml` is the fixed master config with `selected_models`,
-`temperature`, `max_retries` and `max_patients`. The two shared generation settings are passed
+`temperature`, `max_retries`, `max_patients`, `selected_variants`, `patient_input`,
+`patient_labels`, `presenting_evidence_only`, and `exclude_none_recorded_plans`,
+plus the path/model/tuning settings documented in
+[`experiments/configs/README.md`](../../experiments/configs/README.md). The two shared generation settings are passed
 into every selected final model before upstream configuration/construction.
 Temperature must be a finite number from 0 to 2; max_retries must be an integer
 of at least 1, matching the upstream configuration contract. Booleans and numeric
@@ -102,20 +142,20 @@ YAML keys, missing files, malformed registries, unknown/duplicate selections and
 missing selected credentials fail before a run directory or per-patient requests.
 
 `run.json.experiment` records `config_file`, its exact source-byte `config_sha256`,
-the resolved `model_config` path, effective `selected_models`, `temperature`,
-`max_retries` and `max_patients`. The registry path is recorded as provenance; it is not a YAML
-setting. Input/output settings remain configured in the runner.
+the resolved `model_config` path and all effective experiment settings, including
+applied defaults (listed below). The registry path is provenance, not a YAML setting. Dataset, output and reference-resource paths are configured in the experiment YAML
+and resolve from the repo root; guideline settings/table paths follow the guideline root.
 
 `max_patients` must be `null` (meaning all eligible patients) or a
 positive integer. It selects the first N patients in input-file order after the
-presenting-evidence filter. All input records and labels, including those outside
+presenting-evidence and exact recorded-plan filters. All input records and labels, including those outside
 the limit, are validated before selection. Zero, negatives, booleans, strings and
 floats are rejected at startup. The configured limit is recorded in
 `run.json.experiment.max_patients` and `run.json.evaluation.max_patients`.
 Evaluation `input_patient_count` still counts the full input;
 `selected_patient_count` and `selected_patient_ids` describe the limited cohort.
 `excluded_patient_ids` includes patients excluded by either evidence filtering
-or the limit. Generation, scoring, console numbering, result rows and interrupted
+or recorded-plan filtering or the limit. Generation, scoring, console numbering, result rows and interrupted
 run placeholders use only the selected cohort. A limit larger than the eligible
 cohort runs all eligible patients; an empty eligible cohort remains an error.
 
@@ -140,15 +180,21 @@ The local `.env` is gitignored and its contents are not copied into run artifact
 
 Before creating experiment output or making generation requests, startup checks
 all selected aliases and their nonblank key variables, plus shared-stage
-`OPENAI_API_KEY` and `GRAPHRAG_API_KEY`. Unknown aliases and credential errors are
+`OPENAI_API_KEY` for patient retrieval and additionally `GRAPHRAG_API_KEY` for
+guidelines, only when
+selected variants require those sources. Local `llm_only` needs neither shared
+key nor reference resources/encoder initialization. Unknown aliases and credential errors are
 reported together with the affected YAML files and repository-root `.env`;
 configuration failures exit nonzero. Keyless local endpoints and Azure managed
 identity retain their configured authentication modes. These are configuration
 checks, not authentication/model-access requests. A valid setup displays the
 ordered aliases, provider/model identities and key-variable names and requires
 `y` or `yes` to proceed. Any other answer, EOF or Ctrl+C cancels successfully
-without run artifacts. The prompt omits shared-key status, temperature and retry
-settings. `run.json` still records temperature and max_retries in the experiment
+without run artifacts. The prompt groups model, run, variant and dataset/cohort settings, shows every
+model/run/variant/dataset value, variant descriptions, a hyphenated exact sentinel note,
+aligned intermediate cohort counts, and planned final requests. Additional resource/output
+paths and evidence-model/search tuning are recorded in metadata without expanding
+this confirmation display. `run.json` still records temperature and max_retries in the experiment
 and effective per-model settings.
 
 `run.json.assessment_plan_models` records `config_file`, the exact source-byte
@@ -169,6 +215,79 @@ parameters fail explicitly (`drop_params=false`); there is no mode downgrade,
 model fallback or repair request. Hosted Llama 3.3 70B and an OpenAI-compatible
 local server are included as registry examples. Local servers must already be
 running. Shared question/retrieval models retain their existing configuration.
+
+
+## Variant provenance, cohort and reports
+
+`run.json.experiment` includes all 23 effective experiment settings and defaults,
+plus `config_file`, `config_sha256`, and the model-registry reference. Old configs
+with only the original four required fields default to the combined variant,
+sample paths, presenting-evidence filtering enabled, and recorded-plan filtering
+disabled. The shipped YAML explicitly enables all four variants and both filters.
+
+Resource/output path fields are `guidelines`, `experiment_output`, `patient_corpus`,
+and `patient_retrieval_artifacts_dir`. Evidence model fields are
+`guideline_question_model`, `patient_embedding_model`, `patient_keyword_model`,
+and `patient_reranker_model`. Tuning fields are `patient_retrieval_alpha`,
+`patient_retrieval_top_k`, `patient_rerank_top_k`, `guideline_community_level`,
+`guideline_response_type`, and `guideline_verbose`. Each field has an effective
+default and is always included in `run.json.experiment`. Response type is a
+free-form description with examples in the YAML comments, not an enum.
+
+The runner delegates config-aware encoder loading to `PatientRetrievalStartup`
+before importing FAISS-dependent retrieval code. It skips unused encoders,
+retains loading errors for dependent variants, and passes the same model identity
+to the preloaded encoder and cache. A changed encoder setting after import is
+rejected with a restart instruction before any cache can be mislabeled. This
+retains the Apple Silicon initialization-order workaround outside the pipeline.
+
+The optional existing CLI filter override is saved as the effective YAML setting;
+the original source fingerprint is retained.
+
+`variant_definitions[variant_id]` records `patient_retrieval`, `guidelines`, the
+actual `VARIANT_TEMPLATES['variant_id']` identity, and its rendered-template source
+SHA-256. `prompt_provenance` records the project `diagnosis_plan.py` path and exact
+file SHA-256. All variants derive from the existing `EVALUATE_TEMPLATE_KEYINFO`
+by removing whole unused evidence blocks, including the reference fallback when
+reference evidence is omitted. The combined template is unchanged. Upstream
+source is unchanged; the final-model factory/completion wrappers and evaluator
+remain reused.
+
+Evaluation metadata adds `exclude_none_recorded_plans`,
+`excluded_plan_value: ["none recorded"]`, ordered `filter_order`,
+`after_presenting_evidence_count`, `eligible_patient_count`, and
+`exclusion_reasons` keyed by excluded patient ID (first applicable reason:
+`missing_presenting_evidence`, `no_recorded_plan`, `max_patients`). Existing
+input/selected counts, selected/excluded IDs and data/scoring fingerprints remain.
+Only selected, successfully initialized evidence resources are fingerprinted;
+`reference_data` entries for unused/failed sources are `null`. Model snapshots
+are stored once per run. No resolved credentials are written.
+
+After the batch finishes (including ordinary failures), the runner's `RESULTS`
+block invokes the existing collator and writes `results_summary.html` alongside
+the two JSON artifacts. `results_summary` in run metadata records success and
+filename or a sanitized failure. Report failure preserves completed JSON outputs
+and returns nonzero. Interrupted batches preserve JSON but skip report generation.
+The collator continues to support historical schemas without modifying them.
+
+Terminal and HTML summaries show each model's per-variant mean rank-1 condition
+and Plan `BERTScore_F1`, then select its highest mean rank-1 **condition** variant.
+Ties retain selected-variant order. That variant gets separate condition/Plan
+mean, population standard deviation, min, max and scored count. Only available
+scored values enter statistics, including real zeros; skipped/error/missing
+scores do not. Counts make different scored subsets visible. There is no
+condition/Plan composite. Existing HTML details retain all three ranks, six
+metrics per field, and paired comparisons against `llm_only` when present.
+
+Regenerate a report without model calls:
+
+```bash
+python scripts/collate_med_copilot_results.py experiments/output/<run-directory>
+```
+
+This requires the saved label path to remain available with the recorded hash.
+The collator reads saved artifacts, never current model/config files, and writes
+only its HTML report atomically.
 
 
 ## Condition and Plan evaluation
@@ -203,22 +322,24 @@ partner or other ranks. A non-object pair or one with unexpected keys becomes
 non-object root, unexpected top-level keys, duplicate keys or nonfinite numbers
 anywhere, or an incorrectly typed/sized `predictions` array produce
 `predictions: null`. No arrays are truncated and there is no Markdown fallback.
-The exact response stays in each model slot's `assessment_plan_raw`. The shared
-`assessment_plan_prompts` stays at the patient root; final response metadata
+The exact response stays in each model slot's `assessment_plan_raw`. Each variant stores its
+`assessment_plan_prompts`; final response metadata
 lives in each slot's `model_responses` list.
 Generation statuses do not themselves certify response-format validity.
 
 Gold labels are joined to the complete input by exact ID before cohort selection.
-The `--presenting-evidence-only` option defaults to `true`; `false` includes all
-input patients. Only selected IDs are registered in the run. Excluded patients
+YAML `presenting_evidence_only` defaults to `true`, optionally overridden by the
+existing `--presenting-evidence-only true|false` flag. YAML
+`exclude_none_recorded_plans` excludes label `plan` exactly `["none recorded"]`
+when enabled, then `max_patients` selects the first eligible IDs in input order. Only selected IDs are registered in the run. Excluded patients
 have no result row, including when an interruption marks remaining selected
 patients `not_processed`. `run.json.evaluation` records the option, input and
 selected counts, selected/excluded IDs, label and evaluator fingerprints,
 installed metric-library versions and configured settings.
 
 Each prediction is scored separately against the same patient labels:
-`assessment_plans[model_id].evaluation[i].condition` compares that model's `predictions[i].condition` to the label's
-`condition` with underscores replaced by spaces, and `assessment_plans[model_id].evaluation[i].plan`
+`variants[variant_id].assessment_plans[model_id].evaluation[i].condition` compares that model's `predictions[i].condition` to the label's
+`condition` with underscores replaced by spaces, and `variants[variant_id].assessment_plans[model_id].evaluation[i].plan`
 compares the generated and reference Plan arrays after joining each with
 `", "`. The generated Plan itself stays an array. Each evaluation entry records
 `rank: i + 1`. There is no rank weighting, averaging, maximum, or combined score.
@@ -370,11 +491,11 @@ to replace the extractor's result binding and both ranking callbacks and
 reset both components' retained rankings to `null`, before constructing S/O or
 calling any pipeline stage. These bindings remain attached after the call and
 are replaced at the next patient's start. Patient results, provider-stage lists and all selected final-model slots are
-freshly initialized for every input patient. There is no outer
+freshly initialized for every selected input patient/variant. There is no outer
 end-of-patient cleanup or `try/finally` around the pipeline. GraphRAG's own
 scoped instrumentation still restores its hooks when its context exits.
 Completed captures remain in `failed_incomplete` records. Unstarted patients have shared raw/list fields `null`, shared provider lists
-empty, and a fresh `not_processed` slot for every selected final model.
+empty, and a fresh `not_processed` slot for every selected variant/model.
 
 GraphRAG's non-streaming CLI path internally streams its answer. The project-owned
 `scripts/med_copilot_observability.py` temporarily observes the configured FNLLM
@@ -416,33 +537,33 @@ all four suites; each reported zero connection attempts. No compatibility fixes
 were needed. The original `medcopilot` environment remains on SDK 1.99.9, where
 the previous 197-test suite passed. Live provider integration remains unverified.
 
-## Multi-model offline verification
+## Variant/model offline verification
 
-The experiment-config suite covers shared settings, YAML validation, source
-fingerprints, fixed registry paths, credential checks and confirmation without model imports. The model suite
-exercises the real vendored configuration, factory,
-completion wrappers and retry path with mocked LiteLLM transport. Runner tests
-verify native version-2 JSONL, identical shared messages, configured selection order,
-configuration provenance, startup failures and cancellation without requests or run files,
-separate per-model metrics, partial failures and
-interruptions. The preserved single-model pipeline regressions compare the
-default model's nested fields through an explicit test-only projection; the
-saved files contain only the version-2 structure. Helper tests cover fresh slots
-and stopped-run placeholders, including serialization fallback.
-Live provider/schema compatibility, server availability and clinical quality
-are not established by these offline tests.
+Direct helper/config/scoring/model/collator tests cover effective defaults,
+validation and complete saved experiment settings; fresh nested slots and stopped
+run placeholders (including serialization fallback); exact evidence-section
+removal; sentinel filtering and filter order; model/source failure isolation;
+and report normalization, missing combinations, ties, zeros, scored counts,
+population spread, atomic writes and HTML escaping. Existing model factory,
+completion/retry wrappers, parser and evaluator implementations are reused.
 
-Verified on 2026-10-25: 390 tests passed across all seven MED-COPILOT suites
-(25 experiment-config, 128 helper, 22 model, 48 scoring, 21 retrieval,
-14 observability, 132 runner), including master-config injection, console
-formatting, repository-root `.env` credential loading, startup checks,
-explicit confirmation/cancellation, rejection of removed CLI overrides and patient
-limits after evidence filtering, including metadata and interruption handling.
-Ollama regressions verify the exact downloaded tags, keyless local endpoints,
-strict schema requests, and separate output/scoring slots alongside GPT.
-The helper and runner commands also passed directly in `medcopilot`. The full
-suite passed in the existing temporary environment using requirements-pinned
-OpenAI 2.8.0, LiteLLM 1.83.0, FNLLM 0.4.1 and pandas 3.0.6, with socket connections
-and DNS blocked; it reported zero network attempts. The running local Ollama
-server was queried separately for its model inventory and generation capabilities.
-No live inference calls were made; full patient generation remains unverified.
+Full runner integration tests mock only external model/API/retrieval dependencies
+and exercise real configuration, scoring orchestration and collator code. They
+verify the complete four-variant matrix, shared evidence reuse, identical messages
+across models per variant, keyless local baselines, conditional resources/keys,
+source and model failures, cancellation, dataset paths, cohort counts/exclusions,
+all effective metadata fields, generated HTML/terminal statistics, report failure,
+and generation/scoring interruptions. Existing pipeline/capture regressions are
+preserved through an explicit test-only projection of the combined variant.
+Historical JSON artifacts are not rewritten. No live inference is part of the
+offline suite; provider/schema compatibility, model-server availability and
+clinical quality remain unverified.
+
+Verified on 2026-10-26 in `medcopilot`: all 495 offline tests passed (34 config,
+9 startup, 132 helper, 25 model, 52 scoring, 21 retrieval, 14 observability,
+153 runner, 55 collator). The required direct helper and runner commands also
+passed. Configuration tests check all 23 effective fields/defaults in metadata;
+pipeline tests exercise custom model/tuning values and relocated resources/output,
+conditional initialization, unchanged confirmation, encoder/cache identity and
+startup failure isolation. The original combined/question prompt values and
+response schema remain unchanged. Live inference remains unverified.

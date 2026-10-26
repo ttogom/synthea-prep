@@ -9,7 +9,29 @@ import re
 
 import yaml
 
-from scripts.med_copilot_helpers import repo_path
+from med_copilot.prompts import diagnosis_plan
+from scripts.med_copilot_helpers import VARIANT_DESCRIPTIONS, VARIANT_SOURCES, repo_path
+
+
+# Defaults preserve older experiment files; the shipped YAML spells out each field.
+PIPELINE_DEFAULTS = {
+    "guidelines": "med_copilot/data/guidelines",
+    "experiment_output": "experiments/output",
+    "patient_corpus": "med_copilot/upstream/soap_with_metadata.json",
+    "patient_retrieval_artifacts_dir": "med_copilot/data/patient_retrieval_so",
+    "guideline_question_model": "gpt-4o-mini",
+    "patient_embedding_model": "emilyalsentzer/Bio_ClinicalBERT",
+    "patient_keyword_model": "gpt-4o-mini",
+    "patient_reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "patient_retrieval_alpha": 0.5,
+    "patient_retrieval_top_k": 20,
+    "patient_rerank_top_k": 5,
+    "guideline_community_level": 2,
+    "guideline_response_type": "Multiple Paragraphs",
+    "guideline_verbose": True,
+}
+PATH_SETTINGS = ("patient_input", "patient_labels", "guidelines", "experiment_output",
+                 "patient_corpus", "patient_retrieval_artifacts_dir")
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -37,9 +59,52 @@ class ExperimentConfig:
         self.config_path = Path(config_path).resolve()
         data, self.config_sha256 = read_yaml_config(self.config_path)
         required = {"selected_models", "temperature", "max_retries", "max_patients"}
-        if not isinstance(data, dict) or set(data) != required:
-            raise ValueError("Experiment config requires only selected_models, temperature, max_retries, max_patients "
-                             "in experiments/configs/experiment.yaml")
+        defaults = {
+            "selected_variants": ["patient_retrieval_guidelines"],
+            "patient_input": "experiments/input/test_sample_so.jsonl",
+            "patient_labels": "experiments/input/test_sample_labels.jsonl",
+            "presenting_evidence_only": True,
+            "exclude_none_recorded_plans": False,
+            **PIPELINE_DEFAULTS,
+        }
+        if (not isinstance(data, dict) or not required <= set(data)
+                or set(data) - required - set(defaults)):
+            raise ValueError("Experiment config requires selected_models, temperature, max_retries, max_patients; "
+                             "optional settings are " + ", ".join(defaults) + ". "
+                             "Remove unknown settings from experiments/configs/experiment.yaml")
+        data = {**defaults, **data}
+        variants = data["selected_variants"]
+        if (not isinstance(variants, list) or not variants
+                or any(not isinstance(v, str) or v not in VARIANT_SOURCES for v in variants)
+                or len(set(variants)) != len(variants)):
+            raise ValueError("selected_variants must be a nonempty list of unique supported variants")
+        for field in PATH_SETTINGS:
+            if not isinstance(data[field], str) or not data[field].strip():
+                raise ValueError(f"{field} must be a nonempty path string")
+        for field in ("presenting_evidence_only", "exclude_none_recorded_plans", "guideline_verbose"):
+            if type(data[field]) is not bool:
+                raise ValueError(f"{field} must be a boolean")
+        for field in ("guideline_question_model", "patient_embedding_model", "patient_keyword_model",
+                      "patient_reranker_model", "guideline_response_type"):
+            if not isinstance(data[field], str) or not data[field].strip():
+                raise ValueError(f"{field} must be a nonempty string")
+        for field in ("patient_retrieval_top_k", "patient_rerank_top_k"):
+            if type(data[field]) is not int or data[field] < 1:
+                raise ValueError(f"{field} must be a positive integer")
+        level = data["guideline_community_level"]
+        if type(level) is not int or level < 0:
+            raise ValueError("guideline_community_level must be a nonnegative integer")
+        alpha = data["patient_retrieval_alpha"]
+        if type(alpha) not in (int, float) or not 0 <= alpha <= 1 or not math.isfinite(alpha):
+            raise ValueError("patient_retrieval_alpha must be a finite number between 0 and 1")
+        for field in PIPELINE_DEFAULTS:
+            setattr(self, field, data[field])
+        self.selected_variants = list(variants)
+        self.presenting_evidence_only = data["presenting_evidence_only"]
+        self.exclude_none_recorded_plans = data["exclude_none_recorded_plans"]
+        root = Path(__file__).resolve().parents[1]
+        for field in PATH_SETTINGS:
+            setattr(self, field, (root / data[field]).resolve())
         self.model_config = self.config_path.with_name("condition_plan_models.yaml")
         selection = data["selected_models"]
         if (not isinstance(selection, list) or not selection
@@ -63,6 +128,28 @@ class ExperimentConfig:
         self.max_retries = retries
         self.max_patients = max_patients
 
+    @property
+    def needs_patient_retrieval(self):
+        return any("patient_retrieval" in VARIANT_SOURCES[v] for v in self.selected_variants)
+
+    @property
+    def needs_guidelines(self):
+        return any("guidelines" in VARIANT_SOURCES[v] for v in self.selected_variants)
+
+    def variant_metadata(self, root):
+        """Identify the actual project templates and fingerprint their exact text."""
+        source = Path(diagnosis_plan.__file__)
+        return {
+            "variant_definitions": {v: {
+                "patient_retrieval": "patient_retrieval" in VARIANT_SOURCES[v],
+                "guidelines": "guidelines" in VARIANT_SOURCES[v],
+                "template": f"VARIANT_TEMPLATES[{v!r}]",
+                "sha256": hashlib.sha256(diagnosis_plan.VARIANT_TEMPLATES[v].encode()).hexdigest(),
+            } for v in self.selected_variants},
+            "prompt_provenance": {"file": repo_path(source, root),
+                                  "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
+        }
+
     def metadata(self, root):
         """Record the source fingerprint, fixed registry, and effective run settings."""
         return {
@@ -73,10 +160,17 @@ class ExperimentConfig:
             "temperature": self.temperature,
             "max_retries": self.max_retries,
             "max_patients": self.max_patients,
+            "selected_variants": list(self.selected_variants),
+            "patient_input": repo_path(self.patient_input, root),
+            "patient_labels": repo_path(self.patient_labels, root),
+            "presenting_evidence_only": self.presenting_evidence_only,
+            "exclude_none_recorded_plans": self.exclude_none_recorded_plans,
+            **{field: (repo_path(getattr(self, field), root) if field in PATH_SETTINGS
+                       else getattr(self, field)) for field in PIPELINE_DEFAULTS},
         }
 
 
-def configured_model_credentials(registry, selected_models, *, require_shared_credentials=False):
+def configured_model_credentials(registry, selected_models, *, require_shared_credentials=False, required_shared_keys=None):
     """Check alias/key configuration together without authenticating or making requests.
 
     Return private (variable-name, value) pairs. Only variable names may be shown
@@ -122,18 +216,19 @@ def configured_model_credentials(registry, selected_models, *, require_shared_cr
                           "    to .env in the repository root.")
             continue
         credentials[model_id] = (key_env, key)
-    if require_shared_credentials:
-        for key_env in ("OPENAI_API_KEY", "GRAPHRAG_API_KEY"):
-            value = os.environ.get(key_env)
-            if (not value or not value.strip()) and key_env not in missing_keys:
-                issues.append(f"Shared-stage API key is missing or empty: {key_env}\n"
-                              f"    Add {key_env} to .env in the repository root.")
+    shared_keys = (("OPENAI_API_KEY", "GRAPHRAG_API_KEY") if require_shared_credentials
+                   else tuple(required_shared_keys or ()))
+    for key_env in shared_keys:
+        value = os.environ.get(key_env)
+        if (not value or not value.strip()) and key_env not in missing_keys:
+            issues.append(f"Shared-stage API key is missing or empty: {key_env}\n"
+                          f"    Add {key_env} to .env in the repository root.")
     if issues:
         raise ValueError("\n\n".join(f"  - {issue}" for issue in issues))
     return credentials
 
 
-def confirm_experiment(experiment, model_metadata, root):
+def confirm_experiment(experiment, model_metadata, root, cohort=None):
     """Show model identities/key variable names and require an affirmative answer."""
     print("\n========== EXPERIMENT CONFIGURATION ==========\n")
     print(f"Experiment: {repo_path(experiment.config_path, root)}")
@@ -150,11 +245,31 @@ def confirm_experiment(experiment, model_metadata, root):
             print("     Authentication: Azure managed identity")
         else:
             print("     API key not required (unauthenticated endpoint)")
-    print("\nTo change the selection, edit selected_models in")
-    print("experiments/configs/experiment.yaml and restart the script.")
-    print("\nThese are the models selected for this experiment run.")
+    print("\nRun settings:")
+    for key in ("temperature", "max_retries", "max_patients"):
+        value = getattr(experiment, key)
+        print(f"  {key}: {'null' if value is None else value}")
+    print("\nEvidence variants:")
+    for variant in experiment.selected_variants:
+        print(f"  {variant} - {VARIANT_DESCRIPTIONS[variant]}")
+    print("\nDataset and cohort:")
+    settings = experiment.metadata(root)
+    for key in ("patient_input", "patient_labels", "presenting_evidence_only", "exclude_none_recorded_plans"):
+        value = settings[key]
+        print(f"  {key}: {str(value).lower() if type(value) is bool else value}")
+    print('    - Excluded label plan value is exactly ["none recorded"] when the filter is enabled.')
+    if cohort is not None:
+        print()
+        for label, key in (("Input patients:", "input_patient_count"),
+                           ("After presenting-evidence filter:", "after_presenting_evidence_count"),
+                           ("After recorded-plan filter:", "eligible_patient_count"),
+                           ("Selected after patient limit:", "selected_patient_count")):
+            print(f"  {label:<34}{cohort[key]:>3}")
+        count = cohort["selected_patient_count"] * len(experiment.selected_variants) * len(experiment.selected_models)
+        print(f"\nPlanned final requests: {count} (before retries; shared evidence calls are additional)")
+    print("\nTo change settings, edit experiments/configs/experiment.yaml and restart the script.")
     try:
-        answer = input("Is this correct? Start the run? [y/N]: ")
+        answer = input("Is this configuration correct? Start the run? [y/N]: ")
     except (EOFError, KeyboardInterrupt):
         answer = ""
     if answer.strip().lower() not in ("y", "yes"):

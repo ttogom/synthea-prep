@@ -34,6 +34,18 @@ MODEL_RESPONSE_STAGES = (
     "keyword_extraction", "guideline_questions", "guideline_query_embedding",
     "guideline_evidence", "assessment_plan",
 )
+VARIANT_SOURCES = {
+    "llm_only": (),
+    "patient_retrieval": ("patient_retrieval",),
+    "guidelines": ("guidelines",),
+    "patient_retrieval_guidelines": ("patient_retrieval", "guidelines"),
+}
+VARIANT_DESCRIPTIONS = {
+    "llm_only": "Patient S/O only",
+    "patient_retrieval": "S/O + similar-patient example",
+    "guidelines": "S/O + clinical guidelines",
+    "patient_retrieval_guidelines": "S/O + both evidence sources",
+}
 # Legacy Markdown-parser compatibility: a line naming one generated section,
 # such as "## Assessment", "## Plan", or a standalone label ("Assessment:",
 # "**Plan**") like the reference patient's. Heading level, case, bold, an
@@ -312,8 +324,24 @@ def format_assessment_plans(assessment_plans, model_settings):
     return "\n\n".join(groups)
 
 
-def new_patient_result(patient_id, status=None, model_ids=None):
+def new_patient_result(patient_id, status=None, model_ids=None, variant_ids=None):
     """Fresh patient outputs; provider response lists are independent per stage/patient."""
+    if variant_ids is not None:
+        model_ids, variant_ids = tuple(model_ids), tuple(variant_ids)
+        sources = {source for variant in variant_ids for source in VARIANT_SOURCES[variant]}
+        fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
+            "predictions", "assessment_plan_raw", "evaluation", "assessment_plan_prompts")]
+        return {
+            "id": patient_id, "status": status, **dict.fromkeys(fields),
+            "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES if stage != "assessment_plan"},
+            "evidence_status": {source: {"status": "not_processed" if source in sources else "not_requested",
+                                         "error": None} for source in ("patient_retrieval", "guidelines")},
+            "variants": {variant: {
+                "status": "not_processed", "error": None,
+                "evidence_sources": list(VARIANT_SOURCES[variant]), "assessment_plan_prompts": None,
+                "assessment_plans": {model: new_model_result() for model in model_ids},
+            } for variant in variant_ids},
+        }
     if model_ids is not None:
         fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
             "predictions", "assessment_plan_raw", "evaluation")]
@@ -520,17 +548,20 @@ def run_status(patient_statuses, stopped=False):
 class ExperimentRun:
     """Own one run directory: run.json plus one results.jsonl line per patient."""
 
-    def __init__(self, run_dir, metadata, patient_ids, model_ids=None):
+    def __init__(self, run_dir, metadata, patient_ids, model_ids=None, variant_ids=None):
         self.run_dir = Path(run_dir)
         self.metadata = metadata
         self.unsaved = list(patient_ids)
         self.statuses = []
         self.results_writable = True
         self.model_ids = None if model_ids is None else tuple(model_ids)
+        self.variant_ids = None if variant_ids is None else tuple(variant_ids)
 
     @classmethod
     def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids,
-              model_ids=None):
+              model_ids=None, variant_ids=None):
+        model_ids = None if model_ids is None else tuple(model_ids)
+        variant_ids = None if variant_ids is None else tuple(variant_ids)
         run_dir = create_run_dir(output_root, make_run_name(started_at, input_path, branch))
         metadata = {
             "run_name": run_dir.name,
@@ -544,8 +575,10 @@ class ExperimentRun:
         }
         if model_ids is not None:
             metadata.update(schema_version=2, assessment_plan_models=None)
+        if variant_ids is not None:
+            metadata.update(schema_version=3, variant_definitions=None, prompt_provenance=None)
         (run_dir / RESULTS_FILE).touch(exist_ok=False)
-        run = cls(run_dir, metadata, patient_ids, model_ids)
+        run = cls(run_dir, metadata, patient_ids, model_ids, variant_ids)
         run.update()
         return run
 
@@ -589,7 +622,7 @@ class ExperimentRun:
         if current is not None and current["id"] in self.unsaved and self.results_writable:
             current = {**current, "status": "failed_incomplete"}
             for record in (current, new_patient_result(
-                    current["id"], "failed_incomplete", self.model_ids)):
+                    current["id"], "failed_incomplete", self.model_ids, self.variant_ids)):
                 try:
                     self.save_result(record)
                     break
@@ -600,7 +633,7 @@ class ExperimentRun:
             if not self.results_writable:
                 break
             try:
-                self.save_result(new_patient_result(patient_id, "not_processed", self.model_ids))
+                self.save_result(new_patient_result(patient_id, "not_processed", self.model_ids, self.variant_ids))
             except Exception:
                 break
         try:

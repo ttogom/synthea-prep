@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -20,7 +21,7 @@ class AssessmentPlanModels:
     """
 
     def __init__(self, config_path, selected_models, *, temperature, max_retries,
-                 require_shared_credentials=False):
+                 require_shared_credentials=False, required_shared_keys=None):
         self.config_path = Path(config_path).resolve()
         data, self.config_sha256 = read_yaml_config(self.config_path)
         if not isinstance(data, dict) or set(data) != {"models"}:
@@ -37,6 +38,7 @@ class AssessmentPlanModels:
             raise ValueError("Select a nonempty list of unique model IDs")
         credentials = configured_model_credentials(
             registry, selection, require_shared_credentials=require_shared_credentials,
+            required_shared_keys=required_shared_keys,
         )
         self.model_ids = tuple(selection)
         self._models = {}
@@ -131,10 +133,7 @@ class AssessmentPlanModels:
                 output.update(parse_condition_plan(content))
                 output["status"] = "completed"
             except Exception as exc:
-                message = str(exc)
-                for secret in self._secrets:
-                    message = message.replace(secret, "[REDACTED]")
-                output["error"] = {"type": type(exc).__name__, "message": message}
+                output["error"] = self.error_metadata(exc)
             except BaseException as exc:
                 output["error"] = {"type": type(exc).__name__, "message": "Generation interrupted"}
                 raise
@@ -143,3 +142,11 @@ class AssessmentPlanModels:
         result["status"] = ("completed" if all(
             output["status"] == "completed" for output in result["assessment_plans"].values()
         ) else "failed_incomplete")
+
+    def error_metadata(self, exc):
+        """Describe source/model failures without exposing selected or shared keys."""
+        message = str(exc)
+        secrets = self._secrets + [os.environ.get(name) for name in ("OPENAI_API_KEY", "GRAPHRAG_API_KEY")]
+        for secret in sorted({value for value in secrets if value}, key=len, reverse=True):
+            message = message.replace(secret, "[REDACTED]")
+        return {"type": type(exc).__name__, "message": message}

@@ -98,3 +98,24 @@ Return ONLY one valid JSON object with the single key "predictions":
 - Do not include Markdown, code fences, headings, reasoning, or any additional keys or text.
 '''
 
+# Keep the combined prompt above verbatim. Remove whole evidence sections,
+# including the reference-specific fallback; never rewrite the common task.
+REFERENCE_SECTION = """Use the following example as clinical reference evidence:
+{example}
+If no reference patient is available, identify the three conditions and their respective plans from the patient's Subjective and Objective and any relevant additional information.
+
+"""
+GUIDELINE_SECTION = """Additional Information that may help you make a decision if relevant:
+{Key_info}
+
+"""
+if (EVALUATE_TEMPLATE_KEYINFO.count(REFERENCE_SECTION) != 1
+        or EVALUATE_TEMPLATE_KEYINFO.count(GUIDELINE_SECTION) != 1):
+    raise ValueError("Update evidence section boundaries when editing the final prompt")
+
+VARIANT_TEMPLATES = {
+    "llm_only": EVALUATE_TEMPLATE_KEYINFO.replace(REFERENCE_SECTION, "").replace(GUIDELINE_SECTION, ""),
+    "patient_retrieval": EVALUATE_TEMPLATE_KEYINFO.replace(GUIDELINE_SECTION, ""),
+    "guidelines": EVALUATE_TEMPLATE_KEYINFO.replace(REFERENCE_SECTION, ""),
+    "patient_retrieval_guidelines": EVALUATE_TEMPLATE_KEYINFO,
+}

@@ -640,7 +640,7 @@ class PatientScorerTests(unittest.TestCase):
 
 class ScoringArgumentTests(unittest.TestCase):
     def test_config_and_model_cli_overrides_are_rejected(self):
-        self.assertEqual(vars(parse_scoring_args([])), {"presenting_evidence_only": True})
+        self.assertEqual(vars(parse_scoring_args([])), {"presenting_evidence_only": None})
         for option in ("--config", "--experiment-config", "--model-config", "--models"):
             with self.subTest(option=option), redirect_stderr(StringIO()) as stderr:
                 with self.assertRaises(SystemExit) as failure:
@@ -649,7 +649,7 @@ class ScoringArgumentTests(unittest.TestCase):
                 self.assertIn("unrecognized arguments", stderr.getvalue())
 
     def test_default_bare_and_explicit_boolean_forms(self):
-        for arguments, expected in (([], True), (["--presenting-evidence-only"], True),
+        for arguments, expected in (([], None), (["--presenting-evidence-only"], True),
                                     (["--presenting-evidence-only", "true"], True),
                                     (["--presenting-evidence-only=true"], True),
                                     (["--presenting-evidence-only", "FALSE"], False),
@@ -669,6 +669,62 @@ class ScoringArgumentTests(unittest.TestCase):
     def test_none_uses_process_arguments(self):
         with patch.object(sys, "argv", ["runner", "--presenting-evidence-only", "false"]):
             self.assertFalse(parse_scoring_args().presenting_evidence_only)
+
+
+class VariantScoringTests(unittest.TestCase):
+    setUp = PatientScorerTests.setUp
+    write_labels = PatientScorerTests.write_labels
+    scorer = PatientScorerTests.scorer
+    result = PatientScorerTests.result
+
+    def test_exact_sentinel_filter_precedes_limit_and_records_exclusions(self):
+        rows = [dict(id=name, subjective="S", objective="O") for name in ("no-evidence", "no-plan", "keep", "limited")]
+        self.patients = rows
+        self.write_labels([dict(id=row["id"], condition="gold", plan=["none recorded"] if row["id"] == "no-plan" else ["plan"],
+                                has_presenting_evidence=row["id"] != "no-evidence") for row in rows])
+        scorer = self.scorer(max_patients=1, exclude_none_recorded_plans=True)
+        self.assertEqual([row["id"] for row in scorer.patients], ["keep"])
+        metadata = scorer.metadata(self.directory)
+        self.assertEqual([metadata[key] for key in ("input_patient_count", "after_presenting_evidence_count", "eligible_patient_count", "selected_patient_count")], [4, 3, 2, 1])
+        self.assertEqual(metadata["exclusion_reasons"], {"no-evidence": ["missing_presenting_evidence"], "no-plan": ["no_recorded_plan"], "limited": ["max_patients"]})
+        self.assertEqual(metadata["excluded_plan_value"], ["none recorded"])
+        self.assertTrue(metadata["exclude_none_recorded_plans"])
+
+    def test_filter_does_not_normalize_case_whitespace_or_other_plan_shapes(self):
+        plans = [["none recorded"], ["None recorded"], [" none recorded "], [], ["none recorded", "other"]]
+        self.patients = [dict(id=str(i), subjective="S", objective="O") for i in range(len(plans))]
+        self.write_labels([dict(id=str(i), condition="gold", plan=plan, has_presenting_evidence=True) for i, plan in enumerate(plans)])
+        self.assertEqual([p["id"] for p in self.scorer(exclude_none_recorded_plans=True).patients], ["1", "2", "3", "4"])
+        self.assertEqual(len(self.scorer(exclude_none_recorded_plans=False).patients), 5)
+        for value in (None, 0, 1, "true"):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                self.scorer(exclude_none_recorded_plans=value)
+
+    def test_all_filtered_cohort_and_bad_later_labels_fail_before_scoring(self):
+        self.write_labels([dict(id="patient-a", condition="gold", plan=["none recorded"], has_presenting_evidence=True), self.labels[1]])
+        with self.assertRaisesRegex(ValueError, "No patients selected"):
+            self.scorer(exclude_none_recorded_plans=True)
+        self.labels[-1]["plan"] = "invalid"
+        self.write_labels(self.labels)
+        with self.assertRaisesRegex(ValueError, "plan"):
+            self.scorer(max_patients=1, exclude_none_recorded_plans=True)
+
+    def test_nested_variants_score_each_model_without_mixing_predictions(self):
+        scorer = self.scorer()
+        record = {"id": "patient-a", "variants": {}}
+        for variant in ("llm_only", "guidelines"):
+            record["variants"][variant] = {"assessment_plans": {
+                model: {**self.result(condition=f"{variant}:{model}"), "status": "completed"}
+                for model in ("one", "two")}}
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            self.assertIs(scorer.score_result(record), record)
+        self.assertEqual(evaluate.call_count, 24)
+        for variant, data in record["variants"].items():
+            for model, output in data["assessment_plans"].items():
+                self.assertEqual(output["predictions"][0]["condition"], f"{variant}:{model}")
+                self.assertEqual(len(output["evaluation"]), 3)
+                self.assertEqual(output["evaluation"][0]["condition"]["metrics"], self.metrics)
+        self.assertNotIn("evaluation", record)
 
 
 if __name__ == "__main__":

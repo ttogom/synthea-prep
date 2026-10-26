@@ -1300,6 +1300,53 @@ class RunFileTests(TemporaryRootTestCase):
 
 
 class ExperimentRunTests(TemporaryRootTestCase):
+    def test_variant_start_stop_preserves_partial_scores_and_every_unstarted_combination(self):
+        variants = list(H["VARIANT_SOURCES"])
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="variants", commit="0" * 40,
+            patient_ids=["a", "b"], model_ids=iter(["mini", "llama"]), variant_ids=iter(variants),
+        )
+        metadata, records, _ = self.read(run)
+        self.assertEqual(metadata["schema_version"], 3)
+        self.assertIsNone(metadata["variant_definitions"])
+        self.assertIsNone(metadata["prompt_provenance"])
+        self.assertEqual(records, [])
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"], variant_ids=variants)
+        current["variants"]["llm_only"].update(status="completed", assessment_plan_prompts={"user": "exact café\n"})
+        model = current["variants"]["llm_only"]["assessment_plans"]["mini"]
+        model.update(status="completed", assessment_plan_raw="RAW", predictions=[{"condition": "A", "plan": []}],
+                     evaluation=[{"rank": 1, "condition": {"metrics": {"BERTScore_F1": 0.0}}}])
+        run.stop(self.finished, current)
+        metadata, records, text = self.read(run)
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(records[0], {**current, "status": "failed_incomplete"})
+        self.assertEqual(records[1], H["new_patient_result"]("b", "not_processed", ["mini", "llama"], variants))
+        self.assertEqual(text.count("\n"), 2)
+        self.assertEqual(current["status"], None)
+        self.assertEqual(run.unsaved, [])
+
+    def test_variant_stop_fallback_and_completion_retain_the_selected_matrix(self):
+        variants, models = ["llm_only", "guidelines"], ["mini", "llama"]
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="variants", commit=None,
+            patient_ids=["a", "b"], model_ids=models, variant_ids=variants,
+        )
+        current = H["new_patient_result"]("a", model_ids=models, variant_ids=variants)
+        current["variants"]["guidelines"]["assessment_plans"]["llama"]["predictions"] = float("nan")
+        run.stop(self.finished, current)
+        self.assertEqual(self.read(run)[1], [H["new_patient_result"](id_, status, models, variants)
+                                           for id_, status in (("a", "failed_incomplete"), ("b", "not_processed"))])
+        completed = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="completed", commit=None,
+            patient_ids=["a"], model_ids=models, variant_ids=variants,
+        )
+        completed.save_result(H["new_patient_result"]("a", "completed", models, variants))
+        self.assertEqual(completed.finish(self.finished), "completed")
+        self.assertEqual(self.read(completed)[0]["schema_version"], 3)
+
     def test_multimodel_stop_preserves_partial_outputs_and_initializes_unstarted_models(self):
         run = H["ExperimentRun"].start(
             self.repo / "experiments/output", root=self.repo, input_path=self.input,
@@ -1568,6 +1615,43 @@ class ExperimentRunTests(TemporaryRootTestCase):
 
 
 class CaptureHelperTests(unittest.TestCase):
+    def test_variant_factory_sources_statuses_and_nested_captures_are_independent(self):
+        variants = list(H["VARIANT_SOURCES"])
+        first = H["new_patient_result"]("a", model_ids=iter(["mini", "llama"]), variant_ids=iter(variants))
+        second = H["new_patient_result"]("b", model_ids=["mini", "llama"], variant_ids=variants)
+        self.assertEqual(list(first["variants"]), variants)
+        for field in ("predictions", "assessment_plan_raw", "evaluation", "assessment_plan_prompts", "assessment_plans"):
+            self.assertNotIn(field, first)
+        self.assertNotIn("assessment_plan", first["model_responses"])
+        self.assertEqual(first["evidence_status"], {source: {"status": "not_processed", "error": None}
+                                                  for source in ("patient_retrieval", "guidelines")})
+        for name, variant in first["variants"].items():
+            self.assertEqual(variant["evidence_sources"], list(H["VARIANT_SOURCES"][name]))
+            self.assertEqual(variant["status"], "not_processed")
+            self.assertIsNone(variant["error"])
+            self.assertIsNone(variant["assessment_plan_prompts"])
+            self.assertEqual(list(variant["assessment_plans"]), ["mini", "llama"])
+            self.assertEqual(variant["assessment_plans"]["mini"], H["new_model_result"]())
+        slot = first["variants"]["llm_only"]["assessment_plans"]["mini"]
+        slot["model_responses"].append({"response_id": "private"})
+        first["variants"]["guidelines"]["evidence_sources"].append("changed")
+        first["evidence_status"]["guidelines"]["error"] = {"type": "Error"}
+        self.assertEqual(second["variants"]["llm_only"]["assessment_plans"]["mini"], H["new_model_result"]())
+        self.assertEqual(first["variants"]["llm_only"]["assessment_plans"]["llama"], H["new_model_result"]())
+        self.assertEqual(first["variants"]["guidelines"]["assessment_plans"]["mini"], H["new_model_result"]())
+        self.assertEqual(H["VARIANT_SOURCES"]["guidelines"], ("guidelines",))
+        self.assertIsNone(second["evidence_status"]["guidelines"]["error"])
+
+    def test_variant_factory_marks_unused_sources_without_inventing_evidence(self):
+        for variant, required in H["VARIANT_SOURCES"].items():
+            with self.subTest(variant=variant):
+                row = H["new_patient_result"]("a", "not_processed", ["model"], [variant])
+                for source, state in row["evidence_status"].items():
+                    self.assertEqual(state["status"], "not_processed" if source in required else "not_requested")
+                    self.assertIsNone(state["error"])
+                self.assertIsNone(row["guideline_evidence"])
+                self.assertIsNone(row["selected_reference_patient"])
+
     def test_patient_initial_capture_values_and_stage_lists_are_independent(self):
         first, second = H["new_patient_result"]("a"), H["new_patient_result"]("b", "not_processed")
         for field in ("keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids", "reranked_patient_ids"):

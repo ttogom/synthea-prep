@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import re
+from statistics import mean, pstdev
 import tempfile
 
 
@@ -250,6 +251,46 @@ def load_report_data(run_dir, *, root=ROOT):
             raise ValueError(f"Invalid reference condition or plan for patient {patient_id!r}")
         labels[patient_id] = label
     rows = _json_lines((run_dir / "results.jsonl").read_text(encoding="utf-8"), run_dir / "results.jsonl")
+    selected_ids = evaluation.get("selected_patient_ids", [])
+    if (not isinstance(selected_ids, list) or not all(_text(value) for value in selected_ids)
+            or len(set(selected_ids)) != len(selected_ids)):
+        raise ValueError("run.json selected_patient_ids must be unique, nonempty strings")
+    # Schema v3 stores one patient row containing explicit variant/model slots.
+    # Normalize it into the same report records used for historical schemas.
+    selected_variants = (metadata.get("experiment") or {}).get("selected_variants", [])
+    if (not isinstance(selected_variants, list) or any(not isinstance(v, str) or v not in VARIANTS or v == "not_recorded"
+            for v in selected_variants) or len(set(selected_variants)) != len(selected_variants)):
+        raise ValueError("run.json selected_variants must be unique supported variant IDs")
+    if metadata.get("schema_version") == 3:
+        if not selected_variants:
+            raise ValueError("Schema v3 requires selected_variants")
+        existing = set()
+        for row in rows:
+            patient_id = row.get("id")
+            if not _text(patient_id) or patient_id in existing:
+                raise ValueError("Schema v3 requires unique, nonempty patient IDs")
+            if "variants" not in row:
+                raise ValueError("Schema v3 requires variants in every patient row")
+            existing.add(patient_id)
+        rows.extend({"id": patient_id, "status": "not_processed", "variants": {}}
+                    for patient_id in selected_ids if patient_id not in existing)
+    expanded = []
+    for row in rows:
+        if "variants" not in row:
+            expanded.append(row)
+            continue
+        variants = row["variants"]
+        if not isinstance(variants, dict):
+            raise ValueError("variants must be an object")
+        for variant in dict.fromkeys([*selected_variants, *variants]):
+            if variant not in VARIANTS or variant == "not_recorded":
+                raise ValueError(f"Unsupported evidence_variant: {variant!r}")
+            entry = variants.get(variant, {})
+            if not isinstance(entry, dict) or not isinstance(entry.get("assessment_plans", {}), dict):
+                raise ValueError("Variant and assessment_plans must be objects")
+            expanded.append({"id": row.get("id"), "status": entry.get("status", "not_processed"),
+                             "evidence_variant": variant, "assessment_plans": entry.get("assessment_plans", {})})
+    rows = expanded
     for row in rows:
         if "assessment_plans" in row and not isinstance(row["assessment_plans"], dict):
             raise ValueError(f"assessment_plans must be an object for patient {row.get('id')!r}")
@@ -264,10 +305,6 @@ def load_report_data(run_dir, *, root=ROOT):
         raise ValueError("run.json selected model IDs must be unique, nonempty strings")
     legacy_names = list(dict.fromkeys(name for row in rows if (name := _legacy_model(row))))
     legacy_default = legacy_names[0] if len(legacy_names) == 1 else "Model not recorded"
-    selected_ids = evaluation.get("selected_patient_ids", [])
-    if (not isinstance(selected_ids, list) or not all(_text(value) for value in selected_ids)
-            or len(set(selected_ids)) != len(selected_ids)):
-        raise ValueError("run.json selected_patient_ids must be unique, nonempty strings")
     existing_ids = {row.get("id") for row in rows if _text(row.get("id"))}
     recorded_model_ids = list(dict.fromkeys(model for row in rows
                                            for model in row.get("assessment_plans", {})))
@@ -317,7 +354,8 @@ def load_report_data(run_dir, *, root=ROOT):
         notices.append("Reference labels have no saved fingerprint; their original contents could not be verified.")
     if not patients:
         notices.append("No patient results were saved or selected. There are no scores to summarize.")
-    return {"patients": patients, "summary": summary, "comparisons": comparisons, "notices": notices}
+    return {"patients": patients, "summary": summary, "comparisons": comparisons, "notices": notices,
+            "selected_models": model_ids, "selected_variants": selected_variants}
 
 
 def _e(value):
@@ -431,6 +469,48 @@ def _patient_html(patient, index):
             f'{_plan(patient["reference_plan"], reference=True)}</div></section>{"".join(outputs)}</div></details>')
 
 
+def format_top_rank_summary(data):
+    """Summarize top-1 BERTScore only; choose best variant by condition mean.
+
+    Missing/error/skipped scores are excluded, never replaced by zero. Ties
+    retain report/config order. Plan scores are independent, without a composite.
+    """
+    groups = {model: {variant: {"condition": [], "plan": []}
+                      for variant in data.get("selected_variants", [])}
+              for model in data.get("selected_models", [])}
+    for patient in data["patients"]:
+        for output in patient["outputs"]:
+            fields = groups.setdefault(output["model_id"], {}).setdefault(
+                output["variant"], {"condition": [], "plan": []})
+            first = output["predictions"][0]
+            for field in fields:
+                score = first["scores"][field]
+                if score["status"] == "scored":
+                    fields[field].append(score["metrics"]["BERTScore_F1"])
+    lines = ["Top-ranked condition/Plan BERTScore_F1 (higher is better).",
+             "Best variant: highest mean CONDITION BERTScore_F1; ties retain configured order.",
+             "Scored subsets can differ; compare counts. No condition/Plan composite is calculated."]
+    for model, variants in groups.items():
+        lines.append(f"\nModel: {model}")
+        for variant, fields in variants.items():
+            values = []
+            for field, scores in fields.items():
+                values.append(f"{field}: {mean(scores):.4f} (n={len(scores)})" if scores else f"{field}: N/A (n=0)")
+            lines.append(f"  {variant}: " + "; ".join(values))
+        scored = [variant for variant, fields in variants.items() if fields["condition"]]
+        if not scored:
+            lines.append("  Best variant: unavailable (no scored top-ranked conditions)")
+            continue
+        best = max(scored, key=lambda v: mean(variants[v]["condition"]))
+        lines.append(f"  Best variant: {best}")
+        for field, scores in variants[best].items():
+            lines.append(f"    Top-ranked {field}: " + (
+                f"mean={mean(scores):.4f}, population_sd={pstdev(scores):.4f}, "
+                f"min={min(scores):.4f}, max={max(scores):.4f}, n={len(scores)}"
+                if scores else "N/A (n=0)"))
+    return "\n".join(lines)
+
+
 def render_report(data):
     """Render a self-contained HTML page; all source text is escaped, never executed."""
     patients = data["patients"]
@@ -458,7 +538,7 @@ def render_report(data):
         "HEALTH": _e(health), "HEALTH_CLASS": "attention" if attention else "healthy",
         "HEALTH_DETAIL": _e(health_detail), "PATIENTS": str(len(patients)), "MODELS": str(len(models)),
         "NOTICES": notices, "MODEL_OPTIONS": options(models, {}), "VARIANT_OPTIONS": options(variants, VARIANTS),
-        "SUMMARY": _overview_rows(data), "COMPARISONS": _overview_rows(data, comparison=True),
+        "SUMMARY": _overview_rows(data), "TOP_RANK_SUMMARY": _e(format_top_rank_summary(data)), "COMPARISONS": _overview_rows(data, comparison=True),
         "METRIC_HEADER": _metric_header(),
         "DETAILS": ''.join(_patient_html(patient, index) for index, patient in enumerate(patients)),
         # Escape script boundaries, including malicious labels and Unicode separators.
@@ -486,7 +566,7 @@ def generate_report(run_dir, *, root=ROOT):
 
 
 def main(argv=None):
-    """Standalone entry point; runner integration is deliberately separate."""
+    """Standalone entry point; the runner also generates this report after a batch."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_directory", type=Path, help="Directory containing run.json and results.jsonl")
     args = parser.parse_args(argv)
@@ -509,6 +589,7 @@ _PAGE = r'''<!doctype html>
 </div></header>
 <main><noscript><p class="notice">JavaScript is disabled. All results and all overview ranks are shown below; filters require JavaScript.</p></noscript>
 @@NOTICES@@
+<section aria-label="Top-ranked BERTScore summary"><h2>Best evidence variant by model</h2><pre class="top-rank-summary">@@TOP_RANK_SUMMARY@@</pre></section>
 <div class="filters"><label>Model<select id="model-filter"><option value="">All models</option>@@MODEL_OPTIONS@@</select></label>
 <label>Evidence<select id="variant-filter"><option value="">All recorded outputs</option>@@VARIANT_OPTIONS@@</select></label>
 <p>Filters apply to the overview and patient predictions.</p><button id="reset" type="button">Reset filters</button></div>
@@ -538,7 +619,7 @@ _STYLE = r'''
 :root{--ink:#1b302e;--muted:#647570;--accent:#197266;--pale:#eaf3ef;--line:#dbe4de;--paper:#fbfcf9;--amber:#8d5f18}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 header,main{max-width:1280px;margin:auto;padding:32px 44px}header{padding-bottom:12px}.brand{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:1.7px;font-weight:700;color:var(--muted)}
-.brand-mark{display:grid;place-items:center;width:30px;height:30px;background:var(--accent);color:white;font-size:16px;border-radius:8px;letter-spacing:0}.brand-rule{height:15px;width:1px;background:var(--line);margin:0 4px}
+.brand-mark{display:grid;place-items:center;width:30px;height:30px;background:var(--accent);color:white;font-size:16px;border-radius:8px;letter-spacing:0}.top-rank-summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7}.brand-rule{height:15px;width:1px;background:var(--line);margin:0 4px}
 .hero{display:flex;justify-content:space-between;gap:36px;align-items:center;margin:38px 0 30px}.eyebrow{font-size:10px;letter-spacing:1.4px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:0 0 8px;display:block}
 h1{font-size:42px;font-weight:600;letter-spacing:-1.8px;line-height:1.15;margin:0 0 12px}h1 span{color:var(--accent)}.intro{max-width:560px;color:var(--muted);margin:0;font-size:15px}.health{max-width:310px;padding:16px 18px;background:var(--pale);border-radius:10px;border-left:3px solid var(--accent);flex-shrink:0}
 .health strong{font-size:13px}.health p{font-size:12px;color:var(--muted);margin:5px 0 0}.health.attention{background:#fff5e5;border-color:var(--amber)}

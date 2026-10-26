@@ -327,6 +327,37 @@ class AssessmentPlanModelsTests(unittest.TestCase):
                          "condition_plan_models.yaml", ".env in the repository root"):
             self.assertIn(expected, str(error.exception))
 
+    def test_shared_key_preflight_requires_only_the_requested_evidence_sources(self):
+        with patch.dict(os.environ, {"TEST_MODEL_KEY": "mini", "OPENAI_API_KEY": "shared"}, clear=True):
+            models = AssessmentPlanModels(self.path, ["mini"], **self.run_settings,
+                                          required_shared_keys=["OPENAI_API_KEY"])
+            self.assertEqual(models.model_ids, ("mini",))
+            with patch.object(ModelFactory, "create_chat_model") as factory, self.assertRaisesRegex(ValueError, "GRAPHRAG_API_KEY"):
+                AssessmentPlanModels(self.path, ["mini"], **self.run_settings,
+                                     required_shared_keys=["OPENAI_API_KEY", "GRAPHRAG_API_KEY"])
+            factory.assert_not_called()
+        with patch.dict(os.environ, {"TEST_MODEL_KEY": "mini"}, clear=True):
+            self.assertEqual(AssessmentPlanModels(self.path, ["mini"], **self.run_settings,
+                                                  required_shared_keys=[]).model_ids, ("mini",))
+        self.transport.assert_not_called()
+
+    def test_public_error_metadata_redacts_final_and_shared_credentials_without_mutating_error(self):
+        models = self.load_models(["mini", "llama"])
+        exc = RuntimeError("secret-mini secret-llama shared-openai shared-graph café\nsecond line")
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "shared-openai", "GRAPHRAG_API_KEY": "shared-graph"}):
+            self.assertEqual(models.error_metadata(exc), {
+                "type": "RuntimeError", "message": "[REDACTED] [REDACTED] [REDACTED] [REDACTED] café\nsecond line"})
+        self.assertIn("secret-mini", str(exc))
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(models.error_metadata(ValueError("normal failure")),
+                             {"type": "ValueError", "message": "normal failure"})
+
+    def test_error_metadata_redacts_overlapping_keys_in_full_before_shorter_prefixes(self):
+        models = self.load_models()
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "secret-mini-extended", "GRAPHRAG_API_KEY": "secret-mini-extended-graph"}):
+            exc = RuntimeError("secret-mini-extended-graph secret-mini-extended secret-mini")
+            self.assertEqual(models.error_metadata(exc)["message"], "[REDACTED] [REDACTED] [REDACTED]")
+
     def test_preflight_rejects_bad_selection_without_initializing_clients(self):
         for selection in ([], ["missing"], ["mini", "mini"], [1], "mini"):
             with self.subTest(selection=selection), patch.object(ModelFactory, "create_chat_model") as factory:
