@@ -410,98 +410,46 @@ def _metric_header():
     return ''.join(f'<th scope="col">{_e(metric)}</th>' for metric in DISPLAY_METRICS)
 
 
-def _overview_rows(data, *, comparison=False):
-    # One model/evidence cell spans all ranks. Each rank gets its own cell
-    # beside the two condition/plan subrows it describes.
-    models = {}
-    for row in data["comparisons" if comparison else "summary"]:
-        variants = models.setdefault(row["model_id"], {})
-        ranks = variants.setdefault(row["variant"], {})
-        ranks.setdefault(row["rank"], {})[row["field"]] = row
-    rendered = []
-    for model_id, variants in models.items():
-        for variant, ranks in variants.items():
-            row_count = sum(len(fields) for fields in ranks.values())
-            identity = (f'<th class="group-label" scope="rowgroup" rowspan="{row_count}">'
-                        f'<strong>{_e(model_id)}</strong><span class="row-detail">{_e(variant)}</span></th>')
-            subrows = []
-            for rank in sorted(ranks):
-                fields = ranks[rank]
-                rank_cell = (f'<th class="rank-cell" scope="row" rowspan="{len(fields)}">'
-                             f'<span class="rank-label">Rank {rank}</span></th>')
-                first_field = True
-                for field in ("condition", "plan"):
-                    if field not in fields:
-                        continue
-                    row = fields[field]
-                    if comparison:
-                        count = f'{row["paired_patients"]} paired patients'
-                        values = row["differences"]
-                    else:
-                        counts = row["counts"]
-                        skipped = counts.get("skipped_no_recorded_plan", 0) + counts.get("missing_reference", 0)
-                        errors = sum(counts.get(status, 0) for status in ("error", "interrupted", "invalid_metrics"))
-                        scored = counts.get("scored", 0)
-                        missing = row["total"] - scored - skipped - errors
-                        count = f'{scored}/{row["total"]} scored · {skipped} skipped · {missing} missing · {errors} errors'
-                        values = row["means"]
-                    subrows.append(f'<tr data-rank="{rank}" data-field="{field}">'
-                                   f'{identity if not subrows else ""}{rank_cell if first_field else ""}'
-                                   f'<th class="field-label" scope="row">{field.title()}'
-                                   f'<span class="row-detail counts">{_e(count)}</span></th>'
-                                   + ''.join(f'<td>{_number(values[metric], signed=comparison)}</td>'
-                                             for metric in DISPLAY_METRICS) + '</tr>')
-                    first_field = False
-            attributes = f'data-model="{_e(model_id)}" data-variant="{_e(variant)}"'
-            rendered.append(f'<tbody class="model-group" {attributes}>{"".join(subrows)}</tbody>')
-    return ''.join(rendered)
-
-
 def _patient_html(patient, index, variant_labels):
     outputs = []
     for output in patient["outputs"]:
-        heading = f'<h4>{_e(output["model_id"])}</h4>'
-        if output["model_name"] != output["model_id"]:
-            heading += f'<p class="model-name">{_e(output["model_name"])}</p>'
-        heading += f'<p class="variant-name">{_e(variant_labels[output["variant"]])}</p>'
         status = output["status"]
         note = output["generation_note"] or "Generation completed"
         pairs = []
         for pair in output["predictions"]:
             rows = []
             for field, entry in pair["scores"].items():
-                rows.append(f'<tr><th scope="row">{field.title()}<span class="score-reason">'
-                            f'{_e(entry["reason"])}</span></th>'
+                rank = (f'<th class="rank-cell" scope="rowgroup" rowspan="2">{pair["rank"]}</th>'
+                        if field == "condition" else '')
+                prediction = (_e(pair["condition"]) if pair["condition"] else '<span class="unavailable">Condition unavailable</span>') if field == "condition" else _plan(pair["plan"])
+                rows.append(f'<tr data-field="{field}">{rank}<th class="prediction-field" scope="row">'
+                            f'<span class="field-kind">{field.title()}</span>{prediction}'
+                            f'<span class="score-reason">{_e(entry["reason"])}</span></th>'
                             + ''.join(f'<td>{_number(entry["metrics"][metric])}</td>' for metric in DISPLAY_METRICS)
                             + '</tr>')
-            condition = _e(pair["condition"]) if pair["condition"] else '<span class="unavailable">Condition unavailable</span>'
-            pairs.append(f'<li class="prediction"><div class="pair-heading"><span class="rank">{pair["rank"]}</span>'
-                         f'<h5>{condition}</h5></div><div class="plan-block"><span class="eyebrow">Corresponding plan</span>'
-                         f'{_plan(pair["plan"])}</div><div class="table-scroll"><table class="score-table">'
-                         f'<caption class="sr-only">Rank {pair["rank"]} condition and plan scores</caption>'
-                         f'<thead><tr><th scope="col">Evaluation</th>{_metric_header()}</tr></thead>'
-                         f'<tbody>{"".join(rows)}</tbody></table></div></li>')
-        outputs.append(f'<section class="model-output" data-model="{_e(output["model_id"])}" '
-                       f'data-variant="{_e(output["variant"])}"><div class="output-heading"><div>{heading}</div>'
-                       f'<span class="badge {status}">{_e(note)}</span></div>'
-                       f'<ol class="predictions">{"".join(pairs)}</ol></section>')
+            pairs.append(f'<tbody class="prediction" data-rank="{pair["rank"]}">{"".join(rows)}</tbody>')
+        reported = f'<p class="model-name">Reported model: {_e(output["model_name"])}</p>'
+        outputs.append(f'<details class="model-output" data-model="{_e(output["model_id"])}" '
+                       f'data-variant="{_e(output["variant"])}"><summary><strong>{_e(output["model_id"])}</strong>'
+                       f'<span class="variant-name">{_e(variant_labels[output["variant"]])}'
+                       f'<span class="variant-id">{_e(output["variant"])}</span></span>'
+                       f'<span class="badge {status}">{_e(note)}</span></summary>'
+                       f'<div class="model-body">{reported}<div class="table-scroll"><table class="score-table">'
+                       '<caption class="sr-only">All three ranked condition and plan predictions with all six scores</caption>'
+                       f'<thead><tr><th scope="col">Rank</th><th scope="col">Prediction / scoring</th>{_metric_header()}</tr></thead>'
+                       f'{"".join(pairs)}</table></div></div></details>')
     search = (patient["id"] + ' ' + patient["reference_condition"] + ' '
               + patient["reference_condition"].replace('_', ' ')).lower()
     return (f'<details class="patient" data-search="{_e(search)}" id="patient-{index}">'
             f'<summary><span class="patient-heading"><strong>{_e(patient["reference_condition"].replace("_", " "))}</strong>'
             f'<span class="patient-id" title="{_e(patient["id"])}">{_e(patient["id"])}</span></span>'
-            '<span class="expand-hint" aria-hidden="true">View predictions <span>+</span></span></summary>'
+            '<span class="expand-hint" aria-hidden="true">Expand / collapse <span>+</span></span></summary>'
             '<div class="patient-body"><section class="reference"><div><span class="eyebrow">Reference condition</span>'
             f'<h3>{_e(patient["reference_condition"])}</h3></div><div><span class="eyebrow">Reference plan</span>'
             f'{_plan(patient["reference_plan"], reference=True)}</div></section>{"".join(outputs)}</div></details>')
 
 
-def format_top_rank_summary(data):
-    """Summarize top-1 BERTScore only; choose best variant by condition mean.
-
-    Missing/error/skipped scores are excluded, never replaced by zero. Ties
-    retain report/config order. Plan scores are independent, without a composite.
-    """
+def _top_rank_groups(data):
     groups = {model: {variant: {"condition": [], "plan": []}
                       for variant in data.get("selected_variants", [])}
               for model in data.get("selected_models", [])}
@@ -514,6 +462,21 @@ def format_top_rank_summary(data):
                 score = first["scores"][field]
                 if score["status"] == "scored":
                     fields[field].append(score["metrics"]["BERTScore_F1"])
+    return groups
+
+
+def _best_variant(variants):
+    scored = [variant for variant, fields in variants.items() if fields["condition"]]
+    return max(scored, key=lambda variant: mean(variants[variant]["condition"])) if scored else None
+
+
+def format_top_rank_summary(data):
+    """Summarize top-1 BERTScore only; choose best variant by condition mean.
+
+    Missing/error/skipped scores are excluded, never replaced by zero. Ties
+    retain report/config order. Plan scores are independent, without a composite.
+    """
+    groups = _top_rank_groups(data)
     lines = ["Top-ranked condition/Plan BERTScore_F1 (higher is better).",
              "Best variant: highest mean CONDITION BERTScore_F1; ties retain configured order.",
              "Scored subsets can differ; compare counts. No condition/Plan composite is calculated."]
@@ -524,11 +487,10 @@ def format_top_rank_summary(data):
             for field, scores in fields.items():
                 values.append(f"{field}: {mean(scores):.4f} (n={len(scores)})" if scores else f"{field}: N/A (n=0)")
             lines.append(f"  {variant}: " + "; ".join(values))
-        scored = [variant for variant, fields in variants.items() if fields["condition"]]
-        if not scored:
+        best = _best_variant(variants)
+        if best is None:
             lines.append("  Best variant: unavailable (no scored top-ranked conditions)")
             continue
-        best = max(scored, key=lambda v: mean(variants[v]["condition"]))
         lines.append(f"  Best variant: {best}")
         for field, scores in variants[best].items():
             lines.append(f"    Top-ranked {field}: " + (
@@ -538,10 +500,108 @@ def format_top_rank_summary(data):
     return "\n".join(lines)
 
 
+def _display_variant_labels(data):
+    labels = dict(data.get("variant_labels", VARIANTS))
+    if labels.get("patient_retrieval_guidelines") == "S/O + both evidence sources":
+        labels["patient_retrieval_guidelines"] = "S/O + similar-patient example + clinical guidelines"
+    return labels
+
+
+def _statistics_groups(data):
+    groups = {}
+    for patient in data["patients"]:
+        for output in patient["outputs"]:
+            ranks = groups.setdefault((output["model_id"], output["variant"]), {})
+            for prediction in output["predictions"]:
+                fields = ranks.setdefault(prediction["rank"], {})
+                for field, score in prediction["scores"].items():
+                    entry = fields.setdefault(field, {"counts": Counter(), "values": {metric: [] for metric in METRICS}})
+                    entry["counts"][score["status"]] += 1
+                    if score["status"] == "scored":
+                        for metric in METRICS:
+                            entry["values"][metric].append(score["metrics"][metric])
+    return groups
+
+
+def _variant_statistics_html(ranks, model, variant):
+    groups = []
+    for rank in (1, 2, 3):
+        rows = []
+        for field in ("condition", "plan"):
+            entry = ranks.get(rank, {}).get(field, {})
+            counts = entry.get("counts", {})
+            scored, total = counts.get("scored", 0), sum(counts.values())
+            unavailable = [f'{count} {SCORE_REASONS.get(status, "unavailable").lower()}'
+                           for status, count in counts.items() if status != "scored" and count]
+            coverage = f'{scored}/{total} scored' + ('; ' + '; '.join(unavailable) if unavailable else '')
+            for index, metric in enumerate(DISPLAY_METRICS):
+                scores = entry.get("values", {}).get(metric, [])
+                values = (mean(scores), pstdev(scores), min(scores), max(scores)) if scores else (None,) * 4
+                rank_cell = f'<th scope="rowgroup" rowspan="12" class="rank-cell">{rank}</th>' if field == "condition" and index == 0 else ''
+                field_cell = (f'<th scope="rowgroup" rowspan="6" class="stat-field">{field.title()}'
+                              f'<span class="score-reason">{_e(coverage)}</span></th>') if index == 0 else ''
+                rows.append(f'<tr data-field="{field}" data-metric="{_e(metric)}">{rank_cell}{field_cell}'
+                            f'<th scope="row">{_e(metric)}</th>'
+                            + ''.join(f'<td>{_number(value)}</td>' for value in values)
+                            + f'<td>{len(scores)}</td></tr>')
+        groups.append(f'<tbody data-rank="{rank}">{"".join(rows)}</tbody>')
+    return ('<div class="table-scroll"><table class="variant-statistics-table">'
+            f'<caption class="sr-only">All ranks and six-metric statistics for {_e(model)} / {_e(variant)}</caption>'
+            '<thead><tr><th scope="col">Rank</th><th scope="col">Field / coverage</th><th scope="col">Metric</th>'
+            '<th scope="col">Mean</th><th scope="col">Population SD</th><th scope="col">Min</th>'
+            '<th scope="col">Max</th><th scope="col">Scored patients</th></tr></thead>'
+            + ''.join(groups) + '</table></div>')
+
+
+def _top_rank_html(data, labels):
+    statistics = _statistics_groups(data)
+    cards = []
+    for model, variants in _top_rank_groups(data).items():
+        best = _best_variant(variants)
+        if best is None:
+            best_label = '<p class="top-rank-unavailable">No scored top-ranked conditions; best variant unavailable.</p>'
+        else:
+            best_label = (f'<div class="top-rank-best"><span class="eyebrow">Best evidence variant</span>'
+                          f'<strong>{_e(labels.get(best, best))}</strong>'
+                          f'<span class="top-rank-variant-id">{_e(best)}</span></div>')
+        rows = []
+        configured_order = {variant: index for index, variant in enumerate(variants)}
+        ordered = sorted(variants, key=lambda variant: (not bool(variants[variant]["condition"]),
+                         -mean(variants[variant]["condition"]) if variants[variant]["condition"] else 0))
+        for variant in ordered:
+            fields = variants[variant]
+            cells = []
+            for scores in fields.values():
+                cells.append(f'<td><span class="top-rank-value">{_number(mean(scores) if scores else None)}</span>'
+                             f'<span class="top-rank-count">n={len(scores)}</span></td>')
+            winning = variant == best
+            marker = '<span class="top-rank-winner">Best</span>' if winning else ''
+            scores = {field: mean(values) if values else None for field, values in fields.items()}
+            attributes = ' '.join(f'data-{field}-score="{scores[field] if scores[field] is not None else ""}"' for field in ("condition", "plan"))
+            table = _variant_statistics_html(statistics.get((model, variant), {}), model, variant)
+            rows.append(f'<tbody class="top-rank-variant" data-variant="{_e(variant)}" data-order="{configured_order[variant]}" {attributes}>'
+                        f'<tr data-variant="{_e(variant)}" data-best="{str(winning).lower()}">'
+                        f'<th scope="row"><span class="top-rank-variant-name">{_e(labels.get(variant, variant))}{marker}</span>'
+                        f'<span class="top-rank-variant-id">{_e(variant)}</span></th>{"".join(cells)}</tr>'
+                        '<tr class="variant-details-row"><td colspan="3">'
+                        f'<details class="variant-statistics" data-variant="{_e(variant)}">'
+                        f'<summary>All three ranks · all six metrics <span class="sr-only">for {_e(labels.get(variant, variant))}</span></summary>'
+                        f'{table}</details></td></tr></tbody>')
+        table = ('<div class="table-scroll"><table class="top-rank-table" data-sort-field="condition" data-sort-direction="descending">'
+                 f'<caption class="sr-only">Top-ranked BERTScore by evidence variant for {_e(model)}</caption>'
+                 '<thead><tr><th scope="col">Evidence variant</th><th scope="col" aria-sort="descending">'
+                 '<button type="button" class="score-sort" data-field="condition">Condition <span class="sort-indicator" aria-hidden="true">↓</span></button></th>'
+                 '<th scope="col" aria-sort="none"><button type="button" class="score-sort" data-field="plan">Plan <span class="sort-indicator" aria-hidden="true">↕</span></button></th></tr></thead>'
+                 f'{"".join(rows)}</table></div>') if rows else '<p class="unavailable">No evidence variants available.</p>'
+        cards.append(f'<article class="top-rank-card" data-model="{_e(model)}">'
+                     f'<h3>{_e(model)}</h3>{best_label}{table}</article>')
+    return ''.join(cards) if cards else '<p class="empty">No model results available.</p>'
+
+
 def render_report(data):
     """Render a self-contained HTML page; all source text is escaped, never executed."""
     patients = data["patients"]
-    variant_labels = data.get("variant_labels", VARIANTS)
+    variant_labels = _display_variant_labels(data)
     outputs = [output for patient in patients for output in patient["outputs"]]
     models = list(dict.fromkeys(output["model_id"] for output in outputs))
     variants = list(dict.fromkeys(output["variant"] for output in outputs))
@@ -566,7 +626,7 @@ def render_report(data):
         "HEALTH": _e(health), "HEALTH_CLASS": "attention" if attention else "healthy",
         "HEALTH_DETAIL": _e(health_detail), "PATIENTS": str(len(patients)), "MODELS": str(len(models)),
         "NOTICES": notices, "MODEL_OPTIONS": options(models, {}), "VARIANT_OPTIONS": options(variants, variant_labels),
-        "SUMMARY": _overview_rows(data), "TOP_RANK_SUMMARY": _e(format_top_rank_summary(data)), "COMPARISONS": _overview_rows(data, comparison=True),
+        "TOP_RANK_SUMMARY": _top_rank_html(data, variant_labels),
         "METRIC_HEADER": _metric_header(),
         "DETAILS": ''.join(_patient_html(patient, index, variant_labels) for index, patient in enumerate(patients)),
         # Escape script boundaries, including malicious labels and Unicode separators.
@@ -615,56 +675,54 @@ _PAGE = r'''<!doctype html>
 <div class="health @@HEALTH_CLASS@@"><strong>@@HEALTH@@</strong><p>@@HEALTH_DETAIL@@</p></div></div>
 <div class="stats"><div><span>Patients</span><strong>@@PATIENTS@@</strong></div><div><span>Models</span><strong>@@MODELS@@</strong></div>
 </div></header>
-<main><noscript><p class="notice">JavaScript is disabled. All results and all overview ranks are shown below; filters require JavaScript.</p></noscript>
+<main><noscript><p class="notice">JavaScript is disabled. All patients and expandable details remain available. Sorting and filtering require JavaScript.</p></noscript>
 @@NOTICES@@
-<section aria-label="Top-ranked BERTScore summary"><h2>Best evidence variant by model</h2><pre class="top-rank-summary">@@TOP_RANK_SUMMARY@@</pre></section>
+<section aria-labelledby="top-rank-heading"><div class="section-heading"><h2 id="top-rank-heading">Best evidence variant by model</h2></div>
+<p class="section-note">Selected by the highest mean condition BERTScore_F1 for the first-ranked prediction. Higher is better. Plan scores are shown separately.</p>
+<div class="top-rank-cards">@@TOP_RANK_SUMMARY@@</div>
+<p class="metric-note">Click Condition or Plan to sort rank-1 means. Missing scores stay last. Counts (n) may differ; ties follow configured order. Expand any variant for all six metrics at ranks 1–3, including mean, population SD, range, and scored patient counts.</p></section>
+<section aria-labelledby="patient-heading"><div class="section-heading"><div><h2 id="patient-heading">Patient predictions</h2></div>
+<button id="expand-all" type="button">Expand shown patients</button></div>
 <div class="filters"><label>Model<select id="model-filter"><option value="">All models</option>@@MODEL_OPTIONS@@</select></label>
 <label>Evidence<select id="variant-filter"><option value="">All recorded outputs</option>@@VARIANT_OPTIONS@@</select></label>
-<p>Filters apply to the overview and patient predictions.</p><button id="reset" type="button">Reset filters</button></div>
-<section aria-labelledby="overview-heading"><div class="section-heading"><div><p class="eyebrow">01 / Aggregate results</p><h2 id="overview-heading">Performance overview</h2></div>
-</div>
-<p class="section-note">Arithmetic means across scored patients, separately for each model, evidence variant, field, and rank. Skipped and unavailable scores are excluded; zero scores are included. Overview uses all patients.</p>
-<div class="table-scroll overview"><table id="summary-table"><caption class="sr-only">Mean scores by model, evidence variant, rank, and field</caption>
-<thead><tr><th scope="col">Model / evidence</th><th scope="col">Rank</th><th scope="col">Field / coverage</th>@@METRIC_HEADER@@</tr></thead>@@SUMMARY@@</table>
-<p class="empty" id="summary-empty" hidden>No results match these filters.</p></div>
-<p class="metric-note">Scores measure text similarity, not clinical correctness. Metrics retain their saved scales and are not combined. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</p></section>
-<section aria-labelledby="comparison-heading"><div class="section-heading"><div><p class="eyebrow">02 / Evidence comparison</p><h2 id="comparison-heading">Change from patient S/O only</h2></div><span class="chip">vs. llm_only</span></div>
-<p class="section-note">Mean difference (evidence variant − llm_only) for the same model, rank, field, and metric. Only patients scored in both variants are paired. All three ranks show condition and plan scores together.</p>
-<div class="table-scroll overview"><table id="comparison-table"><caption class="sr-only">Paired score differences from llm_only</caption><thead><tr><th scope="col">Model / evidence</th><th scope="col">Rank</th><th scope="col">Field / paired coverage</th>@@METRIC_HEADER@@</tr></thead>
-@@COMPARISONS@@</table><p class="empty" id="comparison-empty">No paired baseline comparison is available for these patients.</p></div></section>
-<section aria-labelledby="patient-heading"><div class="section-heading"><div><p class="eyebrow">03 / Individual results</p><h2 id="patient-heading">Patient predictions</h2></div>
-<button id="expand-all" type="button">Expand shown patients</button></div><div class="patient-tools"><label>Find a patient<input id="patient-search" type="search" placeholder="Search patient ID or reference condition…"></label>
+<p>Filters apply to patient details.</p><button id="reset" type="button">Reset filters</button></div>
+<div class="patient-tools"><label>Find a patient<input id="patient-search" type="search" placeholder="Search patient ID or reference condition…"></label>
 <span id="patient-count" aria-live="polite">@@PATIENTS@@ patients</span></div>
-<p class="section-note">The first 10 matching patients are shown initially. Search checks all patients and filters this section only. Expand a patient to see the label and all three condition / plan pairs per model and evidence variant.</p>
+<p class="section-note">The first 10 matching patients are shown initially. Search checks all patients. Expand a patient, then a model/variant row, to see all predictions and scores. Sticky headers and the floating collapse controls remain available while scrolling.</p>
 <div id="patients">@@DETAILS@@</div><p id="patients-empty" class="empty" hidden>No patients match these filters.</p>
 <div class="patient-pagination"><button id="show-more" type="button" hidden>Show 10 more patients</button>
 <button id="show-less" type="button" hidden>Show first 10 patients</button></div></section>
-<footer>Saved predictions and scores only. No generation or scoring is performed by this report.</footer></main>
+<div id="collapse-controls" class="collapse-controls" role="group" aria-label="Collapse patient details" hidden>
+<button id="collapse-current" type="button">Collapse current patient</button><button id="collapse-all" type="button">Collapse all patients</button></div>
+<footer>Saved predictions and scores only. No generation or scoring is performed by this report. Scores measure text similarity, not clinical correctness. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</footer></main>
 <script id="report-data" type="application/json">@@DATA@@</script><script>@@SCRIPT@@</script></body></html>'''
 
 
 _STYLE = r'''
 :root{--ink:#1b302e;--muted:#647570;--accent:#197266;--pale:#eaf3ef;--line:#dbe4de;--paper:#fbfcf9;--amber:#8d5f18}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-header,main{max-width:1280px;margin:auto;padding:32px 44px}header{padding-bottom:12px}.brand{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:1.7px;font-weight:700;color:var(--muted)}
-.brand-mark{display:grid;place-items:center;width:30px;height:30px;background:var(--accent);color:white;font-size:16px;border-radius:8px;letter-spacing:0}.top-rank-summary{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7}.brand-rule{height:15px;width:1px;background:var(--line);margin:0 4px}
-.hero{display:flex;justify-content:space-between;gap:36px;align-items:center;margin:38px 0 30px}.eyebrow{font-size:10px;letter-spacing:1.4px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:0 0 8px;display:block}
-h1{font-size:42px;font-weight:600;letter-spacing:-1.8px;line-height:1.15;margin:0 0 12px}h1 span{color:var(--accent)}.intro{max-width:560px;color:var(--muted);margin:0;font-size:15px}.health{max-width:310px;padding:16px 18px;background:var(--pale);border-radius:10px;border-left:3px solid var(--accent);flex-shrink:0}
-.health strong{font-size:13px}.health p{font-size:12px;color:var(--muted);margin:5px 0 0}.health.attention{background:#fff5e5;border-color:var(--amber)}
-.stats{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid var(--line);border-radius:12px;background:white;overflow:hidden}.stats>div{padding:18px 24px;border-right:1px solid var(--line)}.stats>div:last-child{border:0}.stats span{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}.stats strong{font-size:27px;line-height:1;font-weight:600;letter-spacing:-.8px}
-main{padding-top:10px}.notice{border:1px solid #e8dfca;background:#fffaf0;border-radius:8px;color:#74613d;font-size:12px;padding:12px 16px;margin:14px 0}.filters{display:flex;align-items:end;gap:16px;padding:18px 0 22px;border-bottom:1px solid var(--line);margin-top:4px}
-label{font-size:11px;color:var(--muted);font-weight:600;display:block}select,input{display:block;margin-top:5px;padding:9px 30px 9px 11px;border:1px solid #ccd9d0;border-radius:6px;background:white;color:var(--ink);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:38px;max-width:100%}select{min-width:165px}input{width:390px;padding-right:10px}.filters p{font-size:11px;color:var(--muted);margin:0 auto 10px 0;max-width:200px}
-button{border:1px solid #cbdad0;border-radius:6px;background:white;color:var(--accent);font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:10px 13px;cursor:pointer;white-space:nowrap}button:hover{background:var(--pale)}:focus-visible{outline:3px solid #7fc3af;outline-offset:3px}
-main>section{margin-top:38px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:12px}h2{font-size:23px;line-height:1.3;letter-spacing:-.6px;font-weight:600;margin:0}.section-note{font-size:12px;color:var(--muted);max-width:970px;margin:0 0 16px;line-height:1.7}
-.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:9px;background:white}table{border-collapse:collapse;width:100%;font-size:12px;text-align:left}table th,table td{padding:14px 16px;border-bottom:1px solid var(--line)}thead th{font-size:10px;color:var(--muted);letter-spacing:.4px;background:#f3f6f1;font-weight:600;white-space:nowrap}tbody th{font-weight:500;min-width:240px}tbody th strong{font-size:12px;display:block;overflow-wrap:anywhere}td{text-align:right;font-variant-numeric:tabular-nums;min-width:94px}thead th:not(:first-child){text-align:right}tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}.row-detail{display:block;font-size:10px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.counts{font-size:10px;letter-spacing:.05px}.na{color:#89948d;font-size:11px}.metric-note{font-size:11px;color:var(--muted);margin:12px 0 0}.chip{font:11px ui-monospace,monospace;background:var(--pale);border:1px solid #d3e5dc;padding:6px 10px;border-radius:20px;color:var(--accent)}
-.overview .group-label{min-width:190px;max-width:230px;background:#f8faf6;vertical-align:middle;text-align:left}.overview .rank-cell{min-width:76px;width:76px;vertical-align:middle;text-align:left}.overview .field-label{min-width:165px;max-width:195px;text-align:left;font-weight:600}.overview th,.overview td{padding:10px 12px}.overview td{min-width:82px;font-size:11px}.overview thead th:nth-child(2),.overview thead th:nth-child(3){text-align:left}.overview .model-group{border-bottom:2px solid var(--line)}.overview .model-group:last-child{border-bottom:0}.overview tr[data-field="condition"]:not(:first-child)>th,.overview tr[data-field="condition"]:not(:first-child)>td{border-top:2px solid var(--line)}.rank-label{display:inline-block;padding:3px 7px;border-radius:4px;background:var(--pale);color:var(--accent);font-size:10px;font-weight:700;white-space:nowrap}
-.empty{padding:22px;text-align:center;color:var(--muted);font-size:12px;margin:0}.patient-tools{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:18px 0 10px}.patient-tools>span{font-size:12px;color:var(--muted);margin-bottom:10px}.patient{background:white;border:1px solid var(--line);border-radius:6px;margin-bottom:5px;overflow:hidden}.patient>summary{cursor:pointer;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;gap:12px;list-style:none}.patient>summary::-webkit-details-marker{display:none}.patient-heading{display:grid;grid-template-columns:150px minmax(0,1fr);align-items:center;gap:12px;min-width:0;flex:1}.patient>summary strong{text-transform:capitalize;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.patient-id{display:block;color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.expand-hint{color:var(--accent);font-size:10px;white-space:nowrap}.expand-hint span{display:inline-block;font-size:17px;margin-left:8px}.patient[open]>summary .expand-hint span{transform:rotate(45deg)}.patient-pagination{display:flex;justify-content:center;gap:10px;margin-top:14px}.patient-body{padding:0 16px 16px}.reference{display:grid;grid-template-columns:1fr 1.5fr;gap:30px;background:var(--pale);border-radius:7px;padding:18px 20px}.reference h3{font-size:14px;margin:0;font-weight:600;overflow-wrap:anywhere}.plan{padding-left:20px;margin:7px 0 0;font-size:13px}.plan li{margin:5px 0;padding-left:3px}.unavailable{color:var(--muted);font-size:12px;margin:6px 0}.output-heading{display:flex;justify-content:space-between;align-items:start;gap:15px;margin:24px 0 16px}.output-heading h4{font-size:15px;margin:0;overflow-wrap:anywhere}.model-name,.variant-name{font-size:11px;color:var(--muted);margin:4px 0 0;overflow-wrap:anywhere}.variant-name{color:var(--accent)}.badge{font-size:10px;padding:5px 9px;border:1px solid #d0e4d8;color:var(--accent);border-radius:5px;background:#f1f8f3;white-space:nowrap}.badge.failed_incomplete,.badge.not_processed{background:#fff5e5;color:var(--amber);border-color:#eaddc4}
-.predictions{list-style:none;padding:0;margin:0}.prediction{border:1px solid var(--line);border-radius:8px;padding:17px;margin-bottom:14px}.pair-heading{display:flex;align-items:baseline;gap:11px}.rank{display:inline-grid;place-items:center;background:var(--pale);color:var(--accent);width:25px;height:25px;font-size:12px;border-radius:5px;flex-shrink:0;font-weight:700}h5{font-size:14px;line-height:1.5;font-weight:600;margin:0;overflow-wrap:anywhere}.plan-block{margin:14px 0 17px;padding-left:36px}.plan-block .eyebrow{font-size:9px;margin:0}.score-table{font-size:11px}.score-table td,.score-table th{padding:10px 12px}.score-table tbody th{min-width:215px}.score-reason{display:block;font-size:10px;color:var(--muted);margin-top:4px;font-weight:400}.score-table .na{font-size:10px}.prediction .table-scroll{border-radius:6px}footer{font-size:11px;color:var(--muted);border-top:1px solid var(--line);margin-top:35px;padding:20px 0 10px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}
-@media(max-width:850px){header,main{padding-left:20px;padding-right:20px}.hero{align-items:start;flex-direction:column;gap:20px;margin-top:28px}.health{max-width:none;width:100%}h1{font-size:35px}.filters{flex-wrap:wrap}.filters p{display:none}.section-heading{align-items:start;flex-wrap:wrap}.reference{grid-template-columns:1fr;gap:20px}.expand-hint{font-size:0}.expand-hint span{font-size:20px}.patient-body{padding:0 12px 12px}.output-heading{flex-wrap:wrap}.patient-tools input{width:100%}.patient-tools label{flex:1}.stats>div{padding:17px 20px}.plan-block{padding-left:0}}
-@media(max-width:600px){.patient-heading{grid-template-columns:minmax(0,1fr);gap:1px}.patient>summary{padding:7px 10px}.patient-tools{align-items:start;flex-direction:column;gap:5px}.patient-tools label{width:100%}.patient-tools>span{margin:0}.patient-pagination{flex-wrap:wrap}}
-@media print{body{background:white}header,main{max-width:none;padding:15px}.filters,.patient-tools,button,.expand-hint{display:none}.patient,.prediction,.reference{break-inside:avoid}.table-scroll{overflow:visible}table{font-size:9px}table th,table td{padding:6px;min-width:0!important}.health{border:1px solid #aaa}.stats{break-inside:avoid}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header,main{max-width:1280px;margin:auto;padding:24px 32px}header{padding-bottom:10px}main{padding-top:8px;padding-bottom:85px}
+.brand{display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:1.7px;font-weight:700;color:var(--muted)}.brand-mark{display:grid;place-items:center;width:28px;height:28px;background:var(--accent);color:white;font-size:15px;border-radius:7px;letter-spacing:0}.brand-rule{height:14px;width:1px;background:var(--line);margin:0 4px}
+.hero{display:flex;justify-content:space-between;gap:28px;align-items:center;margin:28px 0 22px}.eyebrow{display:block;font-size:9px;letter-spacing:1.1px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:0 0 6px}h1{font-size:36px;font-weight:600;letter-spacing:-1.4px;line-height:1.15;margin:0 0 9px}h1 span{color:var(--accent)}.intro{max-width:560px;color:var(--muted);margin:0;font-size:13px}
+.health{max-width:310px;padding:12px 14px;background:var(--pale);border-radius:8px;border-left:3px solid var(--accent);flex-shrink:0}.health strong{font-size:12px}.health p{font-size:11px;color:var(--muted);margin:4px 0 0}.health.attention{background:#fff5e5;border-color:var(--amber)}.stats{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid var(--line);border-radius:9px;background:white;overflow:hidden}.stats>div{padding:12px 18px;border-right:1px solid var(--line)}.stats>div:last-child{border:0}.stats span{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}.stats strong{font-size:23px;line-height:1;font-weight:600}
+main>section{margin-top:26px}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:9px}h2{font-size:21px;line-height:1.3;letter-spacing:-.5px;font-weight:600;margin:0}.section-note{font-size:11px;color:var(--muted);margin:0 0 12px;line-height:1.6}.metric-note{font-size:11px;color:var(--muted);margin:10px 0 0}.notice{border:1px solid #e8dfca;background:#fffaf0;border-radius:7px;color:#74613d;font-size:11px;padding:9px 12px;margin:12px 0}
+button{border:1px solid #cbdad0;border-radius:5px;background:white;color:var(--accent);font:600 11px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:7px 10px;cursor:pointer;white-space:nowrap}button:hover{background:var(--pale)}:focus-visible{outline:3px solid #7fc3af;outline-offset:2px}label{font-size:10px;color:var(--muted);font-weight:600;display:block}select,input{display:block;margin-top:4px;padding:7px 25px 7px 9px;border:1px solid #ccd9d0;border-radius:5px;background:white;color:var(--ink);font:12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:32px;max-width:100%}select{min-width:150px}input{width:340px;padding-right:8px}.filters{display:flex;align-items:end;gap:12px;padding:8px 0 12px;border-bottom:1px solid var(--line)}.filters p{font-size:10px;color:var(--muted);margin:0 auto 8px 0}.patient-tools{display:flex;align-items:end;justify-content:space-between;gap:14px;margin:10px 0 8px}.patient-tools>span{font-size:11px;color:var(--muted);margin-bottom:7px}
+.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:white}table{border-collapse:collapse;width:100%;font-size:11px;text-align:left}th,td{padding:6px 8px;border-bottom:1px solid var(--line)}thead th{font-size:9px;color:var(--muted);background:#f3f6f1;font-weight:600;white-space:nowrap}tbody th{font-weight:500}td{text-align:right;font-variant-numeric:tabular-nums}thead th:not(:first-child){text-align:right}tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}.na{color:#89948d;font-size:10px}.empty{padding:16px;text-align:center;color:var(--muted);font-size:11px;margin:0}
+.top-rank-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}.top-rank-card{min-width:0;padding:14px;background:white;border:1px solid var(--line);border-radius:8px}.top-rank-card h3{font-size:15px;font-weight:600;margin:0;overflow-wrap:anywhere}.top-rank-best{padding:8px 10px;margin:10px 0;background:var(--pale);border-radius:6px}.top-rank-best .eyebrow{font-size:9px;margin-bottom:3px}.top-rank-best strong{display:block;font-size:12px;font-weight:600;overflow-wrap:anywhere}.top-rank-variant-id{display:block;font-size:9px;font-weight:400;color:var(--muted);overflow-wrap:anywhere;margin-top:2px}.top-rank-variant-name{font-weight:500;overflow-wrap:anywhere}.top-rank-winner{display:inline-block;margin-left:6px;border-radius:3px;padding:1px 4px;background:#d9ece1;color:var(--accent);font-size:9px;font-weight:700}.top-rank-unavailable{font-size:11px;color:var(--muted);margin:10px 0}
+.top-rank-table>thead>tr>th,.top-rank-table>tbody>tr>th,.top-rank-table>tbody>tr>td{padding:7px 10px}.top-rank-table>tbody>tr>th{min-width:135px;font-size:11px}.top-rank-table>tbody>tr>td{min-width:92px;white-space:nowrap}.top-rank-table tr[data-best="true"]{background:#f0f7f2}.top-rank-table tr[data-best="true"]>th{border-left:3px solid var(--accent);padding-left:7px}.top-rank-value{display:inline-block;font-size:12px;font-weight:600}.top-rank-count{display:block;font-size:9px;color:var(--muted);margin-top:2px}.score-sort{border:0;background:transparent;padding:2px 0;font-size:10px;color:var(--muted)}.score-sort:hover{background:transparent;color:var(--accent)}.sort-indicator{display:inline-block;min-width:12px}.top-rank-table>tbody>tr.variant-details-row>td{padding:0;white-space:normal}.top-rank-variant{border-bottom:1px solid var(--line)}.top-rank-variant:last-child{border-bottom:0}
+.top-rank-table{table-layout:fixed}.top-rank-table>thead>tr>th:first-child{width:55%}.top-rank-table>tbody>tr>td{min-width:0}
+.variant-statistics>summary{cursor:pointer;color:var(--accent);font-size:10px;padding:5px 10px;background:#fbfcfa}.variant-statistics>.table-scroll{margin:0 6px 7px;border-radius:4px}.variant-statistics-table{font-size:10px}.variant-statistics-table th,.variant-statistics-table td{padding:4px 6px;min-width:55px;white-space:nowrap}.variant-statistics-table th[scope="row"]{text-align:left}.variant-statistics-table .rank-cell{min-width:28px;vertical-align:top;text-align:center;background:var(--pale)}.variant-statistics-table .stat-field{min-width:100px;max-width:145px;vertical-align:top;text-align:left;white-space:normal}.variant-statistics-table tbody{border-bottom:2px solid var(--line)}.variant-statistics-table tbody:last-child{border-bottom:0}.variant-statistics-table thead th{font-size:9px}
+.patient{--patient-header-height:36px;background:white;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;overflow:visible}.patient>summary{height:var(--patient-header-height);position:sticky;top:0;z-index:20;cursor:pointer;padding:6px 10px;display:flex;justify-content:space-between;align-items:center;gap:10px;list-style:none;background:white;border-radius:5px}.patient[open]>summary{box-shadow:0 2px 4px #1b302e12}.patient>summary::-webkit-details-marker{display:none}.patient-heading{display:grid;grid-template-columns:140px minmax(0,1fr);align-items:center;gap:10px;min-width:0;flex:1}.patient>summary strong{text-transform:capitalize;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.patient-id{display:block;color:var(--muted);font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.expand-hint{color:var(--accent);font-size:9px;white-space:nowrap}.expand-hint span{display:inline-block;font-size:16px;margin-left:6px}.patient[open]>summary .expand-hint span{transform:rotate(45deg)}.patient-body{padding:0 8px 8px}.patient-pagination{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.reference{display:grid;grid-template-columns:1fr 2fr;gap:16px;background:var(--pale);border-radius:4px;padding:7px 9px;margin:6px 0}.reference .eyebrow{font-size:8px;margin-bottom:3px}.reference h3{font-size:12px;margin:0;font-weight:600;overflow-wrap:anywhere}.plan{padding-left:16px;margin:2px 0;font-size:11px;line-height:1.35}.plan li{margin:1px 0;padding-left:1px}.unavailable{color:var(--muted);font-size:10px;margin:3px 0}.score-reason{display:block;font-size:9px;line-height:1.3;color:var(--muted);margin-top:2px;font-weight:400;white-space:normal}
+.model-output{border:1px solid var(--line);border-radius:4px;margin:3px 0}.model-output>summary{display:grid;grid-template-columns:10px minmax(105px,1fr) minmax(150px,2fr) auto;align-items:center;gap:7px;position:sticky;top:var(--patient-header-height);z-index:10;cursor:pointer;list-style:none;padding:5px 7px;background:#f8faf6;border-radius:4px;font-size:11px}.model-output>summary::-webkit-details-marker{display:none}.model-output>summary::before{content:"▸";color:var(--accent)}.model-output[open]>summary::before{content:"▾"}.model-output>summary>strong{font-size:11px;overflow-wrap:anywhere}.variant-name{color:var(--accent);font-size:10px;overflow-wrap:anywhere}.variant-id{display:block;font-size:9px;color:var(--muted)}.model-body{padding:3px 5px 5px}.model-name{font-size:9px;color:var(--muted);overflow-wrap:anywhere;margin:3px 0}.badge{font-size:9px;padding:2px 4px;max-width:165px;border:1px solid #d0e4d8;color:var(--accent);border-radius:3px;background:#f1f8f3;overflow-wrap:anywhere}.badge.failed_incomplete,.badge.not_processed{background:#fff5e5;color:var(--amber);border-color:#eaddc4}
+.score-table th,.score-table td{padding:4px 6px}.score-table .rank-cell{min-width:26px;width:30px;vertical-align:top;background:var(--pale);text-align:center;font-size:11px}.score-table .prediction-field{min-width:215px;max-width:330px;text-align:left;vertical-align:top;font-size:11px;line-height:1.35;font-weight:400;overflow-wrap:anywhere}.score-table td{min-width:65px;vertical-align:top;font-size:10px}.score-table thead th{font-size:9px}.score-table .prediction{border-bottom:2px solid var(--line)}.score-table .prediction:last-child{border-bottom:0}.field-kind{display:block;font-size:8px;letter-spacing:.4px;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:2px}
+.collapse-controls{position:fixed;right:14px;bottom:14px;z-index:100;display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100vw - 28px);padding:7px;border:1px solid #c1d3c8;background:#fffffff5;box-shadow:0 3px 15px #1b302e22;border-radius:7px}.collapse-controls button{font-size:11px;padding:7px 9px}
+footer{font-size:10px;color:var(--muted);border-top:1px solid var(--line);margin-top:24px;padding:15px 0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}
+@media(max-width:1100px){.top-rank-cards{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:850px){header,main{padding-left:18px;padding-right:18px}.hero{align-items:start;flex-direction:column;gap:15px;margin-top:22px}.health{max-width:none;width:100%}h1{font-size:32px}.filters{flex-wrap:wrap}.filters p{display:none}.section-heading{align-items:start;flex-wrap:wrap}.patient-tools input{width:100%}.patient-tools label{flex:1}.expand-hint{font-size:0}.expand-hint span{font-size:17px}}
+@media(max-width:600px){header,main{padding-left:12px;padding-right:12px}.top-rank-card{padding:10px}.patient{--patient-header-height:46px}.patient-heading{grid-template-columns:minmax(0,1fr);gap:1px}.patient-tools{align-items:start;flex-direction:column;gap:5px}.patient-tools label{width:100%}.patient-tools>span{margin:0}.patient-pagination{flex-wrap:wrap}.reference{grid-template-columns:1fr;gap:5px}.model-output>summary{grid-template-columns:10px minmax(100px,1fr) auto}.model-output>summary>.variant-name{grid-column:2/4}.model-output>summary>.badge{grid-column:3;grid-row:1}.collapse-controls{right:8px;bottom:8px}}
+@media print{body{background:white}header,main{max-width:none;padding:12px}.filters,.patient-tools,button,.expand-hint,.collapse-controls{display:none!important}.patient>summary,.model-output>summary{position:static}.table-scroll{overflow:visible}table th,table td{padding:4px;min-width:0!important}.top-rank-card{break-inside:avoid}.stats{break-inside:avoid}}
 '''
-
 
 _SCRIPT = r'''
 "use strict";
@@ -679,16 +737,6 @@ function matches(element) {
          (!variant.value || element.dataset.variant === variant.value);
 }
 function update() {
-  for (const name of ["summary", "comparison"]) {
-    const table = byId(name + "-table");
-    let visible = 0;
-    for (const group of table.querySelectorAll("tbody.model-group")) {
-      group.hidden = !matches(group);
-      if (!group.hidden) visible++;
-    }
-    table.hidden = !visible;
-    byId(name + "-empty").hidden = !!visible;
-  }
   let visiblePatients = 0;
   let matchingPatients = 0;
   const query = search.value.trim().toLowerCase();
@@ -715,6 +763,7 @@ function updateExpandLabel() {
   const visible = patients.filter(patient => !patient.hidden);
   byId("expand-all").textContent = visible.length && visible.every(patient => patient.open)
     ? "Collapse shown patients" : "Expand shown patients";
+  byId("collapse-controls").hidden = !visible.some(patient => patient.open);
 }
 function resetPagination() { patientLimit = pageSize; update(); }
 for (const select of [model, variant]) select.addEventListener("change", resetPagination);
@@ -732,6 +781,55 @@ byId("reset").addEventListener("click", () => {
 });
 byId("show-more").addEventListener("click", () => { patientLimit += pageSize; update(); });
 byId("show-less").addEventListener("click", resetPagination);
+function closePatient(patient) {
+  patient.open = false;
+  for (const output of patient.querySelectorAll("details.model-output")) output.open = false;
+}
+byId("collapse-all").addEventListener("click", () => {
+  for (const patient of patients) closePatient(patient);
+  updateExpandLabel();
+});
+byId("collapse-current").addEventListener("click", () => {
+  const open = patients.filter(patient => !patient.hidden && patient.open);
+  const current = open.find(patient => {
+    const bounds = patient.getBoundingClientRect();
+    return bounds.top < window.innerHeight && bounds.bottom > 0;
+  }) || open[0];
+  if (current) {
+    closePatient(current);
+    current.scrollIntoView({block: "start"});
+  }
+  updateExpandLabel();
+});
+function sortScores(table, field, direction) {
+  const key = field + "Score";
+  const groups = [...table.querySelectorAll("tbody.top-rank-variant")];
+  groups.sort((left, right) => {
+    const a = left.dataset[key], b = right.dataset[key];
+    const aMissing = a === "" || a === undefined, bMissing = b === "" || b === undefined;
+    if (aMissing !== bMissing) return aMissing ? 1 : -1;
+    if (!aMissing && Number(a) !== Number(b))
+      return (Number(a) < Number(b) ? -1 : 1) * (direction === "ascending" ? 1 : -1);
+    return Number(left.dataset.order) - Number(right.dataset.order);
+  });
+  for (const group of groups) table.appendChild(group);
+  table.dataset.sortField = field; table.dataset.sortDirection = direction;
+  for (const button of table.querySelectorAll("button.score-sort")) {
+    const active = button.dataset.field === field;
+    button.parentElement.setAttribute("aria-sort", active ? direction : "none");
+    button.querySelector(".sort-indicator").textContent = active ? (direction === "descending" ? "↓" : "↑") : "↕";
+  }
+}
+for (const table of document.querySelectorAll("table.top-rank-table")) {
+  for (const button of table.querySelectorAll("button.score-sort")) {
+    button.addEventListener("click", () => {
+      const field = button.dataset.field;
+      const direction = table.dataset.sortField === field && table.dataset.sortDirection === "descending"
+        ? "ascending" : "descending";
+      sortScores(table, field, direction);
+    });
+  }
+}
 update();
 '''
 

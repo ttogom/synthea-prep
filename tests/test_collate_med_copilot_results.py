@@ -47,18 +47,54 @@ def output(value=0.5):
     }
 
 
+class HtmlNode:
+    def __init__(self, tag, attrs=()):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.children = []
+
+    def find_all(self, tag, **attrs):
+        found = []
+        for child in self.children:
+            if isinstance(child, HtmlNode):
+                if child.tag == tag and all(child.attrs.get(key) == value for key, value in attrs.items()):
+                    found.append(child)
+                found.extend(child.find_all(tag, **attrs))
+        return found
+
+    def find_one(self, tag, **attrs):
+        return next(iter(self.find_all(tag, **attrs)), None)
+
+    @property
+    def text(self):
+        return ''.join(child.text if isinstance(child, HtmlNode) else child for child in self.children)
+
+
 class Document(HTMLParser):
     def __init__(self, html):
         super().__init__(convert_charrefs=True)
         self.tags = []
         self.text = []
+        self.root = HtmlNode('document')
+        self.stack = [self.root]
         self.feed(html)
 
     def handle_starttag(self, tag, attrs):
         self.tags.append((tag, dict(attrs)))
+        node = HtmlNode(tag, attrs)
+        self.stack[-1].children.append(node)
+        if tag not in ('meta', 'input', 'link', 'br', 'hr', 'img'):
+            self.stack.append(node)
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, 0, -1):
+            if self.stack[index].tag == tag:
+                del self.stack[index:]
+                break
 
     def handle_data(self, data):
         self.text.append(data)
+        self.stack[-1].children.append(data)
 
 
 class ReportTests(unittest.TestCase):
@@ -173,7 +209,7 @@ class ReportTests(unittest.TestCase):
         html = generate_report(self.run, root=self.root).read_text()
         self.assertIn('<option value="custom_evidence">Saved custom evidence description</option>', html)
         self.assertIn("Saved S/O-only description", html)
-        self.assertIn("Best variant: custom_evidence", html)
+        self.assertIn('<tr data-variant="custom_evidence" data-best="true">', html)
         for private in ("PRIVATE_SOURCE_PATH", "PRIVATE_COMPONENT_EVIDENCE", "PRIVATE_AGENT_TRACE", "PRIVATE_PROMPT"):
             self.assertNotIn(private, html)
         self.assertEqual(before, [(self.run / name).read_bytes() for name in ("run.json", "results.jsonl")])
@@ -353,7 +389,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("mean=0.5000, population_sd=0.5000, min=0.0000, max=1.0000, n=2", summary)
         html = render_report(data)
         self.assertNotIn("Model: <script>mini</script>", html)
-        self.assertIn("Model: &lt;script&gt;mini&lt;/script&gt;", html)
+        self.assertIn('<h3>&lt;script&gt;mini&lt;/script&gt;</h3>', html)
         self.rows = []
         self.metadata["evaluation"]["selected_patient_ids"] = []
         self.write()
@@ -379,6 +415,184 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("inf", summary)
         self.assertNotIn("nan", summary)
         self.assertIn("population_sd=0.0000", summary)
+
+    def test_best_variant_section_has_sorted_scores_and_statistics_for_every_variant(self):
+        self.native_v3()
+        self.write()
+        document = Document(render_report(self.load())).root
+        cards = document.find_all('article', **{'class':'top-rank-card'})
+        self.assertEqual([card.attrs['data-model'] for card in cards], ['mini','llama'])
+        for card in cards:
+            table = card.find_one('table', **{'class':'top-rank-table'})
+            groups = table.find_all('tbody', **{'class':'top-rank-variant'})
+            self.assertEqual([group.attrs['data-variant'] for group in groups], ['guidelines','llm_only'])
+            self.assertEqual([group.attrs['data-condition-score'] for group in groups], ['0.8','0.4'])
+            self.assertEqual([group.attrs['data-plan-score'] for group in groups], ['0.4','0.2'])
+            self.assertEqual(len(table.find_all('button', **{'class':'score-sort'})), 2)
+            for group in groups:
+                details = group.find_one('details', **{'class':'variant-statistics'})
+                self.assertNotIn('open', details.attrs)
+                statistics = details.find_one('table', **{'class':'variant-statistics-table'})
+                self.assertEqual([body.attrs['data-rank'] for body in statistics.find_all('tbody')], ['1','2','3'])
+                self.assertEqual(len([row for row in statistics.find_all('tr') if 'data-metric' in row.attrs]), 36)
+        self.assertNotIn('pre', [tag for tag,_ in Document(render_report(self.load())).tags])
+
+    def test_each_variant_statistics_preserve_all_rank_population_spread_and_plan_scores(self):
+        self.native_v3()
+        self.labels.append({'id':'patient-2','condition':'second','plan':['action']})
+        self.metadata['evaluation']['selected_patient_ids'].append('patient-2')
+        second=deepcopy(self.rows[0]); second['id']='patient-2'; self.rows.append(second)
+        for row,value in zip(self.rows,(0.0,1.0)):
+            for variant in row['variants'].values():
+                for model in variant['assessment_plans']:
+                    variant['assessment_plans'][model]=output(value)
+        self.write()
+        document=Document(render_report(self.load())).root
+        for card in document.find_all('article', **{'class':'top-rank-card'}):
+            for details in card.find_all('details', **{'class':'variant-statistics'}):
+                table=details.find_one('table', **{'class':'variant-statistics-table'})
+                self.assertEqual([cell.text for cell in table.find_one('thead').find_all('th')],
+                    ['Rank','Field / coverage','Metric','Mean','Population SD','Min','Max','Scored patients'])
+                for body in table.find_all('tbody'):
+                    for field,expected in [('condition',['0.5000','0.5000','0.0000','1.0000','2']),
+                                           ('plan',['0.2500','0.2500','0.0000','0.5000','2'])]:
+                        row=next(row for row in body.find_all('tr') if row.attrs.get('data-field')==field
+                                 and row.attrs.get('data-metric')=='BERTScore_F1')
+                        self.assertEqual([cell.text for cell in row.find_all('td')], expected)
+
+    def test_best_variant_cards_keep_zero_missing_scores_and_failed_models_distinct(self):
+        self.native_v3()
+        for variant in self.rows[0]["variants"].values():
+            variant["assessment_plans"]["mini"] = output(0)
+            variant["assessment_plans"]["mini"]["evaluation"][0]["plan"] = score(status="skipped_no_recorded_plan")
+            variant["assessment_plans"]["llama"] = {"status": "failed_incomplete"}
+        self.write()
+        html = render_report(self.load())
+        cards = dict(re.findall(r'<article class="top-rank-card" data-model="([^"]*)">(.*?)</article>', html, re.S))
+        self.assertIn('<tr data-variant="llm_only" data-best="true">', cards["mini"])
+        self.assertIn('title="0">0.0000', cards["mini"])
+        self.assertIn('class="top-rank-count">n=0', cards["mini"])
+        self.assertIn('class="na">N/A', cards["mini"])
+        self.assertNotIn('data-best="true"', cards["llama"])
+        self.assertIn("best variant unavailable", cards["llama"])
+        self.assertEqual(cards["llama"].count('class="variant-statistics"'), 2)
+        self.metadata["experiment"]["selected_variants"].reverse()
+        self.write()
+        html = render_report(self.load())
+        mini = re.search(r'<article class="top-rank-card" data-model="mini">(.*?)</article>', html, re.S)[1]
+        self.assertIn('<tr data-variant="guidelines" data-best="true">', mini)
+
+    def test_top_rank_cards_handle_an_empty_cohort_with_and_without_selected_models(self):
+        self.rows = []
+        self.metadata["evaluation"]["selected_patient_ids"] = []
+        self.write()
+        html = render_report(self.load())
+        self.assertIn("No model results available", html)
+        self.native_v3()
+        self.rows = []
+        self.metadata["evaluation"]["selected_patient_ids"] = []
+        self.write()
+        html = render_report(self.load())
+        cards = re.findall(r'<article class="top-rank-card" data-model="([^"]*)">(.*?)</article>', html, re.S)
+        self.assertEqual(len(cards), 2)
+        for _, card in cards:
+            self.assertIn("best variant unavailable", card)
+            self.assertNotIn('data-best="true"', card)
+            self.assertIn('class="top-rank-count">n=0', card)
+
+    def test_combined_evidence_description_spells_out_sources_without_changing_saved_labels(self):
+        self.native_v3()
+        self.metadata['experiment']['selected_variants']=['patient_retrieval_guidelines']
+        self.rows[0]['variants']={'patient_retrieval_guidelines':self.rows[0]['variants']['guidelines']}
+        self.write()
+        data=self.load()
+        original=deepcopy(data)
+        document=Document(render_report(data)).root
+        heading=document.find_one('article', **{'class':'top-rank-card'}).find_one('div', **{'class':'top-rank-best'})
+        self.assertIn('S/O + similar-patient example + clinical guidelines', heading.text)
+        self.assertNotIn('both evidence sources', heading.text)
+        self.assertEqual(data,original)
+
+    def test_custom_variants_get_all_rank_all_metric_statistics_without_registry_changes(self):
+        self.native_v4()
+        self.write()
+        data=self.load()
+        document=Document(render_report(data)).root
+        for card in document.find_all('article', **{'class':'top-rank-card'}):
+            panels=card.find_all('details', **{'class':'variant-statistics'})
+            self.assertEqual({panel.attrs['data-variant'] for panel in panels},{'llm_only','custom_evidence'})
+            custom=next(panel for panel in panels if panel.attrs['data-variant']=='custom_evidence')
+            self.assertIn('Saved custom evidence description',custom.find_one('summary').text)
+            for rank,body in enumerate(custom.find_one('table').find_all('tbody'),1):
+                self.assertEqual(body.attrs['data-rank'],str(rank))
+                for field in ('condition','plan'):
+                    rows=[row for row in body.find_all('tr') if row.attrs['data-field']==field]
+                    self.assertEqual(len(rows),6)
+                    for row in rows:
+                        expected=0.8 if field=='condition' else 0.4
+                        self.assertEqual(row.find_all('td')[0].text,f'{expected:.4f}')
+                        self.assertEqual(row.find_all('td')[-1].text,'1')
+
+    def test_default_variant_order_sorts_numeric_condition_scores_and_keeps_missing_last(self):
+        self.native_v3()
+        for slot in self.rows[0]['variants']['guidelines']['assessment_plans'].values():
+            slot['evaluation'][0]['condition']=score(status='missing_generation')
+        for slot in self.rows[0]['variants']['llm_only']['assessment_plans'].values():
+            slot['evaluation'][0]['condition']=score(0)
+        self.write()
+        document=Document(render_report(self.load())).root
+        for table in document.find_all('table', **{'class':'top-rank-table'}):
+            groups=table.find_all('tbody', **{'class':'top-rank-variant'})
+            self.assertEqual([group.attrs['data-variant'] for group in groups],['llm_only','guidelines'])
+            self.assertEqual([group.attrs['data-condition-score'] for group in groups],['0',''])
+            self.assertEqual(table.attrs['data-sort-direction'],'descending')
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js is required for offline sorting checks')
+    def test_javascript_score_sorting_is_numeric_stable_and_preserves_expanded_statistics(self):
+        javascript=re.findall(r'<script>(.*?)</script>',render_report(self.load()),re.S)[0]
+        harness=r'''
+const assert=require('node:assert/strict'), vm=require('node:vm');
+class Element {
+  constructor(dataset={}) { this.dataset=dataset; this.value=''; this.listeners={}; this.attributes={}; this.hidden=false; }
+  addEventListener(name,callback) { this.listeners[name]=callback; }
+  fire(name) { this.listeners[name](); }
+  setAttribute(name,value) { this.attributes[name]=value; }
+}
+function table() {
+  const groups=[['0','0.9'],['0.8','0.1'],['','0.7'],['0.8','0.3'],['-0.2','']].map((values,index)=>{
+    const group=new Element({variant:String(index),order:String(index),conditionScore:values[0],planScore:values[1]});
+    group.statistics={open:index===3}; return group;
+  });
+  const result=new Element({sortField:'condition',sortDirection:'descending'});
+  result.groups=[groups[1],groups[3],groups[0],groups[4],groups[2]];
+  result.buttons=['condition','plan'].map(field=>{
+    const button=new Element({field}); button.parentElement=new Element(); button.indicator=new Element();
+    button.querySelector=()=>button.indicator; return button;
+  });
+  result.querySelectorAll=selector=>selector==='button.score-sort'?result.buttons:result.groups;
+  result.appendChild=group=>{result.groups.splice(result.groups.indexOf(group),1);result.groups.push(group);};
+  return result;
+}
+const tables=[table(),table()], elements={};
+for(const id of ['model-filter','variant-filter','patient-search','patient-count','patients-empty','show-more',
+                'show-less','expand-all','reset','collapse-controls','collapse-current','collapse-all']) elements[id]=new Element();
+const document={getElementById:id=>elements[id],querySelectorAll:selector=>selector==='table.top-rank-table'?tables:[]};
+vm.runInNewContext(SCRIPT,{document,window:{innerHeight:900}});
+const order=target=>target.groups.map(group=>group.dataset.variant).join(',');
+assert.equal(order(tables[0]),'1,3,0,4,2');
+tables[0].buttons[0].fire('click'); assert.equal(order(tables[0]),'4,0,1,3,2'); // Ascending, missing stays last.
+assert.equal(tables[0].buttons[0].parentElement.attributes['aria-sort'],'ascending');
+assert.equal(tables[0].buttons[0].indicator.textContent,'↑');
+tables[0].buttons[1].fire('click'); assert.equal(order(tables[0]),'0,2,3,1,4');
+assert.equal(tables[0].buttons[0].parentElement.attributes['aria-sort'],'none');
+tables[0].buttons[1].fire('click'); assert.equal(order(tables[0]),'1,3,2,0,4');
+tables[0].buttons[0].fire('click'); assert.equal(order(tables[0]),'1,3,0,4,2');
+assert.equal(tables[0].groups[1].statistics.open,true); // Reordering moves the same expanded DOM group.
+assert.equal(order(tables[1]),'1,3,0,4,2'); // Other models retain their own sort order.
+'''
+        program='const SCRIPT='+json.dumps(javascript)+';\n'+harness
+        result=subprocess.run([shutil.which('node'),'-e',program],text=True,capture_output=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_legacy_results_use_only_the_final_response_model_and_preserve_all_pairs(self):
         data = self.load()
@@ -724,10 +938,10 @@ class ReportTests(unittest.TestCase):
         for phrase in ("reference_condition", "Reference action one", "Reference action two", "patient-1",
                        "legacy-final-version", "Condition 1", "Condition 2", "Condition 3", "Action 3.3"):
             self.assertIn(phrase, text)
-        self.assertEqual(sum(tag == "li" and attrs.get("class") == "prediction" for tag, attrs in document.tags), 3)
-        self.assertEqual(sum(tag == "table" and attrs.get("class") == "score-table" for tag, attrs in document.tags), 3)
+        self.assertEqual(sum(tag == "tbody" and attrs.get("class") == "prediction" for tag, attrs in document.tags), 3)
+        self.assertEqual(sum(tag == "table" and attrs.get("class") == "score-table" for tag, attrs in document.tags), 1)
         self.assertIn('title="0.5">0.5000', html)
-        self.assertIn('class="rank-label">Rank 1', html)
+        self.assertIn('class="prediction" data-rank="1"', html)
         for metric in METRICS:
             self.assertGreaterEqual(text.count(metric), 5)
         payload = re.search(r'<script id="report-data" type="application/json">(.*?)</script>', html, re.S)[1]
@@ -771,77 +985,60 @@ class ReportTests(unittest.TestCase):
         self.assertIn("0/1 patients completed generation", html)
         self.assertIn("Results need attention", html)
 
-    def test_grouped_overview_keeps_each_model_together_with_ordered_ranks_and_two_subrows(self):
-        self.rows = [{"id": "patient-1", "evidence_variant": variant,
-                      "assessment_plans": {"a": output(), "b": output()}}
-                     for variant in ("llm_only", "guidelines")]
+    def test_removed_sections_are_replaced_by_complete_variant_statistics(self):
+        self.rows=[{'id':'patient-1','evidence_variant':variant,'assessment_plans':{'a':output(),'b':output()}}
+                   for variant in ('llm_only','guidelines')]
         self.write()
-        data = self.load()
-        # Rendering must order rank numbers even if an upstream consumer
-        # rearranges the aggregate entries before passing them to the renderer.
-        data["summary"].reverse()
-        html = render_report(data)
-        for table_id, expected_groups in (("summary-table", 4), ("comparison-table", 2)):
-            table = re.search(rf'<table id="{table_id}">(.*?)</table>', html, re.S)[1]
-            groups = re.findall(r'<tbody class="model-group"([^>]*)>(.*?)</tbody>', table, re.S)
-            self.assertEqual(len(groups), expected_groups)
-            model_sequence = []
-            for attributes, body in groups:
-                attrs = dict(re.findall(r'(data-[\w-]+)="([^"]*)"', attributes))
-                model = attrs["data-model"]
-                model_sequence.append(model)
-                rows = re.findall(r'<tr data-rank="(\d)" data-field="(.*?)">', body)
-                self.assertEqual(rows, [(str(rank), field) for rank in (1, 2, 3) for field in ("condition", "plan")])
-                self.assertEqual(body.count('class="group-label" scope="rowgroup" rowspan="6"'), 1)
-                self.assertEqual(body.count(f'<strong>{model}</strong>'), 1)
-                self.assertEqual(body.count('class="rank-cell" scope="row" rowspan="2"'), 3)
-                self.assertEqual(re.findall(r'class="rank-label">Rank (\d)', body), ["1", "2", "3"])
-                self.assertIn('class="field-label" scope="row">Condition', body)
-                self.assertIn('class="field-label" scope="row">Plan', body)
-            self.assertEqual(len(list(dict.fromkeys(model_sequence))), 2)
-            self.assertEqual(sum(left != right for left, right in zip(model_sequence, model_sequence[1:])), 1)
-        self.assertNotIn('id="field-filter"', html)
-        self.assertNotIn('id="rank-filter"', html)
+        data=self.load(); data['summary'].reverse()
+        html=render_report(data)
+        for marker in ('id="summary-table"','id="comparison-table"','id="overview-heading"','id="comparison-heading"',
+                       '01 / Aggregate results','02 / Evidence comparison','03 / Individual results'):
+            self.assertNotIn(marker,html)
+        document=Document(html).root
+        panels=document.find_all('details', **{'class':'variant-statistics'})
+        self.assertEqual(len(panels),4)
+        for panel in panels:
+            table=panel.find_one('table', **{'class':'variant-statistics-table'})
+            groups=table.find_all('tbody')
+            self.assertEqual([group.attrs['data-rank'] for group in groups],['1','2','3'])
+            for group in groups:
+                rows=group.find_all('tr')
+                self.assertEqual(len(rows),12)
+                for field in ('condition','plan'):
+                    self.assertEqual([row.attrs['data-metric'] for row in rows if row.attrs['data-field']==field],
+                        ['BERTScore_F1','ROUGE-L','BLEU','METEOR','ROUGE-1','ROUGE-2'])
 
-    def test_model_name_appears_once_with_rank_between_model_and_condition_plan(self):
-        html = render_report(self.load())
-        table = re.search(r'<table id="summary-table">(.*?)</table>', html, re.S)[1]
-        self.assertEqual(table.count('<strong>legacy-final-version</strong>'), 1)
-        header = re.search(r'<thead>(.*?)</thead>', table, re.S)[1]
-        labels = [re.sub('<[^>]*>', '', label) for label in re.findall(r'<th[^>]*>(.*?)</th>', header)]
-        self.assertEqual(labels[:3], ["Model / evidence", "Rank", "Field / coverage"])
-        rows = re.findall(r'<tr data-rank="(\d)" data-field="(.*?)">(.*?)</tr>', table, re.S)
-        for rank, field, body in rows:
-            headings = [attrs.get("class") for tag, attrs in Document(body).tags if tag == "th"]
-            expected = (["group-label"] if rank == "1" and field == "condition" else [])
-            expected += (["rank-cell"] if field == "condition" else []) + ["field-label"]
-            self.assertEqual(headings, expected)
+    def test_patient_model_variants_are_compact_collapsible_with_all_predictions(self):
+        document=Document(render_report(self.load())).root
+        patient=document.find_one('details', **{'class':'patient'})
+        model=patient.find_one('details', **{'class':'model-output'})
+        self.assertNotIn('open',model.attrs)
+        self.assertIn('legacy-final-version',model.find_one('summary').text)
+        self.assertIn('Reported model: legacy-final-version',model.text)
+        table=model.find_one('table', **{'class':'score-table'})
+        self.assertEqual([cell.text for cell in table.find_one('thead').find_all('th')][:2],['Rank','Prediction / scoring'])
+        groups=table.find_all('tbody', **{'class':'prediction'})
+        self.assertEqual([group.attrs['data-rank'] for group in groups],['1','2','3'])
+        for rank,group in enumerate(groups,1):
+            self.assertEqual([row.attrs['data-field'] for row in group.find_all('tr')],['condition','plan'])
+            self.assertIn(f'Condition {rank}',group.text)
+            for action in (1,2,3): self.assertIn(f'Action {rank}.{action}',group.text)
+            self.assertEqual(len(group.find_all('td')),12)
 
-    def test_all_score_tables_put_bert_first_then_rouge_l_without_misaligning_values(self):
-        values = {"BLEU": 0.11, "METEOR": 0.22, "ROUGE-1": 0.33,
-                  "ROUGE-2": 0.44, "ROUGE-L": 0.55, "BERTScore_F1": 0.66}
-        baseline, evidence = deepcopy(self.rows[0]), deepcopy(self.rows[0])
-        baseline["evidence_variant"], evidence["evidence_variant"] = "llm_only", "guidelines"
-        for entry in baseline["evaluation"]:
-            entry["condition"] = score(0)
-        for entry in evidence["evaluation"]:
-            entry["condition"]["metrics"] = values.copy()
-        self.rows = [baseline, evidence]
-        self.write()
-        html = render_report(self.load())
-        expected = ["BERTScore_F1", "ROUGE-L", "BLEU", "METEOR", "ROUGE-1", "ROUGE-2"]
-        for table in re.findall(r'<table[^>]*>(.*?)</table>', html, re.S):
-            header = re.search(r'<thead>(.*?)</thead>', table, re.S)[1]
-            labels = [re.sub('<[^>]*>', '', label) for label in re.findall(r'<th[^>]*>(.*?)</th>', header)]
-            self.assertEqual(labels[-6:], expected)
-        comparison = re.search(r'<table id="comparison-table">(.*?)</table>', html, re.S)[1]
-        first_row = re.search(r'<tr data-rank="1" data-field="condition">(.*?)</tr>', comparison, re.S)[1]
-        cells = [re.sub('<[^>]*>', '', cell) for cell in re.findall(r'<td>(.*?)</td>', first_row)]
-        self.assertEqual(cells, ["+0.6600", "+0.5500", "+0.1100", "+0.2200", "+0.3300", "+0.4400"])
-        prediction_table = re.findall(r'<table class="score-table">(.*?)</table>', html, re.S)[3]
-        first_prediction_row = re.search(r'<tbody><tr>(.*?)</tr>', prediction_table, re.S)[1]
-        cells = [re.sub('<[^>]*>', '', cell) for cell in re.findall(r'<td>(.*?)</td>', first_prediction_row)]
-        self.assertEqual(cells, ["0.6600", "0.5500", "0.1100", "0.2200", "0.3300", "0.4400"])
+    def test_patient_score_tables_put_bert_first_then_rouge_l_without_misaligning_values(self):
+        values={'BLEU':0.11,'METEOR':0.22,'ROUGE-1':0.33,'ROUGE-2':0.44,'ROUGE-L':0.55,'BERTScore_F1':0.66}
+        baseline,evidence=deepcopy(self.rows[0]),deepcopy(self.rows[0])
+        baseline['evidence_variant'],evidence['evidence_variant']='llm_only','guidelines'
+        for entry in baseline['evaluation']: entry['condition']=score(0)
+        for entry in evidence['evaluation']: entry['condition']['metrics']=values.copy()
+        self.rows=[baseline,evidence]; self.write()
+        tables=Document(render_report(self.load())).root.find_all('table', **{'class':'score-table'})
+        self.assertEqual(len(tables),2)
+        for table in tables:
+            self.assertEqual([cell.text for cell in table.find_one('thead').find_all('th')][-6:],
+                             ['BERTScore_F1','ROUGE-L','BLEU','METEOR','ROUGE-1','ROUGE-2'])
+        row=tables[1].find_one('tbody').find_all('tr')[0]
+        self.assertEqual([cell.text for cell in row.find_all('td')],['0.6600','0.5500','0.1100','0.2200','0.3300','0.4400'])
 
     def test_patient_rows_preserve_full_ids_in_compact_headings_with_more_controls(self):
         html = render_report(self.load())
@@ -888,7 +1085,7 @@ class ReportTests(unittest.TestCase):
         for control in ("model-filter", "variant-filter", "patient-search", "expand-all", "reset", "show-more", "show-less"):
             self.assertTrue(any(attrs.get("id") == control for _, attrs in document.tags))
         self.assertFalse(any(attrs.get("id") in ("rank-filter", "field-filter") for _, attrs in document.tags))
-        self.assertEqual(sum(tag == "details" for tag, _ in document.tags), 1)
+        self.assertEqual(sum(tag == "details" and attrs.get("class") == "patient" for tag, attrs in document.tags), 1)
         self.assertIn('lang="en"', html)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for the offline JavaScript interaction check")
@@ -911,73 +1108,69 @@ class ReportTests(unittest.TestCase):
         # Exercise the actual report script against a minimal offline DOM. The
         # separate HTML test verifies these control IDs and data attributes exist.
         harness = r'''
-const assert = require("node:assert/strict");
-const vm = require("node:vm");
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
 class Element {
-  constructor(dataset = {}, children = []) {
-    this.dataset = dataset; this.children = children; this.hidden = false;
-    this.open = false; this.value = ""; this.textContent = ""; this.listeners = {};
+  constructor(dataset={},children=[]) {
+    this.dataset=dataset; this.children=children; this.hidden=false; this.open=false;
+    this.value=''; this.textContent=''; this.listeners={}; this.bounds={top:0,bottom:100};
   }
   querySelectorAll() { return this.children; }
-  addEventListener(name, callback) { this.listeners[name] = callback; }
+  addEventListener(name,callback) { this.listeners[name]=callback; }
   fire(name) { this.listeners[name](); }
+  getBoundingClientRect() { return this.bounds; }
+  scrollIntoView() { this.scrolled=true; }
 }
-const elements = {};
-for (const id of ["model-filter", "variant-filter", "patient-search", "show-more", "show-less",
-                  "summary-empty", "comparison-empty", "patients-empty", "patient-count", "expand-all", "reset"])
-  elements[id] = new Element();
-for (const [name, rows] of [["summary", DATA.summary], ["comparison", DATA.comparisons]]) {
-  const groups = rows.filter(row => row.field === "condition" && row.rank === 1);
-  elements[name + "-table"] = new Element({}, groups.map(row => new Element({
-    model: row.model_id, variant: row.variant, rank: String(row.rank), field: row.field
-  })));
-}
-const cards = DATA.patients.map(patient => new Element({search: patient.id + " " + patient.reference_condition},
-  patient.outputs.map(output => new Element({model: output.model_id, variant: output.variant}))));
-const document = {getElementById: id => elements[id], querySelectorAll: () => cards};
-vm.runInNewContext(SCRIPT, {document});
-const visibleGroups = name => elements[name + "-table"].children.filter(group => !group.hidden);
-const visibleCards = () => cards.filter(card => !card.hidden);
-assert.equal(visibleGroups("summary").length, 2); // One group contains all ranks per model/evidence.
-assert.equal(elements["comparison-empty"].hidden, true); // A zero-pair row explicitly displays N/A.
-assert.equal(visibleCards().length, 10);
-assert.equal(elements["patient-count"].textContent, "Showing 10 of 23 matching patients");
-assert.equal(elements["show-more"].textContent, "Show 10 more patients (13 remaining)");
-assert.equal(elements["show-less"].hidden, true);
-elements["expand-all"].fire("click");
-assert.ok(cards.slice(0, 10).every(card => card.open)); assert.equal(cards[10].open, false);
-assert.equal(visibleCards().length, 10); // Expanding details never bypasses the patient limit.
-elements["expand-all"].fire("click"); assert.ok(cards.every(card => !card.open));
-elements["show-more"].fire("click"); assert.equal(visibleCards().length, 20);
-assert.equal(elements["show-more"].textContent, "Show 3 more patients (3 remaining)");
-assert.equal(elements["show-less"].hidden, false);
-elements["show-more"].fire("click"); assert.equal(visibleCards().length, 23);
-assert.equal(elements["show-more"].hidden, true);
-elements["show-less"].fire("click"); assert.equal(visibleCards().length, 10);
-elements["model-filter"].value = "a"; elements["model-filter"].fire("change");
-assert.equal(cards[0].hidden, false); assert.equal(cards[1].hidden, true);
-assert.equal(visibleGroups("summary").length, 1);
-assert.equal(elements["patient-count"].textContent, "Showing 10 of 22 matching patients");
-elements["variant-filter"].value = "guidelines"; elements["variant-filter"].fire("change");
-assert.equal(visibleGroups("summary").length, 0); assert.equal(elements["patients-empty"].hidden, false);
-assert.equal(elements["show-more"].hidden, true);
-elements["reset"].fire("click");
-assert.equal(visibleGroups("summary").length, 2); assert.equal(visibleCards().length, 10);
-elements["patient-search"].value = "PATIENT-23"; elements["patient-search"].fire("input");
-assert.equal(cards[0].hidden, true); assert.equal(cards[22].hidden, false);
-assert.equal(elements["patient-count"].textContent, "Showing 1 of 1 matching patients");
-assert.equal(visibleGroups("summary").length, 2); // Search changes patient details only.
-elements["expand-all"].fire("click");
-assert.equal(cards[0].open, false); assert.equal(cards[22].open, true);
-assert.equal(elements["expand-all"].textContent, "Collapse shown patients");
-elements["expand-all"].fire("click"); assert.equal(cards[22].open, false);
-elements["patient-search"].value = "does not exist"; elements["patient-search"].fire("input");
-assert.equal(visibleCards().length, 0); assert.equal(elements["patients-empty"].hidden, false);
-elements["reset"].fire("click");
-assert.equal(elements["patient-count"].textContent, "Showing 10 of 23 matching patients");
-elements["show-more"].fire("click");
-elements["patient-search"].value = "patient"; elements["patient-search"].fire("input");
-assert.equal(visibleCards().length, 10); // Changing filters starts a fresh ten-patient page.
+const elements={};
+for (const id of ['model-filter','variant-filter','patient-search','show-more','show-less','patients-empty',
+                  'patient-count','expand-all','reset','collapse-controls','collapse-current','collapse-all'])
+  elements[id]=new Element();
+const cards=DATA.patients.map(patient=>new Element({search:patient.id+' '+patient.reference_condition},
+  patient.outputs.map(output=>new Element({model:output.model_id,variant:output.variant}))));
+const document={getElementById:id=>elements[id],querySelectorAll:selector=>selector==='details.patient'?cards:[]};
+vm.runInNewContext(SCRIPT,{document,window:{innerHeight:900}});
+const visible=()=>cards.filter(card=>!card.hidden);
+assert.equal(visible().length,10);
+assert.equal(elements['patient-count'].textContent,'Showing 10 of 23 matching patients');
+assert.equal(elements['show-more'].textContent,'Show 10 more patients (13 remaining)');
+assert.equal(elements['collapse-controls'].hidden,true);
+elements['expand-all'].fire('click');
+assert.ok(cards.slice(0,10).every(card=>card.open)); assert.equal(cards[10].open,false);
+assert.ok(cards.every(card=>card.children.every(output=>!output.open))); // Predictions stay compact.
+assert.equal(visible().length,10); assert.equal(elements['collapse-controls'].hidden,false);
+elements['expand-all'].fire('click'); assert.ok(cards.every(card=>!card.open));
+elements['show-more'].fire('click'); assert.equal(visible().length,20);
+assert.equal(elements['show-more'].textContent,'Show 3 more patients (3 remaining)');
+elements['show-more'].fire('click'); assert.equal(visible().length,23);
+assert.equal(elements['show-more'].hidden,true);
+elements['show-less'].fire('click'); assert.equal(visible().length,10);
+elements['model-filter'].value='a'; elements['model-filter'].fire('change');
+assert.equal(cards[0].hidden,false); assert.equal(cards[1].hidden,true);
+assert.equal(elements['patient-count'].textContent,'Showing 10 of 22 matching patients');
+elements['variant-filter'].value='guidelines'; elements['variant-filter'].fire('change');
+assert.equal(elements['patients-empty'].hidden,false); assert.equal(elements['show-more'].hidden,true);
+elements['collapse-current'].fire('click'); // Empty filtered views are harmless.
+elements['reset'].fire('click'); assert.equal(visible().length,10);
+elements['patient-search'].value='PATIENT-23'; elements['patient-search'].fire('input');
+assert.equal(cards[22].hidden,false); assert.equal(visible().length,1);
+assert.equal(elements['patient-count'].textContent,'Showing 1 of 1 matching patients');
+elements['expand-all'].fire('click'); cards[22].children[0].open=true;
+assert.equal(elements['expand-all'].textContent,'Collapse shown patients');
+elements['collapse-current'].fire('click');
+assert.equal(cards[22].open,false); assert.equal(cards[22].children[0].open,false);
+assert.equal(cards[22].scrolled,true); assert.equal(elements['collapse-controls'].hidden,true);
+elements['reset'].fire('click');
+cards[0].open=true; cards[0].bounds={top:-500,bottom:-1};
+cards[1].open=true; cards[1].children[0].open=true; cards[1].bounds={top:-100,bottom:700};
+cards[1].fire('toggle'); elements['collapse-current'].fire('click');
+assert.equal(cards[0].open,true); assert.equal(cards[1].open,false);
+assert.equal(cards[1].children[0].open,false); assert.equal(cards[1].scrolled,true);
+cards[22].open=true; cards[22].children[0].open=true; // Also close off-screen/hidden state.
+elements['collapse-all'].fire('click');
+assert.ok(cards.every(card=>!card.open && card.children.every(output=>!output.open)));
+assert.equal(elements['collapse-controls'].hidden,true);
+elements['show-more'].fire('click'); elements['patient-search'].value='patient';
+elements['patient-search'].fire('input'); assert.equal(visible().length,10);
 '''
         program = 'const DATA = ' + json.dumps(data) + ';\nconst SCRIPT = ' + json.dumps(javascript) + ';\n' + harness
         result = subprocess.run([shutil.which("node"), "-e", program], text=True, capture_output=True, timeout=20)
