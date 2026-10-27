@@ -5339,6 +5339,72 @@ class ComponentExtensionIntegrationTests(unittest.TestCase):
                 self.assertEqual(list(variant["assessment_plans"]), self.experiment["selected_models"])
         return run, records
 
+    def test_nonstring_guideline_answers_do_not_block_any_selected_variant(self):
+        root = self.fixture.root
+        cases = (
+            ("none", None),
+            ("object", {"answer": "Evidence café {literal}", "available": True, "detail": None}),
+            ("array", ["Evidence", "Follow-up"]),
+            ("number", 1.25),
+            ("boolean", False),
+            ("empty", ""),
+            ("text", "  Evidence café\n{literal braces}\t"),
+        )
+        for name, answer in cases:
+            with self.subTest(answer=name):
+                self.fixture = PipelineFixture(root / name)
+                fixture = self.fixture
+                fixture.real_scoring = True
+                fixture.write_labels([self.label(fixture.patient_id)])
+                fixture.final_reply = self.reply
+                fixture.guideline_text = answer
+                self.config = yaml.safe_load(MODEL_CONFIG.read_text())
+                self.experiment["selected_models"] = [
+                    "gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b"]
+                self.write_config()
+                status, run, [record] = self.execute()
+                self.assertEqual(status, "completed")
+                component = record["components"]["guidelines"]
+                self.assertEqual(component["status"], "completed")
+                self.assertIsNone(component["error"])
+                self.assertEqual(component["capture"]["guideline_evidence"], answer)
+                self.assertEqual(type(component["capture"]["guideline_evidence"]), type(answer))
+                self.assertEqual(component["capture"]["graphrag_context"],
+                                 RunMedCopilotTests.expected_context(self))
+                self.assertEqual(component["outputs"]["Key_info"], format(answer))
+                self.assertEqual(len(fixture.keyword_calls), 1)
+                self.assertEqual(len(fixture.graph_calls), 1)
+                self.assertEqual(len(fixture.calls), 17)  # Shared questions plus 16 final calls.
+                self.assertEqual(len(fixture.scoring_calls), 96)
+                templates = runpy.run_path(str(fixture.prompt_module))["VARIANT_TEMPLATES"]
+                for variant_id, variant in record["variants"].items():
+                    # Before component capture existed, .format() received the raw answer.
+                    expected = templates[variant_id].format(
+                        conditions=fixture.conditions, example=fixture.results[0], Key_info=answer)
+                    self.assertEqual(variant["status"], "completed")
+                    self.assertEqual(variant["assessment_plan_prompts"]["user"], expected)
+                    self.assertEqual(len(variant["assessment_plans"]), 4)
+                    self.assertTrue(all(slot["status"] == "completed"
+                                        for slot in variant["assessment_plans"].values()))
+                expected_prompts = [variant["assessment_plan_prompts"]["user"]
+                                    for variant in record["variants"].values() for _ in range(4)]
+                self.assertEqual([call["messages"][1]["content"] for call in fixture.calls[1:]], expected_prompts)
+                self.assertEqual(run["results_summary"]["status"], "completed")
+                self.assertTrue((self.run_dirs()[0] / "results_summary.html").is_file())
+
+    def test_guideline_exceptions_still_block_dependent_variants(self):
+        self.fixture.failure = "graphrag"
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        component = record["components"]["guidelines"]
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertEqual(component["error"]["type"], "RuntimeError")
+        self.assertNotIn("Key_info", component["outputs"])
+        for name, variant in record["variants"].items():
+            self.assertEqual(variant["status"], "failed_incomplete" if "guidelines" in name else "completed")
+        self.assertEqual(len(self.fixture.calls), 5)
+        self.assertEqual(run["results_summary"]["status"], "completed")
+
     def test_arbitrary_variant_ids_share_each_component_once_per_patient_across_models(self):
         self.extend_registry('''
 VARIANTS["custom_both_one"] = VARIANTS["patient_retrieval_guidelines"]

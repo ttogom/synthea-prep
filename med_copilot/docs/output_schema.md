@@ -49,7 +49,7 @@ The existing logical components publish these outputs:
 | Component | Output | Meaning |
 | --- | --- | --- |
 | `patient_retrieval` | `example` | First reranked full reference SOAP example, or the existing `No reference patient available.` fallback after a successful empty retrieval. |
-| `guidelines` | `Key_info` | GraphRAG guideline answer text. |
+| `guidelines` | `Key_info` | GraphRAG answer formatted as text, matching the original final prompt's conversion. |
 
 Components may publish different declared string outputs in future variants.
 An output is final accepted evidence, not merely a successful intermediate tool
@@ -69,7 +69,7 @@ other fields remain `null` or empty provider lists until available.
 | --- | --- |
 | `selected_reference_patient` | Minimal identity of the selected reference, or `null`. |
 | `guideline_questions` | Parsed `Key Questions` list, or `null`; the exact raw question reply remains the GraphRAG query. |
-| `guideline_evidence` | GraphRAG answer text, or `null`. |
+| `guideline_evidence` | Raw GraphRAG answer, including a non-string JSON value if returned; `null` also represents an unavailable capture. |
 | `graphrag_context` | Returned context tables serialized as `{columns, index, data}`, or `null`. |
 | `keyword_extraction_raw` | Exact keyword API content captured before validation, including malformed JSON and whitespace. |
 | `retrieval_keywords` | Successfully extracted terms flattened in symptoms/diagnoses/medications order, trimmed and deduplicated in first-occurrence order. `[]` is valid; `null` means unavailable. |
@@ -81,6 +81,12 @@ Matching remains S/O-only for corpus/query embeddings, keyword overlap and
 cross-encoder scoring. Full reference SOAP is generation evidence after
 selection. Labels/scoring never enter component preparation or final prompts.
 Keyword model extraction and guideline-question generation are separate stages.
+
+Guideline answers are requested as text. If a successful search returns a
+non-string value, preserve it in `capture.guideline_evidence` and format it into
+the string `outputs.Key_info` as the original prompt did (`None` becomes
+`"None"`, for example). This does not block dependent variants; search exceptions
+still fail the component and block its consumers.
 
 ## Variant and final-model records
 

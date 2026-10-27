@@ -129,7 +129,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
                     )
                 capture["guideline_evidence"] = key_info
                 capture["graphrag_context"] = graphrag_context_json(graphrag_context)
-                component["outputs"]["Key_info"] = key_info
+                component["outputs"]["Key_info"] = format(key_info)
                 print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
                 print(key_info)
 
