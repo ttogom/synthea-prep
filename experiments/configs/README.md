@@ -11,7 +11,8 @@ launch directory. There are no model/config CLI overrides.
 | `temperature` | Shared final-model temperature, finite number from 0 to 2. |
 | `max_retries` | Shared upstream final-model retry setting, integer at least 1. |
 | `max_patients` | First N eligible patients in input order; positive integer or `null` for all. |
-| `selected_variants` | Nonempty, unique evidence variants; every model runs each one. |
+| `selected_variants` | Nonempty, unique registered variants; every final model runs each one. |
+| `variant_settings` | Optional mapping of registered variant IDs to declared parameter values; omitted parameters use registered defaults. |
 | `patient_input` | Prepared patient S/O JSONL path. |
 | `patient_labels` | Gold-label JSONL path, joined by exact patient ID. |
 | `presenting_evidence_only` | Keep labels with `has_presenting_evidence: true`. |
@@ -38,7 +39,7 @@ option overrides its matching YAML flag; its effective value is saved.
 
 The four variants are `llm_only` (S/O), `patient_retrieval` (S/O + similar patient),
 `guidelines` (S/O + guidelines), and `patient_retrieval_guidelines` (both sources).
-Required evidence is prepared once per patient and reused across variants/models.
+The component and variant definitions live in `scripts/med_copilot_variants.py`. Required components are prepared once per patient and reused across consuming variants/models. Variant definitions select existing prompt templates and bind component outputs to template fields. Registered settings belong in `variant_settings`; they do not create arbitrary runner overrides. See [Adding a new variant](../../med_copilot/docs/adding_a_new_variant.md) for the always/conditional edit workflow.
 Only evidence sections differ in final prompts; the combined project prompt and
 shared diagnosis/Plan instructions remain unchanged. Source failures block their
 dependent variants while independent variants continue.
@@ -55,10 +56,7 @@ The shipped config selects all four variants and these final models:
 The Ollama entries reuse the upstream OpenAI-compatible adapter at
 `http://localhost:11434/v1` and request `json_schema` output. Keep that server
 running; no key variable is needed for these entries. Optional hosted/local
-Llama 3.3 70B entries remain registered. The shipped one-patient limit means 16
-final requests before retries; shared evidence calls are additional. The sample
-cohort has 10 input patients, 7 after presenting-evidence filtering, 5 after the
-recorded-plan filter, and 1 after the limit.
+Llama 3.3 70B entries remain registered. The shipped `max_patients: null` means every eligible sample patient is run. The sample cohort has 10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-plan filter: 80 final requests before retries with four variants and four models. Shared component calls are additional and are not repeated for each variant/model.
 
 Patient retrieval needs `OPENAI_API_KEY`. Guidelines need `OPENAI_API_KEY` and
 `GRAPHRAG_API_KEY`. Shared credentials/resources are checked only for selected
@@ -86,7 +84,7 @@ The shipped YAML explicitly selects the new matrix/filters.
 Each completed batch automatically creates `results_summary.html` and prints the
 best variant per model using mean top-ranked condition BERTScore_F1, with separate
 condition/Plan statistics and counts. All variants/models and all three ranks
-remain available in the report and version-3 JSONL.
+remain available in the report and version-4 JSONL. Component captures are canonical; variants reference the outputs they consume. Historical schemas remain readable without rewriting old artifacts.
 
 Encoder startup is isolated in `scripts/med_copilot_startup.py`. It reads the
 config before retrieval imports FAISS, loads only a requested encoder, and retains

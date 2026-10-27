@@ -6,6 +6,7 @@ from contextlib import chdir, redirect_stdout
 from copy import deepcopy
 import hashlib
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import runpy
@@ -23,6 +24,15 @@ sys.path.insert(0, str(ROOT))
 from scripts.med_copilot_config import (
     PATH_SETTINGS, PIPELINE_DEFAULTS, ExperimentConfig, configured_model_credentials, confirm_experiment, read_yaml_config,
 )
+from scripts.med_copilot_variants import COMPONENTS, VARIANTS, ComponentSpec, Parameter, VariantSpec
+from med_copilot.prompts.diagnosis_plan import VARIANT_TEMPLATES
+
+
+DEFAULT_COMPONENT_SETTINGS = {
+    "patient_retrieval": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5},
+    "guidelines": {"question_model": "gpt-4o-mini", "community_level": 2,
+                   "response_type": "Multiple Paragraphs", "verbose": True},
+}
 
 
 class ExperimentConfigTests(unittest.TestCase):
@@ -45,13 +55,23 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertEqual(config.selected_models, ["gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b"])
         self.assertEqual(config.temperature, 1)
         self.assertEqual(config.max_retries, 3)
-        self.assertEqual(config.max_patients, 1)
+        self.assertEqual(config.max_patients, yaml.safe_load(path.read_text())["max_patients"])
         self.assertEqual(config.model_config, ROOT / "experiments/configs/condition_plan_models.yaml")
         metadata = config.metadata(ROOT)
         for field, value in yaml.safe_load(path.read_text()).items():
             with self.subTest(config_field=field):
                 self.assertIn(field, metadata)
-                self.assertEqual(metadata[field], value)
+                if field != "variant_settings":
+                    self.assertEqual(metadata[field], value)
+        self.assertEqual(metadata["variant_settings"], {
+            "patient_retrieval": {"patient_retrieval": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5}},
+            "guidelines": {"guidelines": {"question_model": "gpt-4o-mini", "community_level": 2,
+                                           "response_type": "Multiple Paragraphs", "verbose": False}},
+            "patient_retrieval_guidelines": {
+                "patient_retrieval": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5},
+                "guidelines": {"question_model": "gpt-4o-mini", "community_level": 2,
+                               "response_type": "Multiple Paragraphs", "verbose": False}},
+        })
         registry, _ = read_yaml_config(config.model_config)
         self.assertEqual(set(registry), {"models"})
         self.assertTrue(all(not ({"temperature", "max_retries", "selected_models"} & set(model))
@@ -68,6 +88,7 @@ class ExperimentConfigTests(unittest.TestCase):
             "config_sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
             "model_config": "configs/condition_plan_models.yaml", "selected_models": ["llama", "mini"],
             "temperature": 0.35, "max_retries": 5, "max_patients": None,
+            "variant_settings": {"patient_retrieval_guidelines": deepcopy(DEFAULT_COMPONENT_SETTINGS)},
             **{key: str(ROOT / value) if key in PATH_SETTINGS else value for key, value in PIPELINE_DEFAULTS.items()},
             **{key: metadata[key] for key in ("selected_variants", "patient_input", "patient_labels",
                                               "presenting_evidence_only", "exclude_none_recorded_plans")},
@@ -406,6 +427,333 @@ class VariantConfigTests(unittest.TestCase):
         self.assertIn("Planned final requests: 1", text)
 
 
+class ExtensibleComponentConfigTests(unittest.TestCase):
+    write = ExperimentConfigTests.write
+
+    def test_component_string_parameter_can_inherit_a_resolved_shared_path(self):
+        component = ComponentSpec("Corpus context", ("text",), {
+            "corpus_path": Parameter("str", config_field="patient_corpus"),
+        })
+        self.register(COMPONENTS, {"custom_source": component})
+        config = self.load(selected_variants=["custom_a"], variant_settings={})
+        settings = config.component_instances("custom_source")[0][1]
+        self.assertEqual(settings["corpus_path"], str(ROOT / PIPELINE_DEFAULTS["patient_corpus"]))
+        self.assertEqual(config.metadata(ROOT)["variant_settings"]["custom_a"]["custom_source"], settings)
+        json.dumps(config.variant_metadata(ROOT), allow_nan=False)
+
+    def setUp(self):
+        ExperimentConfigTests.setUp(self)
+        component = ComponentSpec(
+            "Custom evidence", ("text",), {
+                "limit": Parameter("int", 3, minimum=1, maximum=8),
+                "strategy": Parameter("str", "focused"),
+                "include_scores": Parameter("bool", False),
+                "weight": Parameter("number", 0.5, minimum=0, maximum=1),
+            }, resources=("guidelines",), credentials=("CUSTOM_API_KEY",),
+            implementation="components/custom.py",
+        )
+        self.register(COMPONENTS, {"custom_source": component})
+        self.register(VARIANTS, {
+            name: VariantSpec(f"Description {name}", ("custom_source",), "guidelines",
+                              {"Key_info": ("custom_source", "text")})
+            for name in ("custom_a", "custom_b")
+        })
+
+    def register(self, mapping, additions):
+        patcher = patch.dict(mapping, additions)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def load(self, **updates):
+        self.data.update(updates)
+        self.write()
+        return ExperimentConfig(self.path)
+
+    def test_legacy_defaults_publish_effective_settings_and_shared_component_plan(self):
+        config = self.load()
+        self.assertEqual(config.variant_settings,
+                         {"patient_retrieval_guidelines": DEFAULT_COMPONENT_SETTINGS})
+        self.assertEqual(config.variant_components, {"patient_retrieval_guidelines": {
+            "patient_retrieval": "patient_retrieval", "guidelines": "guidelines"}})
+        self.assertEqual(config.component_plan, {
+            name: {"component": name, "settings": values} for name, values in DEFAULT_COMPONENT_SETTINGS.items()})
+        self.assertEqual(config.required_resources, {"patient_retrieval", "guidelines"})
+        self.assertEqual(config.required_credentials, ["GRAPHRAG_API_KEY", "OPENAI_API_KEY"])
+        self.assertFalse(config.needs("absent"))
+        self.assertEqual(config.component_instances("absent"), [])
+
+    def test_existing_four_variants_share_exactly_two_component_executions(self):
+        config = self.load(selected_variants=["llm_only", "patient_retrieval", "guidelines",
+                                              "patient_retrieval_guidelines"])
+        self.assertEqual(list(config.component_plan), ["patient_retrieval", "guidelines"])
+        self.assertEqual(config.variant_components["llm_only"], {})
+        self.assertEqual(config.variant_components["patient_retrieval"], {"patient_retrieval": "patient_retrieval"})
+        self.assertEqual(config.variant_components["guidelines"], {"guidelines": "guidelines"})
+        self.assertEqual(config.variant_components["patient_retrieval_guidelines"], {
+            "patient_retrieval": "patient_retrieval", "guidelines": "guidelines"})
+        self.assertEqual(len(config.component_instances("patient_retrieval")), 1)
+        self.assertEqual(len(config.component_instances("guidelines")), 1)
+
+    def test_identical_overrides_are_deduplicated_and_snapshots_do_not_alias(self):
+        settings = {name: {"custom_source": {"limit": 6}} for name in ("custom_a", "custom_b")}
+        config = self.load(selected_variants=["custom_b", "custom_a"], variant_settings=settings)
+        self.assertEqual(len(config.component_plan), 1)
+        first, = config.component_plan
+        self.assertEqual(config.variant_components["custom_a"], {"custom_source": first})
+        self.assertEqual(config.variant_components["custom_b"], {"custom_source": first})
+        expected = {"limit": 6, "strategy": "focused", "include_scores": False, "weight": 0.5}
+        self.assertEqual(config.component_instances("custom_source"), [(first, expected)])
+        instances = config.component_instances("custom_source")
+        instances[0][1]["limit"] = 1
+        metadata = config.metadata(ROOT)
+        metadata["variant_settings"]["custom_a"]["custom_source"]["limit"] = 2
+        self.assertEqual(config.component_instances("custom_source"), [(first, expected)])
+        self.assertEqual(config.variant_settings["custom_a"]["custom_source"]["limit"], 6)
+
+    def test_distinct_overrides_get_distinct_executions_and_stable_order_independent_ids(self):
+        values = {"custom_a": {"custom_source": {"limit": 5, "strategy": "broad"}},
+                  "custom_b": {"custom_source": {"strategy": "focused", "limit": 6}}}
+        first = self.load(selected_variants=["custom_a", "custom_b"], variant_settings=values)
+        self.assertEqual(len(first.component_instances("custom_source")), 2)
+        refs = deepcopy(first.variant_components)
+        self.assertNotEqual(refs["custom_a"], refs["custom_b"])
+        values["custom_a"]["custom_source"] = {"strategy": "broad", "limit": 5}
+        second = self.load(selected_variants=["custom_b", "custom_a"], variant_settings=values)
+        self.assertEqual(second.variant_components, refs)
+        self.assertEqual(list(second.component_plan),
+                         [refs[name]["custom_source"] for name in ("custom_b", "custom_a")])
+
+    def test_equivalent_integer_and_float_number_overrides_share_one_execution(self):
+        config = self.load(selected_variants=["custom_a", "custom_b"], variant_settings={
+            "custom_a": {"custom_source": {"weight": 1}},
+            "custom_b": {"custom_source": {"weight": 1.0}},
+        })
+        self.assertEqual(len(config.component_instances("custom_source")), 1)
+        self.assertEqual(config.variant_components["custom_a"], config.variant_components["custom_b"])
+        self.assertIs(type(config.variant_settings["custom_a"]["custom_source"]["weight"]), float)
+
+    def test_component_instance_identity_collision_is_rejected_instead_of_sharing_wrong_outputs(self):
+        first = self.load(selected_variants=["custom_a"],
+                          variant_settings={"custom_a": {"custom_source": {"limit": 5}}})
+        conflicting_name, = first.component_plan
+        self.register(COMPONENTS, {conflicting_name: ComponentSpec("Different implementation", ("text",))})
+        self.register(VARIANTS, {"conflicting": VariantSpec("Conflicting", (conflicting_name,), "guidelines",
+                                                         {"Key_info": (conflicting_name, "text")})})
+        with self.assertRaisesRegex(ValueError, "identity collision"):
+            self.load(selected_variants=["custom_a", "conflicting"])
+
+    def test_global_baseline_settings_are_component_defaults_and_explicit_defaults_share(self):
+        config = self.load(selected_variants=["patient_retrieval", "patient_retrieval_guidelines"],
+                           patient_retrieval_alpha=0.8, patient_retrieval_top_k=7,
+                           variant_settings={"patient_retrieval": {"patient_retrieval": {"alpha": 0.8}}})
+        self.assertEqual(config.component_instances("patient_retrieval"), [
+            ("patient_retrieval", {"alpha": 0.8, "top_k": 7, "rerank_top_k": 5})])
+        self.assertEqual(config.variant_settings["patient_retrieval"]["patient_retrieval"]["top_k"], 7)
+
+    def test_inactive_settings_are_validated_and_recorded_without_requesting_resources(self):
+        config = self.load(selected_variants=["llm_only"],
+                           variant_settings={"custom_a": {"custom_source": {"limit": 7}}})
+        self.assertEqual(config.component_plan, {})
+        self.assertEqual(config.required_resources, set())
+        self.assertEqual(config.required_credentials, [])
+        self.assertFalse(config.needs_patient_retrieval)
+        self.assertFalse(config.needs_guidelines)
+        self.assertEqual(config.variant_settings["custom_a"]["custom_source"], {
+            "limit": 7, "strategy": "focused", "include_scores": False, "weight": 0.5})
+        self.assertEqual(config.metadata(ROOT)["variant_settings"], config.variant_settings)
+        self.assertEqual(config.variant_metadata(ROOT)["variant_definitions"].keys(), {"llm_only"})
+
+    def test_shared_resource_and_credential_requirements_follow_component_not_variant_name(self):
+        both = ComponentSpec("Different patient search", ("text",), resources=("patient_retrieval", "guidelines"),
+                             credentials=("CUSTOM_API_KEY", "OPENAI_API_KEY", "CUSTOM_API_KEY"))
+        self.register(COMPONENTS, {"custom_source": both})
+        config = self.load(selected_variants=["custom_a", "custom_b"])
+        self.assertTrue(config.needs("custom_source"))
+        self.assertFalse(config.needs("patient_retrieval"))
+        self.assertTrue(config.needs_patient_retrieval)
+        self.assertTrue(config.needs_guidelines)
+        self.assertEqual(config.required_resources, {"patient_retrieval", "guidelines"})
+        self.assertEqual(config.required_credentials, ["CUSTOM_API_KEY", "OPENAI_API_KEY"])
+
+    def test_generic_component_requirements_integrate_with_existing_credential_preflight(self):
+        config = self.load(selected_variants=["custom_a"])
+        with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ValueError, "CUSTOM_API_KEY"):
+            configured_model_credentials({"local": {"api_base": "http://localhost:8000/v1"}}, ["local"],
+                                         required_shared_keys=config.required_credentials)
+        with patch.dict(os.environ, {"CUSTOM_API_KEY": "PRIVATE_CUSTOM_KEY"}, clear=True):
+            self.assertEqual(configured_model_credentials(
+                {"local": {"api_base": "http://localhost:8000/v1"}}, ["local"],
+                required_shared_keys=config.required_credentials), {"local": (None, "local-no-key")})
+        self.assertNotIn("PRIVATE_CUSTOM_KEY", json.dumps(config.metadata(ROOT)))
+
+    def test_metadata_names_actual_template_and_complete_component_registry_provenance(self):
+        implementation = self.root / "components/custom.py"
+        implementation.parent.mkdir()
+        implementation.write_text('"""Placeholder implementation identity."""\n')
+        config = self.load(selected_variants=["custom_b", "llm_only"],
+                           variant_settings={"custom_b": {"custom_source": {"limit": 5}}})
+        metadata = config.variant_metadata(self.root)
+        definition = metadata["variant_definitions"]["custom_b"]
+        self.assertEqual(definition["description"], "Description custom_b")
+        self.assertEqual(definition["template"], "VARIANT_TEMPLATES['guidelines']")
+        self.assertEqual(definition["sha256"], hashlib.sha256(VARIANT_TEMPLATES["guidelines"].encode()).hexdigest())
+        self.assertEqual(definition["bindings"], {"Key_info": ["custom_source", "text"]})
+        instance = definition["components"]["custom_source"]
+        component = metadata["component_definitions"][instance]
+        self.assertEqual(component["component"], "custom_source")
+        self.assertEqual(component["settings"]["limit"], 5)
+        self.assertEqual(component["outputs"], ["text"])
+        self.assertEqual(component["resources"], ["guidelines"])
+        self.assertEqual(component["credentials"], ["CUSTOM_API_KEY"])
+        self.assertEqual(component["implementation"], "components/custom.py")
+        self.assertEqual(component["implementation_sha256"], hashlib.sha256(implementation.read_bytes()).hexdigest())
+        registry_path = ROOT / "scripts/med_copilot_variants.py"
+        self.assertEqual(metadata["registry_provenance"], {
+            "file": str(registry_path), "sha256": hashlib.sha256(registry_path.read_bytes()).hexdigest()})
+        component["settings"]["limit"] = 1
+        definition["bindings"]["Key_info"][0] = "changed"
+        again = config.variant_metadata(self.root)
+        self.assertEqual(again["component_definitions"][instance]["settings"]["limit"], 5)
+        self.assertEqual(again["variant_definitions"]["custom_b"]["bindings"], {"Key_info": ["custom_source", "text"]})
+
+    def test_missing_implementation_fingerprint_is_explicit_without_loading_component_code(self):
+        config = self.load(selected_variants=["custom_a"])
+        metadata = config.variant_metadata(self.root)
+        self.assertIsNone(metadata["component_definitions"]["custom_source"]["implementation_sha256"])
+        self.assertFalse((self.root / "components/custom.py").exists())
+
+    def test_variant_settings_reject_wrong_shapes_unknown_variants_components_and_parameters(self):
+        invalid = (None, [], "custom_a", {"unknown": {}}, {"custom_a": []},
+                   {"custom_a": {"unknown_component": {}}},
+                   {"custom_a": {"custom_source": None}},
+                   {"custom_a": {"custom_source": {"api_key": "PRIVATE_KEY"}}},
+                   {"llm_only": {"custom_source": {}}})
+        for configured in invalid:
+            with self.subTest(configured=configured), self.assertRaises(ValueError):
+                self.load(selected_variants=["custom_a"], variant_settings=configured)
+
+    def test_variant_settings_validate_types_ranges_and_inactive_overrides(self):
+        bad = {"limit": [0, 9, True, 3.0, "3", None],
+               "strategy": ["", " \n", 1, False, [], None],
+               "include_scores": [0, 1, "false", None],
+               "weight": [-0.1, 1.1, True, float("inf"), float("nan"), "0.5", None]}
+        for name, values in bad.items():
+            for value in values:
+                with self.subTest(name=name, value=value), self.assertRaisesRegex(ValueError, "custom_a.custom_source"):
+                    self.load(selected_variants=["llm_only"],
+                              variant_settings={"custom_a": {"custom_source": {name: value}}})
+
+    def test_duplicate_nested_variant_parameter_keys_are_rejected(self):
+        self.path.write_text("selected_models: [mini]\ntemperature: 1\nmax_retries: 3\nmax_patients: null\n"
+                             "selected_variants: [custom_a]\nvariant_settings:\n  custom_a:\n    custom_source:\n"
+                             "      limit: 3\n      limit: 4\n")
+        with self.assertRaisesRegex(ValueError, "Duplicate YAML"):
+            ExperimentConfig(self.path)
+
+    def test_invalid_variant_bindings_and_component_declarations_fail_before_execution(self):
+        invalid = (
+            VariantSpec("", (), "llm_only"),
+            VariantSpec("Duplicate", ("custom_source", "custom_source"), "guidelines", {"Key_info": ("custom_source", "text")}),
+            VariantSpec("Missing", ("absent",), "guidelines", {"Key_info": ("absent", "text")}),
+            VariantSpec("Unknown prompt", (), "absent"),
+            VariantSpec("Missing binding", ("custom_source",), "guidelines", {}),
+            VariantSpec("Extra binding", (), "llm_only", {"extra": ("custom_source", "text")}),
+            VariantSpec("Reserved condition", ("custom_source",), "guidelines", {
+                "conditions": ("custom_source", "text"), "Key_info": ("custom_source", "text")}),
+            VariantSpec("Missing output", ("custom_source",), "guidelines", {"Key_info": ("custom_source", "missing")}),
+            VariantSpec("Wrong source", ("custom_source",), "guidelines", {"Key_info": ("absent", "text")}),
+            VariantSpec("Wrong tuple", ("custom_source",), "guidelines", {"Key_info": ["custom_source", "text"]}),
+            VariantSpec("No dependencies", (), "guidelines", {"Key_info": ("absent", "text")}),
+        )
+        for definition in invalid:
+            with self.subTest(definition=definition), patch.dict(VARIANTS, {"invalid": definition}), self.assertRaises(ValueError):
+                self.load(selected_variants=["invalid"], variant_settings={})
+        for outputs in ((), ("text", "text"), ("",), (1,)):
+            with self.subTest(outputs=outputs), patch.dict(COMPONENTS, {"custom_source": ComponentSpec("Bad", outputs)}), self.assertRaises(ValueError):
+                self.load(selected_variants=["custom_a"], variant_settings={})
+
+    def test_prompt_fields_cannot_traverse_patient_data_or_override_target_conditions(self):
+        self.register(VARIANT_TEMPLATES, {"unsafe": "Patient: {conditions.subjective}; {Key_info}"})
+        self.register(VARIANTS, {"unsafe": VariantSpec("Unsafe", ("custom_source",), "unsafe", {
+            "Key_info": ("custom_source", "text")})})
+        with self.assertRaisesRegex(ValueError, "Unsupported prompt field"):
+            self.load(selected_variants=["unsafe"], variant_settings={})
+
+    def test_malformed_registry_structures_raise_configuration_errors_not_runtime_type_errors(self):
+        invalid_components = (
+            None, object(),
+            ComponentSpec("", ("text",)), ComponentSpec(None, ("text",)),
+            ComponentSpec("Bad", "text"), ComponentSpec("Bad", ["text"]),
+            ComponentSpec("Bad", ([],)),
+            ComponentSpec("Bad", ("text",), parameters=None),
+            ComponentSpec("Bad", ("text",), parameters=["limit"]),
+            ComponentSpec("Bad", ("text",), parameters={"limit": 1}),
+            ComponentSpec("Bad", ("text",), resources="guidelines"),
+            ComponentSpec("Bad", ("text",), resources=(None,)),
+            ComponentSpec("Bad", ("text",), resources=(" ",)),
+            ComponentSpec("Bad", ("text",), credentials="CUSTOM_API_KEY"),
+            ComponentSpec("Bad", ("text",), credentials=(1,)),
+            ComponentSpec("Bad", ("text",), credentials=("BAD KEY",)),
+            ComponentSpec("Bad", ("text",), implementation=None),
+            ComponentSpec("Bad", ("text",), implementation=" "),
+        )
+        for component in invalid_components:
+            with self.subTest(component=component), patch.dict(COMPONENTS, {"custom_source": component}), self.assertRaises(ValueError):
+                self.load(selected_variants=["custom_a"], variant_settings={})
+        invalid_variants = (
+            None, object(), VariantSpec("Bad", None, "llm_only"),
+            VariantSpec("Bad", ["custom_source"], "guidelines", {"Key_info": ("custom_source", "text")}),
+            VariantSpec("Bad", ([],), "llm_only"),
+            VariantSpec("Bad", (), [], {}),
+            VariantSpec("Bad", (), "llm_only", None),
+        )
+        for variant in invalid_variants:
+            with self.subTest(variant=variant), patch.dict(VARIANTS, {"invalid": variant}), self.assertRaises(ValueError):
+                self.load(selected_variants=["invalid"], variant_settings={})
+
+    def test_blank_and_reserved_variant_ids_are_rejected_even_when_registered_or_inactive(self):
+        for variant_id in ("", " \t\n", "not_recorded"):
+            definition = VariantSpec("Registered but invalid identity", (), "llm_only")
+            with self.subTest(variant_id=variant_id), patch.dict(VARIANTS, {variant_id: definition}):
+                with self.assertRaisesRegex(ValueError, "selected_variants"):
+                    self.load(selected_variants=[variant_id], variant_settings={})
+                with self.assertRaisesRegex(ValueError, "variant_settings"):
+                    self.load(selected_variants=["llm_only"], variant_settings={variant_id: {}})
+
+    def test_malformed_parameter_kinds_shared_fields_and_bounds_raise_clean_configuration_errors(self):
+        parameters = (
+            Parameter("unknown", 3), Parameter(None, 3), Parameter([], 3), Parameter({}, 3),
+            Parameter("int", 3, config_field="missing_field"),
+            Parameter("int", 3, config_field=""), Parameter("int", 3, config_field=1),
+            Parameter("int", 3, config_field=[]), Parameter("int", 3, config_field="component_instances"),
+            Parameter("int", 3, minimum="1"), Parameter("int", 3, minimum=True),
+            Parameter("int", 3, maximum="8"), Parameter("int", 3, maximum=False),
+            Parameter("number", 0.5, minimum=float("nan")),
+            Parameter("number", 0.5, maximum=float("inf")),
+            Parameter("int", 3, minimum=4, maximum=2),
+            Parameter("int", 3, maximum=10 ** 400),
+        )
+        for parameter in parameters:
+            component = ComponentSpec("Malformed parameter", ("text",), {"value": parameter})
+            with self.subTest(parameter=parameter), patch.dict(COMPONENTS, {"custom_source": component}), self.assertRaises(ValueError):
+                self.load(selected_variants=["custom_a"], variant_settings={})
+
+    def test_component_parameter_can_reuse_shared_temperature_without_config_loader_changes(self):
+        component = ComponentSpec("Intermediate model", ("text",), {
+            "temperature": Parameter("number", config_field="temperature", minimum=0, maximum=2)})
+        with patch.dict(COMPONENTS, {"custom_source": component}):
+            config = self.load(selected_variants=["custom_a", "custom_b"], temperature=0.35,
+                               variant_settings={"custom_b": {"custom_source": {"temperature": 0.7}}})
+        self.assertEqual(config.component_instances("custom_source")[0],
+                         ("custom_source", {"temperature": 0.35}))
+        self.assertEqual(len(config.component_instances("custom_source")), 2)
+        self.assertEqual(config.metadata(ROOT)["temperature"], 0.35)
+        self.assertEqual(config.metadata(ROOT)["variant_settings"], {
+            "custom_a": {"custom_source": {"temperature": 0.35}},
+            "custom_b": {"custom_source": {"temperature": 0.7}},
+        })
+
+
 class PipelineSettingsTests(unittest.TestCase):
     setUp = ExperimentConfigTests.setUp
     write = ExperimentConfigTests.write
@@ -429,7 +777,7 @@ class PipelineSettingsTests(unittest.TestCase):
         for field, value in expected.items():
             self.assertEqual(config.metadata(ROOT)[field], value)
             self.assertEqual(getattr(config, field), ROOT / value if field in PATH_SETTINGS else value)
-        self.assertEqual(len(config.metadata(ROOT)), 26)  # 23 effective settings + three provenance fields
+        self.assertEqual(len(config.metadata(ROOT)), 27)  # 24 effective settings + three provenance fields
 
     def test_paths_resolve_from_repo_root_and_absolute_paths_are_preserved_from_other_cwd(self):
         for field in PATH_SETTINGS:

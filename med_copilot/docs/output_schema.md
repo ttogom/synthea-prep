@@ -1,294 +1,263 @@
-# MED-COPILOT patient output schema (version 3)
+# MED-COPILOT patient output schema (version 4)
 
-Each run appends one JSON object per selected input patient to `results.jsonl`. JSONL
-escaping is ordinary JSON escaping: after `json.loads`, captured strings retain
-their original characters, including whitespace, Unicode, and embedded newlines.
-`run.json.schema_version` is `3` for variant/model runs. Historical files retain their historical schema. The patient keys are written in this order:
+Each run writes `run.json`, one JSON object per selected patient in
+`results.jsonl`, and an automatically generated `results_summary.html` after batch
+completion. New component-based runs use `run.json.schema_version: 4`.
+Historical schema 1–3 files keep their original layout and remain readable by the
+collator; they are not migrated or rewritten.
+
+JSONL escaping is ordinary JSON escaping: after `json.loads`, captured strings
+retain their original characters, whitespace, Unicode and embedded newlines.
+
+## Patient record
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | `id` | Prepared input patient ID. |
 | `status` | `completed`, `failed_incomplete`, or `not_processed`. |
-| `selected_reference_patient` | Minimal identity of the reference whose formatted full SOAP example enters final generation, or `null`. |
-| `guideline_questions` | Parsed `Key Questions` list, or `null`; the raw question reply remains the GraphRAG query. |
+| `components` | Canonical preparation captures keyed by configured component instance ID. |
+| `variants` | Selected variants in configuration order, each referencing the captures it consumes and retaining final-model outputs. |
+
+Evidence is stored once inside component records. There are no duplicated
+patient-level `guideline_evidence`, selected-reference or ranking fields in schema
+4. A variant using an existing component references its instance; it does not
+rerun preparation or copy its capture. Each selected final model receives an
+independent copy of the variant's exact rendered messages.
+
+## Component records
+
+Each `components[instance_id]` contains:
+
+| Field | Value |
+| --- | --- |
+| `component` | Logical component ID from the lightweight registry. |
+| `status` | `not_processed`, `completed`, or `failed_incomplete`. |
+| `error` | Sanitized `{type, message}`, or `null`. |
+| `settings` | Effective validated parameters for this configured instance, including defaults. |
+| `outputs` | Declared string outputs consumed through prompt bindings. Empty until published. |
+| `capture` | Intermediate/raw evidence, rankings, traces and provider metadata obtained while preparing the component. |
+
+A logical component and identical effective settings share one configured
+instance across all consuming variants/models for the patient. Different
+settings create distinct instance IDs; variant references are authoritative and
+consumers must not infer the instance ID from a naming convention. Required
+resources can still be shared between instances. Preparation is sequential; the
+existing wrappers change process working directories and use mutable callbacks.
+
+The existing logical components publish these outputs:
+
+| Component | Output | Meaning |
+| --- | --- | --- |
+| `patient_retrieval` | `example` | First reranked full reference SOAP example, or the existing `No reference patient available.` fallback after a successful empty retrieval. |
+| `guidelines` | `Key_info` | GraphRAG guideline answer text. |
+
+Components may publish different declared string outputs in future variants.
+An output is final accepted evidence, not merely a successful intermediate tool
+response. Failed or interrupted preparation retains its capture but does not
+become usable evidence accidentally. A successful empty retrieval completes; an
+unavailable component blocks its dependent variants with `EvidenceUnavailable`.
+Independent variants continue, including standalone guidelines when patient
+retrieval fails and standalone patient retrieval when guidelines fail.
+
+### Existing capture fields
+
+The common capture keeps evidence fields separate from prompt outputs. The
+existing patient and guideline stages populate the fields applicable to them;
+other fields remain `null` or empty provider lists until available.
+
+| Capture field | Value |
+| --- | --- |
+| `selected_reference_patient` | Minimal identity of the selected reference, or `null`. |
+| `guideline_questions` | Parsed `Key Questions` list, or `null`; the exact raw question reply remains the GraphRAG query. |
 | `guideline_evidence` | GraphRAG answer text, or `null`. |
-| `graphrag_context` | Returned context tables as `{columns, index, data}`, or `null`. |
-| `keyword_extraction_raw` | Exact string from the keyword API response's `choices[0].message.content`, captured before validation. Malformed JSON, duplicates, category structure, empty strings, and whitespace are preserved. `null` means extraction was not attempted or no string content was obtained. |
-| `retrieval_keywords` | Actual keyword list returned by successful extraction: categories flattened in symptoms/diagnoses/medications order, terms trimmed, duplicates removed in first-occurrence order. `[]` means successful extraction with no terms. `null` means no valid list was produced. These are distinct from guideline questions. |
-| `retrieved_patient_ids` | Retained hybrid ranking, normally up to 20 references, before cross-encoder reranking. Each entry contains a minimal identity and its unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
-| `reranked_patient_ids` | Retained cross-encoder ranking, up to five references, containing minimal identity and the preceding scores plus `rerank_score`. Ties preserve hybrid order. When a reference is selected, its identity equals the first entry's identity. |
-| `model_responses` | Shared evidence-stage provider metadata lists, described below. |
-| `evidence_status` | Per-source status/error for `patient_retrieval` and `guidelines`, as described below. |
-| `variants` | Selected variants, in config order; each contains its own prompts and model outputs. |
+| `graphrag_context` | Returned context tables serialized as `{columns, index, data}`, or `null`. |
+| `keyword_extraction_raw` | Exact keyword API content captured before validation, including malformed JSON and whitespace. |
+| `retrieval_keywords` | Successfully extracted terms flattened in symptoms/diagnoses/medications order, trimmed and deduplicated in first-occurrence order. `[]` is valid; `null` means unavailable. |
+| `retrieved_patient_ids` | Retained hybrid ranking with minimal identities and unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
+| `reranked_patient_ids` | Retained cross-encoder ranking with those scores plus `rerank_score`; ties preserve hybrid order. |
+| `model_responses` | Independent provider metadata lists for evidence-stage responses. |
 
+Matching remains S/O-only for corpus/query embeddings, keyword overlap and
+cross-encoder scoring. Full reference SOAP is generation evidence after
+selection. Labels/scoring never enter component preparation or final prompts.
+Keyword model extraction and guideline-question generation are separate stages.
 
-## Final-model outputs and configuration
+## Variant and final-model records
 
 Each `variants[variant_id]` contains:
 
 | Field | Value |
-|---|---|
-| `status` | `not_processed`, `completed`, or `failed_incomplete`; completed only when every selected final model completes generation. |
-| `error` | `{type, message}` for unavailable required evidence, or `null`; model errors remain in their model slots. |
-| `evidence_sources` | `[]`, `["patient_retrieval"]`, `["guidelines"]`, or `["patient_retrieval", "guidelines"]`. Names reference shared patient evidence. |
-| `assessment_plan_prompts` | Exact final `{system, user}` messages before generation, or `null` for an unattempted/blocked variant. |
-| `assessment_plans` | Model slots keyed by selected registry aliases, in selection order. |
+| --- | --- |
+| `status` | `not_processed`, `completed`, or `failed_incomplete`. Completed only when every selected final model completes generation. |
+| `error` | `{type, message}` for unavailable required evidence or prompt preparation, or `null`; model errors remain in model slots. |
+| `components` | Mapping from each required logical component ID to the configured instance ID in this patient's `components`. Empty for `llm_only`. |
+| `assessment_plan_prompts` | Exact `{system, user}` messages, or `null` before preparation or when blocked. |
+| `assessment_plans` | Independent final-model slots keyed by selected model aliases. |
 
-Each `variants[variant_id].assessment_plans[model_id]` contains these fields in order:
+Each `variants[variant_id].assessment_plans[model_id]` retains:
 
 | Field | Value |
-|---|---|
-| `status` | `not_processed`, `completed`, or `failed_incomplete`. This describes generation, independently of metric statuses. |
-| `error` | Generation error `{type, message}`, with selected credential values redacted, or `null`. |
+| --- | --- |
+| `status` | `not_processed`, `completed`, or `failed_incomplete`, independently of metric statuses. |
+| `error` | Generation error `{type, message}` with credential values redacted, or `null`. |
 | `predictions` | Exactly three ranked `{condition, plan}` pairs, or `null` when structurally invalid/unavailable. |
-| `assessment_plan_raw` | Exact consumed final content, including malformed content, or `null` before content is obtained. |
-| `model_responses` | List of response metadata objects for this model; empty when no response is obtained. |
-| `evaluation` | Three ordered `{rank, condition, plan}` score entries, or `null` when scoring has not started. |
+| `assessment_plan_raw` | Exact consumed reply content, including malformed content, or `null`. |
+| `model_responses` | Response metadata for this final model. |
+| `evaluation` | Three ordered `{rank, condition, plan}` score entries, or `null` before scoring. |
 
-For example (shared capture fields and evaluation arrays omitted here):
+The nesting separates reusable evidence from distinct generated outputs:
+
+```text
+patient
+├── components
+│   ├── patient_retrieval → one capture and accepted example
+│   └── guidelines       → one capture and accepted guideline answer
+└── variants
+    ├── llm_only                    → no component references → model outputs
+    ├── patient_retrieval           → patient instance        → model outputs
+    ├── guidelines                  → guideline instance      → model outputs
+    └── patient_retrieval_guidelines→ both instances           → model outputs
+```
+
+For example, a patient with one completed retrieval component and one selected
+final model has this shape (capture details and evaluation values abbreviated):
 
 ```json
 {
   "id": "prepared-patient-id",
-  "status": "failed_incomplete",
-  "evidence_status": {
-    "patient_retrieval": {"status": "not_requested", "error": null},
-    "guidelines": {"status": "completed", "error": null}
+  "status": "completed",
+  "components": {
+    "patient_retrieval": {
+      "component": "patient_retrieval",
+      "status": "completed",
+      "error": null,
+      "settings": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5},
+      "outputs": {"example": "Exact selected reference example"},
+      "capture": {"selected_reference_patient": {"note_id": "reference-id"}}
+    }
   },
   "variants": {
-    "llm_only": {
-      "status": "failed_incomplete", "error": null,
-      "evidence_sources": [],
-      "assessment_plan_prompts": {"system": "You are a clinical expert.", "user": "exact S/O-only prompt"},
+    "patient_retrieval": {
+      "status": "completed",
+      "error": null,
+      "components": {"patient_retrieval": "patient_retrieval"},
+      "assessment_plan_prompts": {
+        "system": "You are a clinical expert.",
+        "user": "Exact rendered patient-retrieval prompt"
+      },
       "assessment_plans": {
         "gpt_4o_mini": {
-          "status": "completed", "error": null,
-          "predictions": [{"condition": "A", "plan": []}, {"condition": "B", "plan": []}, {"condition": "C", "plan": []}],
-          "assessment_plan_raw": "{...}", "model_responses": [], "evaluation": null
-        },
-        "llama_3_3_70b": {
-          "status": "failed_incomplete",
-          "error": {"type": "RuntimeError", "message": "provider request failed"},
-          "predictions": null, "assessment_plan_raw": null,
-          "model_responses": [], "evaluation": null
+          "status": "completed",
+          "error": null,
+          "predictions": [
+            {"condition": "A", "plan": ["Action A"]},
+            {"condition": "B", "plan": ["Action B"]},
+            {"condition": "C", "plan": []}
+          ],
+          "assessment_plan_raw": "Exact raw JSON reply",
+          "model_responses": [],
+          "evaluation": null
         }
-      }
-    },
-    "guidelines": {
-      "status": "not_processed", "error": null,
-      "evidence_sources": ["guidelines"], "assessment_plan_prompts": null,
-      "assessment_plans": {
-        "gpt_4o_mini": {"status": "not_processed", "error": null, "predictions": null, "assessment_plan_raw": null, "model_responses": [], "evaluation": null},
-        "llama_3_3_70b": {"status": "not_processed", "error": null, "predictions": null, "assessment_plan_raw": null, "model_responses": [], "evaluation": null}
       }
     }
   }
 }
 ```
 
-The complete patient record also contains all shared fields in the table above.
-Required retrieval, questions and guideline evidence are computed once per patient.
-Each selected variant renders its prompt once; every selected model gets an
-independent copy of that variant's exact messages. Final raw replies, predictions, metadata and scores exist only in
-the model slots; no default model is implicitly copied to patient-level fields.
+The full capture contains the fields described above, not only the selected
+reference shown in this abbreviated example. Exact raw responses are captured
+separately from parsed predictions; the example's descriptive strings are not a
+sample live model response.
 
-Console presentation is owned by the runner: its `RANKED CONDITIONS AND PLANS`
-heading precedes model alias/provider/model labels, three numbered conditions,
-and each condition's indented, numbered Plan items. Failed or unavailable outputs
-are labeled within their model group. The formatter does not alter saved results
-or invent missing Plan items; the generation adapter does not print final replies.
+## Status, failures and interruption
 
-Models execute sequentially in configured selection order. Ordinary model
-failures do not stop sibling models or subsequent patients. Refused/truncated
-responses retain obtained content/metadata but fail generation and are not
-scored. An obtained but malformed JSON reply retains the prior `completed`
-generation semantics and is evaluated as missing generation by field/rank.
-A patient is `completed` only if every selected variant/model generation completes; otherwise
-it is `failed_incomplete`. The existing run-status aggregation/exit code applies.
-`evidence_status[source]` has `status` and `error`. Status is `not_requested` when
-no selected variant needs the source, `not_processed` before an attempt,
-`completed` on success (including empty retrieval), or `failed_incomplete` on
-initialization/runtime failure. Errors record type and sanitized message. Only
-dependent variants fail with `EvidenceUnavailable`; their model slots stay
-`not_processed`, prompts stay `null`, and independent variants still run. Empty
-successful retrieval uses the existing no-reference fallback. Guideline calls
-are skipped if their only dependent variant is already blocked by retrieval.
-Source errors preserve all captures obtained before failure.
-An interruption retains earlier replies and any completed scores, marks the
-current patient/run failed, and leaves later variant/model/patient slots unattempted. Scoring
-starts after all final generation calls, so a generation interruption can retain
-an earlier reply whose evaluation has not yet started.
+Ordinary component failures block only consuming variants. Their final-model
+slots remain `not_processed` and prompts remain `null`; completed component
+captures survive. Ordinary model failures remain local to that model, and other
+models/variants/patients continue. Refused or truncated replies retain available
+content/metadata but fail generation. Obtained malformed JSON retains existing
+`completed` generation semantics and produces missing-generation scores.
 
-All runner configuration files belong in `experiments/configs/`.
-`experiment.yaml` is the fixed master config with `selected_models`,
-`temperature`, `max_retries`, `max_patients`, `selected_variants`, `patient_input`,
-`patient_labels`, `presenting_evidence_only`, and `exclude_none_recorded_plans`,
-plus the path/model/tuning settings documented in
-[`experiments/configs/README.md`](../../experiments/configs/README.md). The two shared generation settings are passed
-into every selected final model before upstream configuration/construction.
-Temperature must be a finite number from 0 to 2; max_retries must be an integer
-of at least 1, matching the upstream configuration contract. Booleans and numeric
-strings are rejected. The default experiment retains temperature 1 and retry
-limit 3. Shared retrieval/question/GraphRAG stages keep their existing settings.
+The patient completes only when every selected variant/model generation
+completes. Otherwise it is `failed_incomplete`; an unstarted selected patient is
+`not_processed`. Run statuses remain `running`, `completed`,
+`completed_with_errors`, and `failed_incomplete`. Scoring failures are field/rank
+local and do not change generation status or the run exit code.
 
-`condition_plan_models.yaml` contains only a `models` registry of upstream
-GraphRAG `LanguageModelConfig` fields, plus `api_key_env` and `output_mode`.
-Model entries cannot redefine temperature or max_retries: these belong in the
-master config. Both YAML paths are fixed under `experiments/configs/` relative
-to the repository root, independently of the launch directory. Model selection
-and config-file command-line overrides are unavailable; edit the YAML and restart.
-Only selected credentials are resolved. Invalid experiment fields/values, duplicate
-YAML keys, missing files, malformed registries, unknown/duplicate selections and
-missing selected credentials fail before a run directory or per-patient requests.
+Captures are attached before execution. Component-scoped context handling
+restores mutable extractor/ranking bindings after success, failure or
+interruption; working-directory and GraphRAG hook scopes restore on exit.
+Caught interruptions retain the current patient's obtained captures, prompts,
+replies and scores, and add explicit unattempted placeholders for remaining
+selected patients/variants/models. Excluded patients receive no result rows or
+placeholders. Persistence is at patient boundaries plus best-effort interruption
+finalization; this schema does not add resume-existing-run support or protection
+against uncatchable process termination.
 
-`run.json.experiment` records `config_file`, its exact source-byte `config_sha256`,
-the resolved `model_config` path and all effective experiment settings, including
-applied defaults (listed below). The registry path is provenance, not a YAML setting. Dataset, output and reference-resource paths are configured in the experiment YAML
-and resolve from the repo root; guideline settings/table paths follow the guideline root.
+## Configuration and provenance
 
-`max_patients` must be `null` (meaning all eligible patients) or a
-positive integer. It selects the first N patients in input-file order after the
-presenting-evidence and exact recorded-plan filters. All input records and labels, including those outside
-the limit, are validated before selection. Zero, negatives, booleans, strings and
-floats are rejected at startup. The configured limit is recorded in
-`run.json.experiment.max_patients` and `run.json.evaluation.max_patients`.
-Evaluation `input_patient_count` still counts the full input;
-`selected_patient_count` and `selected_patient_ids` describe the limited cohort.
-`excluded_patient_ids` includes patients excluded by either evidence filtering
-or recorded-plan filtering or the limit. Generation, scoring, console numbering, result rows and interrupted
-run placeholders use only the selected cohort. A limit larger than the eligible
-cohort runs all eligible patients; an empty eligible cohort remains an error.
+The fixed `experiments/configs/experiment.yaml` selects models, variants, cohort,
+paths and tuning. `variant_settings` nests overrides by variant ID, component ID,
+and declared parameter. Registered component defaults may reference shared
+experiment fields. Unknown fields, invalid types/ranges, bad bindings/templates,
+duplicate selections and missing selected credentials fail during preflight.
+`llm_only` with a keyless local final model requires no retrieval resources or
+shared API keys. The presenting-evidence CLI filter override remains available;
+no additional runner command-line arguments are introduced.
 
-The current experiment selects GPT-4o mini and the downloaded Ollama tags
-`Jayasimma/healthcare:latest`, `llama3:latest` and `gemma2:2b`, using the aliases
-`ollama_healthcare`, `ollama_llama3` and `ollama_gemma2_2b`. It retains a one-patient
-limit. Ollama entries use `model_provider: openai`,
-`api_base: http://localhost:11434/v1` and `output_mode: json_schema`, without
-`api_key_env`. Existing configuration, generation and metadata paths handle these
-entries; no runner source changes are required. Each selected Ollama tag and its
-endpoint appear in the per-model effective settings in `run.json`; every patient
-gets independent model result/scoring slots. The unselected Groq Llama entry
-requires enterprise access; it is not an installed Ollama model.
+`run.json.experiment` records every effective YAML setting and applied default,
+config path/source SHA-256 and the final-model registry reference. `variant_definitions` and
+`component_definitions` snapshot the actual dependencies, prompt bindings,
+implementation identities and effective parameters used; `registry_provenance`
+records the registry source path and SHA-256. Prompt provenance
+records the project `diagnosis_plan.py` path/source fingerprint and exact selected
+template hashes. Only accessed/successfully initialized resources are
+fingerprinted; unused/failed resources remain `null`. Shared reference corpus,
+S/O cache/manifest, guideline settings, active prompt, tables and vector stores
+retain their existing fingerprints. Resolved credentials are never saved.
 
-At startup the runner loads the repository-root `.env` using the already-required
-`python-dotenv`, before dependency/client initialization. Exported environment
-variables take precedence. This supplies both shared-stage credentials and the
-variables named by selected models' `api_key_env`; `${OPENAI_API_KEY}` expansion
-can supply `GRAPHRAG_API_KEY` as shown in `.env.example`. Loading is independent
-of the launch directory, and an absent `.env` preserves environment-only setup.
-The local `.env` is gitignored and its contents are not copied into run artifacts.
+`condition_plan_models.yaml` continues to contain only model definitions, with
+credential variable names and `output_mode`. Shared final `temperature` and
+`max_retries` come from the experiment; other upstream defaults, retries,
+timeouts and rate limits remain reused. `run.json.assessment_plan_models` saves
+selected effective settings excluding API keys. Literal keys in model entries
+and credentials/query parameters in endpoint URLs are rejected. Exported
+credentials take precedence over the repository-root `.env`.
 
-Before creating experiment output or making generation requests, startup checks
-all selected aliases and their nonblank key variables, plus shared-stage
-`OPENAI_API_KEY` for patient retrieval and additionally `GRAPHRAG_API_KEY` for
-guidelines, only when
-selected variants require those sources. Local `llm_only` needs neither shared
-key nor reference resources/encoder initialization. Unknown aliases and credential errors are
-reported together with the affected YAML files and repository-root `.env`;
-configuration failures exit nonzero. Keyless local endpoints and Azure managed
-identity retain their configured authentication modes. These are configuration
-checks, not authentication/model-access requests. A valid setup displays the
-ordered aliases, provider/model identities and key-variable names and requires
-`y` or `yes` to proceed. Any other answer, EOF or Ctrl+C cancels successfully
-without run artifacts. The prompt groups model, run, variant and dataset/cohort settings, shows every
-model/run/variant/dataset value, variant descriptions, a hyphenated exact sentinel note,
-aligned intermediate cohort counts, and planned final requests. Additional resource/output
-paths and evidence-model/search tuning are recorded in metadata without expanding
-this confirmation display. `run.json` still records temperature and max_retries in the experiment
-and effective per-model settings.
+Input records and labels are validated before cohort selection. The presenting-
+evidence filter runs first, then optional exact label-Plan exclusion
+`["none recorded"]`, then `max_patients`. `null` selects all eligible patients;
+positive integers select the first N in input order. Evaluation metadata records
+the label/helper hashes, installed scoring versions/defaults, filter order,
+intermediate counts, selected/excluded IDs and reasons. The shipped sample has
+10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-
+plan filter; `max_patients: null` retains all five. Additional output/resource paths
+and evidence tuning remain configured/saved without expanding confirmation.
 
-`run.json.assessment_plan_models` records `config_file`, the exact source-byte
-`config_sha256`, ordered `selected_models`, and a `models` mapping. Each selected
-entry records its credential environment-variable name, `output_mode`, and a
-`config` snapshot of the effective upstream settings excluding `api_key`.
-Literal API keys in model entries and credentials/query parameters in endpoint
-URLs are rejected. Upstream settings/defaults, retries, timeouts and optional
-rate limits are reused through `ModelFactory` and `LitellmChatModel.completion`.
-No upstream source is modified. The full GraphRAG settings loader is unnecessary
-for this registry because it also requires default chat/embedding definitions.
+## Reporting and historical compatibility
 
-`output_mode` is `json_schema`, `json_object`, or `prompt`. The first uses the
-existing strict condition/Plan response schema, the second requests valid JSON
-without API schema enforcement, and the third relies on the same prompt's JSON
-instructions. Every reply still goes through the same local parser. Unsupported
-parameters fail explicitly (`drop_params=false`); there is no mode downgrade,
-model fallback or repair request. Hosted Llama 3.3 70B and an OpenAI-compatible
-local server are included as registry examples. Local servers must already be
-running. Shared question/retrieval models retain their existing configuration.
+The runner's RESULTS block invokes the collator after the batch, including
+ordinary failures. It writes `results_summary.html` and records success/filename
+or a sanitized report failure in `run.json.results_summary`. Report failure
+preserves saved JSON and returns nonzero; interrupted batches preserve JSON and
+skip report generation.
 
-
-## Variant provenance, cohort and reports
-
-`run.json.experiment` includes all 23 effective experiment settings and defaults,
-plus `config_file`, `config_sha256`, and the model-registry reference. Old configs
-with only the original four required fields default to the combined variant,
-sample paths, presenting-evidence filtering enabled, and recorded-plan filtering
-disabled. The shipped YAML explicitly enables all four variants and both filters.
-
-Resource/output path fields are `guidelines`, `experiment_output`, `patient_corpus`,
-and `patient_retrieval_artifacts_dir`. Evidence model fields are
-`guideline_question_model`, `patient_embedding_model`, `patient_keyword_model`,
-and `patient_reranker_model`. Tuning fields are `patient_retrieval_alpha`,
-`patient_retrieval_top_k`, `patient_rerank_top_k`, `guideline_community_level`,
-`guideline_response_type`, and `guideline_verbose`. Each field has an effective
-default and is always included in `run.json.experiment`. Response type is a
-free-form description with examples in the YAML comments, not an enum.
-
-The runner delegates config-aware encoder loading to `PatientRetrievalStartup`
-before importing FAISS-dependent retrieval code. It skips unused encoders,
-retains loading errors for dependent variants, and passes the same model identity
-to the preloaded encoder and cache. A changed encoder setting after import is
-rejected with a restart instruction before any cache can be mislabeled. This
-retains the Apple Silicon initialization-order workaround outside the pipeline.
-
-The optional existing CLI filter override is saved as the effective YAML setting;
-the original source fingerprint is retained.
-
-`variant_definitions[variant_id]` records `patient_retrieval`, `guidelines`, the
-actual `VARIANT_TEMPLATES['variant_id']` identity, and its rendered-template source
-SHA-256. `prompt_provenance` records the project `diagnosis_plan.py` path and exact
-file SHA-256. All variants derive from the existing `EVALUATE_TEMPLATE_KEYINFO`
-by removing whole unused evidence blocks, including the reference fallback when
-reference evidence is omitted. The combined template is unchanged. Upstream
-source is unchanged; the final-model factory/completion wrappers and evaluator
-remain reused.
-
-Evaluation metadata adds `exclude_none_recorded_plans`,
-`excluded_plan_value: ["none recorded"]`, ordered `filter_order`,
-`after_presenting_evidence_count`, `eligible_patient_count`, and
-`exclusion_reasons` keyed by excluded patient ID (first applicable reason:
-`missing_presenting_evidence`, `no_recorded_plan`, `max_patients`). Existing
-input/selected counts, selected/excluded IDs and data/scoring fingerprints remain.
-Only selected, successfully initialized evidence resources are fingerprinted;
-`reference_data` entries for unused/failed sources are `null`. Model snapshots
-are stored once per run. No resolved credentials are written.
-
-After the batch finishes (including ordinary failures), the runner's `RESULTS`
-block invokes the existing collator and writes `results_summary.html` alongside
-the two JSON artifacts. `results_summary` in run metadata records success and
-filename or a sanitized failure. Report failure preserves completed JSON outputs
-and returns nonzero. Interrupted batches preserve JSON but skip report generation.
-The collator continues to support historical schemas without modifying them.
-
-Terminal and HTML summaries show each model's per-variant mean rank-1 condition
-and Plan `BERTScore_F1`, then select its highest mean rank-1 **condition** variant.
-Ties retain selected-variant order. That variant gets separate condition/Plan
-mean, population standard deviation, min, max and scored count. Only available
-scored values enter statistics, including real zeros; skipped/error/missing
-scores do not. Counts make different scored subsets visible. There is no
-condition/Plan composite. Existing HTML details retain all three ranks, six
-metrics per field, and paired comparisons against `llm_only` when present.
-
-Regenerate a report without model calls:
+Reports use saved variant definitions/labels so a historical variant need not
+still exist in today's registry. Schema 1–3 normalization remains supported.
+Terminal/HTML summaries show each model's per-variant rank-1 condition and Plan
+BERTScore_F1 means, choose the highest rank-1 condition mean (ties retain config
+order), and report separate mean, population SD, min, max and scored count.
+Available zero values are included; missing/skipped/error values are not. Paired
+comparisons use the same patients scored in both a variant and `llm_only`.
+All three ranks and six metrics per field remain available. There is no composite
+condition/Plan score and no new agent-trace viewer.
 
 ```bash
 python scripts/collate_med_copilot_results.py experiments/output/<run-directory>
 ```
 
-This requires the saved label path to remain available with the recorded hash.
-The collator reads saved artifacts, never current model/config files, and writes
-only its HTML report atomically.
-
+Regeneration needs the saved label path with its recorded hash and never makes
+model requests or rewrites JSON artifacts. The HTML report is written atomically.
 
 ## Condition and Plan evaluation
 
@@ -413,7 +382,7 @@ per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
 probability. Encoder truncation, upstream import-time NLTK download attempts,
 and per-call BERTScore model initialization remain upstream behavior.
 
-Both ranked lists are `null` until their order is known and `[]` if their stage
+Inside the patient-retrieval component capture, both ranked lists are `null` until their order is known and `[]` if their stage
 completes with an empty ranking. An empty hybrid ranking skips reranking, so
 `reranked_patient_ids` remains `null` in that case. The lists capture the retained
 rankings, not the larger initial FAISS pool, and contain no SOAP text or subject
@@ -431,19 +400,10 @@ DataFrame label or a `subject_id`. Multiple records can belong to one subject.
 
 ## Provider responses
 
-Each patient receives a fresh dictionary with independent lists in this order:
-
-```json
-{
-  "keyword_extraction": [],
-  "guideline_questions": [],
-  "guideline_query_embedding": [],
-  "guideline_evidence": []
-}
-```
-
-Each final-model slot has its own response list using the same object format.
-Every consumed response adds an entry containing only these keys:
+Each component's `capture.model_responses` contains independent evidence-stage
+lists. Existing stages are `keyword_extraction`, `guideline_questions`,
+`guideline_query_embedding` and `guideline_evidence`. Each final-model slot has
+its own `model_responses` list. Every obtained response records:
 
 ```json
 {
@@ -457,113 +417,44 @@ Every consumed response adds an entry containing only these keys:
 }
 ```
 
-For shared stages, model and ID come from the provider's `model` and `id`, never
-the configured model or HTTP request ID. Final stages use the full upstream
-LiteLLM-normalized response; reported fields reflect that adapter's values,
-which may differ from vendor-native fields. Configured provider/model identity
-is stored separately in run metadata. Each is `null` if unavailable. `token_usage` is `null`
-when the provider supplied no usage; when usage exists, an unavailable count is
-`null`, including embedding completion counts. Reported zero counts stay zero.
-No counts are estimated or derived from other counts. Empty stage lists mean no
-response was obtained, including stages never reached. Local BioClinicalBERT and
-cross-encoder execution add no entries.
+Values come from the provider response, not the configured model or HTTP request
+ID. Final calls use LiteLLM-normalized metadata; shared GraphRAG capture observes
+FNLLM's OpenAI/Azure SDK boundaries. Unknown fields/counts are `null`, reported
+zeros remain zero, and no usage counts are estimated. `token_usage` is `null` if
+no usage was provided. Local encoder/cross-encoder work adds no API entries.
 
-Metadata is recorded before response validation/parsing. Failed, refused, or
-truncated replies therefore retain available metadata. A streaming response
-creates one entry when its first SDK chunk arrives; later chunks fill available
-metadata on that entry. Repeated usage chunks are not summed or counted as new
-responses. Separate responses append separate entries, even if their IDs match.
-If a stream breaks before usage arrives, usage stays `null` unless earlier chunks
-supplied it. An API exception before a response, or a stream yielding no chunks,
-adds no entry.
+Metadata/raw content is captured before validation. A streaming response creates
+one entry at its first SDK chunk and later chunks fill available fields; repeated
+usage chunks are not counted again. Broken streams retain metadata received so
+far. A request failing before a response produces no entry. Separate responses
+append separate entries even if their response IDs match.
 
-## Capture boundaries and limitations
+GraphRAG's non-streaming CLI path internally streams its answer. Scoped
+instrumentation restores hooks on exit, covers cached model instances and its
+background embedding event loop, and requests `stream_options.include_usage=true`
+for streamed chat. FNLLM cache hits record consumed cached response metadata;
+those counts do not imply a new billable request. Alternate providers require
+an appropriate capture adapter. Live provider usage availability is not
+established by offline mocks.
 
-`JSONKeywordExtractor` captures raw content and metadata immediately after its
-API call, and the processed list immediately before returning it. Hybrid and
-cross-encoder adapters publish their structured retained rankings before phrase
-attribution and formatting. The retriever's and reranker's callbacks are the sole
-sources of `retrieved_patient_ids` and `reranked_patient_ids`; the runner does not
-reconstruct rankings from returned candidates, scores, or formatted-output counts.
-At the start of every `process_patient` call, the
-runner calls `prepare_patient_output_capture` in `scripts/med_copilot_helpers.py`
-to replace the extractor's result binding and both ranking callbacks and
-reset both components' retained rankings to `null`, before constructing S/O or
-calling any pipeline stage. These bindings remain attached after the call and
-are replaced at the next patient's start. Patient results, provider-stage lists and all selected final-model slots are
-freshly initialized for every selected input patient/variant. There is no outer
-end-of-patient cleanup or `try/finally` around the pipeline. GraphRAG's own
-scoped instrumentation still restores its hooks when its context exits.
-Completed captures remain in `failed_incomplete` records. Unstarted patients have shared raw/list fields `null`, shared provider lists
-empty, and a fresh `not_processed` slot for every selected variant/model.
+Hybrid/reranker callbacks publish structured rankings before display formatting
+or attribution. Each component invocation gets its own scoped capture sink;
+completed captures cannot leak into later patients/instances. Original raw
+keyword content is preserved independently from validated/flattened terms.
+Guideline response text and context tables remain separate; only the text enters
+the existing final prompt binding.
 
-GraphRAG's non-streaming CLI path internally streams its answer. The project-owned
-`scripts/med_copilot_observability.py` temporarily observes the configured FNLLM
-OpenAI provider at SDK response parsing and SDK streaming boundaries. Scoped
-ContextVars cover its background embedding event loop; hooks also cover instances
-already cached by GraphRAG's model manager. FNLLM cache hits retain their original
-raw provider metadata and are recorded when consumed, without making a new API
-request. Those token counts describe that cached response, not a new billable
-request. The schema intentionally adds no cache-status field.
+## Offline verification
 
-The only request-option change is `stream_options.include_usage=true` on streamed
-chat requests. Query text, prompts, model parameters, embeddings, streaming, and
-selection are otherwise preserved; there are no recovery requests. Metadata is
-observed before FNLLM can discard it, rather than replaced with configured values.
-Embedding responses commonly have no provider response ID; they then record
-`null`. Providers may omit usage or the final usage chunk. FNLLM can reject partial
-usage objects; available metadata survives that existing failure.
-
-The instrumentation targets the pinned FNLLM 0.4.1 OpenAI implementation classes
-also used by its Azure backend. Alternate GraphRAG providers require their own
-adapter. Offline integration tests exercise the vendored local-search streaming
-method, synchronous embedding bridge, provider wrappers, model manager, real
-FNLLM implementations, and mocked SDK clients, plus persisted runner JSONL. Live
-provider behavior, Azure endpoint support for usage reporting, and actual remote
-usage availability have not been verified. All four offline suites also passed
-with the requirements-pinned OpenAI SDK 2.8.0 and FNLLM 0.4.1: 98 helper tests,
-21 retrieval tests, 74 runner tests, and 14 observability tests (207 total),
-including start-of-patient reset regressions. Shared-component tests cover
-success/failure/success sequences at 16 pipeline failure boundaries, retained
-raw replies, processed keywords, changing rankings, provider metadata, persisted
-JSONL, failures before extraction or reranking, and reuse after `KeyboardInterrupt`
-and `SystemExit`. Live integration and concurrent patient execution are outside
-this sequential runner verification.
-
-This compatibility check used a temporary virtual environment inheriting
-`medcopilot`'s other dependencies, including pandas 3.0.6, with SDK 2.8.0 installed
-locally in that environment. Outgoing IPv4/IPv6 connections were blocked during
-all four suites; each reported zero connection attempts. No compatibility fixes
-were needed. The original `medcopilot` environment remains on SDK 1.99.9, where
-the previous 197-test suite passed. Live provider integration remains unverified.
-
-## Variant/model offline verification
-
-Direct helper/config/scoring/model/collator tests cover effective defaults,
-validation and complete saved experiment settings; fresh nested slots and stopped
-run placeholders (including serialization fallback); exact evidence-section
-removal; sentinel filtering and filter order; model/source failure isolation;
-and report normalization, missing combinations, ties, zeros, scored counts,
-population spread, atomic writes and HTML escaping. Existing model factory,
-completion/retry wrappers, parser and evaluator implementations are reused.
-
-Full runner integration tests mock only external model/API/retrieval dependencies
-and exercise real configuration, scoring orchestration and collator code. They
-verify the complete four-variant matrix, shared evidence reuse, identical messages
-across models per variant, keyless local baselines, conditional resources/keys,
-source and model failures, cancellation, dataset paths, cohort counts/exclusions,
-all effective metadata fields, generated HTML/terminal statistics, report failure,
-and generation/scoring interruptions. Existing pipeline/capture regressions are
-preserved through an explicit test-only projection of the combined variant.
-Historical JSON artifacts are not rewritten. No live inference is part of the
-offline suite; provider/schema compatibility, model-server availability and
-clinical quality remain unverified.
-
-Verified on 2026-10-26 in `medcopilot`: all 495 offline tests passed (34 config,
-9 startup, 132 helper, 25 model, 52 scoring, 21 retrieval, 14 observability,
-153 runner, 55 collator). The required direct helper and runner commands also
-passed. Configuration tests check all 23 effective fields/defaults in metadata;
-pipeline tests exercise custom model/tuning values and relocated resources/output,
-conditional initialization, unchanged confirmation, encoder/cache identity and
-startup failure isolation. The original combined/question prompt values and
-response schema remain unchanged. Live inference remains unverified.
+Direct registry/config/helper tests cover declarations, parameter defaults and
+validation, output bindings, effective metadata, fresh component/model records,
+scoped capture restoration, failure isolation and stopped-run placeholders.
+Runner integration tests mock external APIs/models/retrieval and verify actual
+messages, configured component sharing, exact existing prompts, persisted JSON,
+resource/credential selection, source/model failures, interruptions and reports.
+Scoring and startup regressions preserve their existing contracts. Collator
+cases cover schema 4, historical files, saved variant identities, missing slots,
+paired scores, ties and unavailable values. No live inference is part of the
+offline suite; provider access, model-server compatibility and clinical quality
+remain unverified. See [Adding a new variant](adding_a_new_variant.md) for the
+extension workflow and required checks.

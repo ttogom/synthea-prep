@@ -13,6 +13,7 @@ selected_variants:
   - patient_retrieval             # S/O + similar-patient example.
   - guidelines                    # S/O + clinical guideline evidence.
   - patient_retrieval_guidelines  # S/O + both evidence sources.
+variant_settings: {}  # Optional variant -> component -> parameter overrides; omitted values use shared defaults.
 
 # Similar-patient retrieval and reranking.
 patient_corpus: med_copilot/upstream/soap_with_metadata.json  # Reference SOAP cases, separate from experiment inputs.

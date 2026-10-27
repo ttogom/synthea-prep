@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -139,6 +140,143 @@ class ReportTests(unittest.TestCase):
         summary = format_top_rank_summary(data)
         self.assertIn("Best variant: llm_only", summary)
         self.assertIn("guidelines: condition: N/A (n=0); plan: N/A (n=0)", summary)
+
+    def native_v4(self):
+        self.native_v3()
+        self.metadata["schema_version"] = 4
+        self.metadata["experiment"]["selected_variants"] = ["llm_only", "custom_evidence"]
+        self.metadata["variant_definitions"] = {
+            "llm_only": {"description": "Saved S/O-only description"},
+            "custom_evidence": {"description": "Saved custom evidence description",
+                                "components": ["custom_component"], "prompt_key": "guidelines",
+                                "private_implementation_detail": "PRIVATE_SOURCE_PATH"},
+        }
+        self.rows[0]["components"] = {
+            "custom_component": {"status": "completed", "error": None,
+                                 "guideline_evidence": "PRIVATE_COMPONENT_EVIDENCE",
+                                 "trace": ["PRIVATE_AGENT_TRACE"]},
+        }
+        custom = self.rows[0]["variants"].pop("guidelines")
+        custom["components"] = ["custom_component"]
+        self.rows[0]["variants"]["custom_evidence"] = custom
+
+    def test_v4_saved_variant_is_reportable_without_a_current_registry_entry(self):
+        self.native_v4()
+        self.write()
+        before = [(self.run / name).read_bytes() for name in ("run.json", "results.jsonl")]
+        data = self.load()
+        self.assertEqual(data["selected_variants"], ["llm_only", "custom_evidence"])
+        self.assertEqual([(item["variant"], item["model_id"]) for item in data["patients"][0]["outputs"]],
+                         [(variant, model) for variant in ("llm_only", "custom_evidence")
+                          for model in ("mini", "llama")])
+        self.assertEqual(data["variant_labels"]["custom_evidence"], "Saved custom evidence description")
+        html = generate_report(self.run, root=self.root).read_text()
+        self.assertIn('<option value="custom_evidence">Saved custom evidence description</option>', html)
+        self.assertIn("Saved S/O-only description", html)
+        self.assertIn("Best variant: custom_evidence", html)
+        for private in ("PRIVATE_SOURCE_PATH", "PRIVATE_COMPONENT_EVIDENCE", "PRIVATE_AGENT_TRACE", "PRIVATE_PROMPT"):
+            self.assertNotIn(private, html)
+        self.assertEqual(before, [(self.run / name).read_bytes() for name in ("run.json", "results.jsonl")])
+
+    def test_v4_component_failures_do_not_override_saved_final_model_statuses(self):
+        self.native_v4()
+        self.rows[0]["components"]["custom_component"].update(status="failed_incomplete",
+                                                            error={"type": "RuntimeError", "message": "PRIVATE_ERROR"})
+        custom = self.rows[0]["variants"]["custom_evidence"]
+        custom.update(status="failed_incomplete", error={"type": "EvidenceUnavailable"})
+        custom["assessment_plans"] = {model: {"status": "not_processed"} for model in ("mini", "llama")}
+        self.write()
+        data = self.load()
+        outputs = data["patients"][0]["outputs"]
+        self.assertEqual([item["status"] for item in outputs],
+                         ["completed", "completed", "not_processed", "not_processed"])
+        self.assertIn("Best variant: llm_only", format_top_rank_summary(data))
+        self.assertNotIn("PRIVATE_ERROR", render_report(data))
+
+    def test_v4_missing_selected_patient_variant_and_model_slots_stay_explicit(self):
+        self.native_v4()
+        self.labels.append({"id": "patient-2", "condition": "second", "plan": ["action"]})
+        self.metadata["evaluation"]["selected_patient_ids"].append("patient-2")
+        del self.rows[0]["variants"]["custom_evidence"]
+        del self.rows[0]["variants"]["llm_only"]["assessment_plans"]["llama"]
+        self.write()
+        data = self.load()
+        self.assertEqual([patient["id"] for patient in data["patients"]], ["patient-1", "patient-2"])
+        outputs = [item for patient in data["patients"] for item in patient["outputs"]]
+        self.assertEqual(len(outputs), 8)
+        self.assertEqual(sum(item["status"] == "not_processed" for item in outputs), 7)
+        self.assertEqual(len(data["comparisons"]), 12)
+        self.assertTrue(all(row["paired_patients"] == 0 for row in data["comparisons"]))
+        self.assertIn("custom_evidence: condition: N/A (n=0)", format_top_rank_summary(data))
+
+    def test_v4_comparisons_keep_same_patient_pairing_and_configured_tie_order(self):
+        self.native_v4()
+        for variant in self.rows[0]["variants"].values():
+            for slot in variant["assessment_plans"].values():
+                slot["evaluation"][0]["condition"] = score(0)
+        self.metadata["experiment"]["selected_variants"].reverse()
+        self.write()
+        data = self.load()
+        self.assertTrue(all(row["paired_patients"] == 1 for row in data["comparisons"]))
+        top = [row for row in data["comparisons"] if row["rank"] == 1 and row["field"] == "condition"]
+        self.assertTrue(all(row["differences"]["BERTScore_F1"] == 0 for row in top))
+        self.assertIn("Best variant: custom_evidence", format_top_rank_summary(data))
+
+    def test_saved_variant_descriptions_are_escaped_in_html_and_embedded_json(self):
+        self.native_v4()
+        attack = '</script><img src=x onerror="alert(1)"> & \u2028'
+        self.metadata["variant_definitions"]["custom_evidence"]["description"] = attack
+        self.write()
+        data = self.load()
+        html = render_report(data)
+        self.assertNotIn(attack, html)
+        self.assertNotIn('<img src=x', html)
+        self.assertIn('&lt;img src=x', html)
+        payload = re.search(r'<script id="report-data" type="application/json">(.*?)</script>', html, re.S)[1]
+        self.assertEqual(json.loads(payload)["variant_labels"]["custom_evidence"], attack)
+        self.assertEqual(html.count('</script>'), 2)
+
+    def test_current_registry_supplies_new_variant_labels_without_reporter_changes(self):
+        self.native_v4()
+        self.metadata.pop("variant_definitions")
+        registry = {"llm_only": SimpleNamespace(description="Registered baseline"),
+                    "custom_evidence": SimpleNamespace(description="Registered custom")}
+        self.write()
+        with patch("scripts.collate_med_copilot_results.REGISTERED_VARIANTS", registry):
+            data = self.load()
+        self.assertEqual(data["variant_labels"]["custom_evidence"], "Registered custom")
+        self.assertIn("Registered custom", render_report(data))
+
+    def test_saved_legacy_definition_without_description_uses_stable_identity(self):
+        self.native_v4()
+        self.metadata["variant_definitions"]["custom_evidence"].pop("description")
+        self.metadata["schema_version"] = 3
+        self.write()
+        data = self.load()
+        self.assertEqual(data["variant_labels"]["custom_evidence"], "custom_evidence")
+        self.assertEqual(data["patients"][0]["outputs"][2]["variant"], "custom_evidence")
+
+    def test_v4_rejects_malformed_saved_definitions_and_undeclared_variants(self):
+        for definitions in ([], {"": {}}, {"not_recorded": {}}, {"custom_evidence": []},
+                            {"custom_evidence": {"description": " "}},
+                            {"custom_evidence": {"description": 1}}, {}, None):
+            with self.subTest(definitions=definitions):
+                self.native_v4()
+                self.metadata["variant_definitions"] = definitions
+                self.write()
+                with self.assertRaises(ValueError):
+                    self.load()
+
+    def test_v4_requires_variant_matrix_metadata_and_unique_patient_records(self):
+        for case in ("empty_selection", "missing_variants", "duplicate_patient"):
+            with self.subTest(case=case):
+                self.native_v4()
+                if case == "empty_selection": self.metadata["experiment"]["selected_variants"] = []
+                if case == "missing_variants": self.rows[0].pop("variants")
+                if case == "duplicate_patient": self.rows.append(deepcopy(self.rows[0]))
+                self.write()
+                with self.assertRaisesRegex(ValueError, "Schema v4 requires"):
+                    self.load()
 
     def test_v3_rejects_invalid_variant_metadata_rows_and_duplicate_patients_cleanly(self):
         cases = ["bad_selection", "duplicate_selection", "unknown_variant", "invalid_variants", "invalid_slot",

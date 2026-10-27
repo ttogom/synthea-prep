@@ -2,15 +2,19 @@
 
 from copy import deepcopy
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
 import re
+from string import Formatter
 
 import yaml
 
 from med_copilot.prompts import diagnosis_plan
-from scripts.med_copilot_helpers import VARIANT_DESCRIPTIONS, VARIANT_SOURCES, repo_path
+from scripts.med_copilot_helpers import repo_path
+from scripts import med_copilot_variants
+from scripts.med_copilot_variants import COMPONENTS, VARIANTS, ComponentSpec, VariantSpec, Parameter
 
 
 # Defaults preserve older experiment files; the shipped YAML spells out each field.
@@ -32,6 +36,13 @@ PIPELINE_DEFAULTS = {
 }
 PATH_SETTINGS = ("patient_input", "patient_labels", "guidelines", "experiment_output",
                  "patient_corpus", "patient_retrieval_artifacts_dir")
+
+
+def _finite_number(value):
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -65,6 +76,7 @@ class ExperimentConfig:
             "patient_labels": "experiments/input/test_sample_labels.jsonl",
             "presenting_evidence_only": True,
             "exclude_none_recorded_plans": False,
+            "variant_settings": {},
             **PIPELINE_DEFAULTS,
         }
         if (not isinstance(data, dict) or not required <= set(data)
@@ -75,7 +87,7 @@ class ExperimentConfig:
         data = {**defaults, **data}
         variants = data["selected_variants"]
         if (not isinstance(variants, list) or not variants
-                or any(not isinstance(v, str) or v not in VARIANT_SOURCES for v in variants)
+                or any(not isinstance(v, str) or not v.strip() or v == "not_recorded" or v not in VARIANTS for v in variants)
                 or len(set(variants)) != len(variants)):
             raise ValueError("selected_variants must be a nonempty list of unique supported variants")
         for field in PATH_SETTINGS:
@@ -127,25 +139,146 @@ class ExperimentConfig:
         self.temperature = temperature
         self.max_retries = retries
         self.max_patients = max_patients
+        self._resolve_components(data["variant_settings"])
+
+    def _resolve_components(self, configured):
+        if not isinstance(configured, dict) or any(not isinstance(key, str) or not key.strip()
+                or key == "not_recorded" or key not in VARIANTS for key in configured):
+            raise ValueError("variant_settings must map registered variant IDs to component settings")
+        self.component_plan, self.variant_components = {}, {}
+        self.variant_settings = {}
+        # Validate explicitly configured inactive variants too, without loading resources.
+        for variant_id in dict.fromkeys([*self.selected_variants, *configured]):
+            variant = VARIANTS[variant_id]
+            if (not isinstance(variant, VariantSpec)
+                    or not isinstance(variant.components, tuple)
+                    or any(not isinstance(name, str) or not name.strip() for name in variant.components)
+                    or not isinstance(variant.prompt_key, str)
+                    or not isinstance(variant.bindings, dict)
+                    or not isinstance(variant.description, str) or not variant.description.strip()
+                    or len(set(variant.components)) != len(variant.components)
+                    or any(name not in COMPONENTS for name in variant.components)
+                    or variant.prompt_key not in diagnosis_plan.VARIANT_TEMPLATES):
+                raise ValueError(f"Invalid variant definition: {variant_id}")
+            fields = {name for _, name, _, _ in Formatter().parse(
+                diagnosis_plan.VARIANT_TEMPLATES[variant.prompt_key]) if name is not None}
+            if any(not name.isidentifier() for name in fields):
+                raise ValueError(f"Unsupported prompt field in {variant_id}")
+            if set(variant.bindings) != fields - {"conditions"} or "conditions" in variant.bindings:
+                raise ValueError(f"Prompt bindings do not match template for {variant_id}")
+            for name in variant.components:
+                component = COMPONENTS[name]
+                if (not isinstance(component, ComponentSpec)
+                        or not isinstance(component.description, str) or not component.description.strip()
+                        or not isinstance(component.outputs, tuple) or not component.outputs
+                        or any(not isinstance(output, str) or not output for output in component.outputs)
+                        or len(set(component.outputs)) != len(component.outputs)
+                        or not isinstance(component.parameters, dict)
+                        or any(not isinstance(key, str) or not key or not isinstance(value, Parameter)
+                               for key, value in component.parameters.items())
+                        or not isinstance(component.resources, tuple)
+                        or any(not isinstance(resource, str) or not resource.strip() for resource in component.resources)
+                        or not isinstance(component.credentials, tuple)
+                        or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+                               for key in component.credentials)
+                        or not isinstance(component.implementation, str) or not component.implementation.strip()):
+                    raise ValueError(f"Invalid component definition: {name}")
+                for key, parameter in component.parameters.items():
+                    if (parameter.kind not in ("str", "int", "bool", "number")
+                            or parameter.config_field is not None and (
+                                not isinstance(parameter.config_field, str) or parameter.config_field not in vars(self))
+                            or any(bound is not None and not _finite_number(bound)
+                                   for bound in (parameter.minimum, parameter.maximum))
+                            or parameter.minimum is not None and parameter.maximum is not None
+                            and parameter.minimum > parameter.maximum):
+                        raise ValueError(f"Invalid parameter definition: {name}.{key}")
+            for binding in variant.bindings.values():
+                if (not isinstance(binding, tuple) or len(binding) != 2
+                        or not all(isinstance(part, str) for part in binding)
+                        or binding[0] not in variant.components
+                        or binding[1] not in COMPONENTS[binding[0]].outputs):
+                    raise ValueError(f"Invalid output binding for {variant_id}")
+            overrides = configured.get(variant_id, {})
+            if not isinstance(overrides, dict) or set(overrides) - set(variant.components):
+                raise ValueError(f"Invalid component settings for {variant_id}")
+            resolved, references = {}, {}
+            for name in variant.components:
+                component = COMPONENTS[name]
+                values = overrides.get(name, {})
+                if not isinstance(values, dict) or set(values) - set(component.parameters):
+                    raise ValueError(f"Unknown parameter for {variant_id}.{name}")
+                defaults = {}
+                for key, parameter in component.parameters.items():
+                    value = (getattr(self, parameter.config_field) if parameter.config_field
+                             else deepcopy(parameter.default))
+                    # Shared path settings have already been resolved to Path objects.
+                    defaults[key] = str(value) if isinstance(value, Path) else value
+                settings = {key: parameter.validate(values.get(key, defaults[key]), f"{variant_id}.{name}.{key}")
+                            for key, parameter in component.parameters.items()}
+                resolved[name] = settings
+                token = hashlib.sha256(json.dumps(settings, sort_keys=True, allow_nan=False).encode()).hexdigest()[:16]
+                instance = name if settings == defaults else f"{name}__{token}"
+                references[name] = instance
+                if variant_id in self.selected_variants:
+                    if instance in self.component_plan and self.component_plan[instance] != {"component": name, "settings": settings}:
+                        raise ValueError("Component instance identity collision")
+                    self.component_plan.setdefault(instance, {"component": name, "settings": deepcopy(settings)})
+            if resolved:
+                self.variant_settings[variant_id] = resolved
+            if variant_id in self.selected_variants:
+                self.variant_components[variant_id] = references
+
+    def needs(self, component):
+        """Whether a selected variant consumes this preparation component."""
+        return any(item["component"] == component for item in self.component_plan.values())
+
+    def component_instances(self, component):
+        """Return the distinct configured executions for one visible runner stage."""
+        return [(key, deepcopy(item["settings"])) for key, item in self.component_plan.items()
+                if item["component"] == component]
+
+    @property
+    def required_resources(self):
+        return {resource for item in self.component_plan.values()
+                for resource in COMPONENTS[item["component"]].resources}
+
+    @property
+    def required_credentials(self):
+        return sorted({key for item in self.component_plan.values()
+                       for key in COMPONENTS[item["component"]].credentials})
 
     @property
     def needs_patient_retrieval(self):
-        return any("patient_retrieval" in VARIANT_SOURCES[v] for v in self.selected_variants)
+        return "patient_retrieval" in self.required_resources
 
     @property
     def needs_guidelines(self):
-        return any("guidelines" in VARIANT_SOURCES[v] for v in self.selected_variants)
+        return "guidelines" in self.required_resources
 
     def variant_metadata(self, root):
         """Identify the actual project templates and fingerprint their exact text."""
         source = Path(diagnosis_plan.__file__)
         return {
             "variant_definitions": {v: {
-                "patient_retrieval": "patient_retrieval" in VARIANT_SOURCES[v],
-                "guidelines": "guidelines" in VARIANT_SOURCES[v],
-                "template": f"VARIANT_TEMPLATES[{v!r}]",
-                "sha256": hashlib.sha256(diagnosis_plan.VARIANT_TEMPLATES[v].encode()).hexdigest(),
+                "description": VARIANTS[v].description,
+                "components": dict(self.variant_components[v]),
+                "bindings": {key: list(value) for key, value in VARIANTS[v].bindings.items()},
+                "patient_retrieval": any("patient_retrieval" in COMPONENTS[name].resources for name in VARIANTS[v].components),
+                "guidelines": any("guidelines" in COMPONENTS[name].resources for name in VARIANTS[v].components),
+                "template": f"VARIANT_TEMPLATES[{VARIANTS[v].prompt_key!r}]",
+                "sha256": hashlib.sha256(diagnosis_plan.VARIANT_TEMPLATES[VARIANTS[v].prompt_key].encode()).hexdigest(),
             } for v in self.selected_variants},
+            "component_definitions": {key: {
+                **deepcopy(item), "description": COMPONENTS[item["component"]].description,
+                "outputs": list(COMPONENTS[item["component"]].outputs),
+                "resources": list(COMPONENTS[item["component"]].resources),
+                "credentials": list(COMPONENTS[item["component"]].credentials),
+                "implementation": COMPONENTS[item["component"]].implementation,
+                "implementation_sha256": (hashlib.sha256((Path(root) / COMPONENTS[item["component"]].implementation).read_bytes()).hexdigest()
+                                          if (Path(root) / COMPONENTS[item["component"]].implementation).is_file() else None),
+            } for key, item in self.component_plan.items()},
+            "registry_provenance": {"file": repo_path(med_copilot_variants.__file__, root),
+                                    "sha256": hashlib.sha256(Path(med_copilot_variants.__file__).read_bytes()).hexdigest()},
             "prompt_provenance": {"file": repo_path(source, root),
                                   "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
         }
@@ -165,6 +298,7 @@ class ExperimentConfig:
             "patient_labels": repo_path(self.patient_labels, root),
             "presenting_evidence_only": self.presenting_evidence_only,
             "exclude_none_recorded_plans": self.exclude_none_recorded_plans,
+            "variant_settings": deepcopy(self.variant_settings),
             **{field: (repo_path(getattr(self, field), root) if field in PATH_SETTINGS
                        else getattr(self, field)) for field in PIPELINE_DEFAULTS},
         }
@@ -251,7 +385,7 @@ def confirm_experiment(experiment, model_metadata, root, cohort=None):
         print(f"  {key}: {'null' if value is None else value}")
     print("\nEvidence variants:")
     for variant in experiment.selected_variants:
-        print(f"  {variant} - {VARIANT_DESCRIPTIONS[variant]}")
+        print(f"  {variant} - {VARIANTS[variant].description}")
     print("\nDataset and cohort:")
     settings = experiment.metadata(root)
     for key in ("patient_input", "patient_labels", "presenting_evidence_only", "exclude_none_recorded_plans"):

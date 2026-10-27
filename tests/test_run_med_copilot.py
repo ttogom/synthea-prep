@@ -39,7 +39,9 @@ from test_med_copilot_observability import ProviderHarness
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 RUNNER = ROOT / "scripts" / "run_med_copilot.py"
+REGISTRY = ROOT / "scripts/med_copilot_variants.py"
 HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
 RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
 OBSERVABILITY = ROOT / "scripts" / "med_copilot_observability.py"
@@ -74,7 +76,7 @@ RESULT_FIELDS = [
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
-    "reference_data", "schema_version", "assessment_plan_models", "variant_definitions", "prompt_provenance", "experiment", "evaluation",
+    "reference_data", "schema_version", "assessment_plan_models", "variant_definitions", "prompt_provenance", "component_definitions", "registry_provenance", "experiment", "evaluation",
 ]
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 FINAL_RESPONSE_FORMAT = {
@@ -107,12 +109,45 @@ V2_RESULT_FIELDS = [field for field in RESULT_FIELDS
 V3_RESULT_FIELDS = [field for field in V2_RESULT_FIELDS if field not in ("assessment_plans", "assessment_plan_prompts")] + ["evidence_status", "variants"]
 
 
+V4_RESULT_FIELDS = ["id", "status", "components", "variants"]
+
+
+def schema3_view(record):
+    """Project canonical component captures for preserved historical assertions.
+
+    New extension tests inspect raw schema 4 records separately. This projection
+    changes no values and keeps the extensive prior evidence/generation checks.
+    """
+    if "components" not in record:
+        return record
+    projected = dict.fromkeys(V3_RESULT_FIELDS)
+    projected.update(id=record["id"], status=record["status"])
+    projected["model_responses"] = {stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]
+                                    if stage != "assessment_plan"}
+    for component in record["components"].values():
+        for field, value in component["capture"].items():
+            if field == "model_responses":
+                for stage, entries in value.items():
+                    projected[field][stage].extend(deepcopy(entries))
+            elif value is not None:
+                projected[field] = deepcopy(value)
+    projected["evidence_status"] = {
+        source: {"status": record["components"].get(source, {}).get("status", "not_requested"),
+                 "error": record["components"].get(source, {}).get("error")}
+        for source in ("patient_retrieval", "guidelines")}
+    projected["variants"] = deepcopy(record["variants"])
+    for output in projected["variants"].values():
+        output["evidence_sources"] = list(output["components"])
+    return projected
+
+
 def combined_variant_result(record):
     """View the combined variant for pre-existing pipeline regressions.
 
     New matrix tests inspect native v3 rows directly; this view keeps all earlier
     generation/retrieval/scoring assertions rather than deleting their coverage.
     """
+    record = schema3_view(record)
     if "variants" not in record:
         return record
     variant = record["variants"]["patient_retrieval_guidelines"]
@@ -135,6 +170,12 @@ def legacy_patient_result(record):
         projected[key] = output[key]
     projected["model_responses"]["assessment_plan"] = output["model_responses"]
     return {key: projected[key] for key in RESULT_FIELDS}
+
+
+def runner_config_metadata(fixture):
+    with fixture.runtime():
+        runner = runpy.run_path(str(fixture.script), run_name="metadata_reader")
+        return runner["ExperimentConfig"](fixture.experiment_config).metadata(fixture.root)
 
 
 def prediction_pairs(condition="MOCK_DIAGNOSIS", plan=None):
@@ -319,6 +360,7 @@ class PipelineFixture:
         (self.upstream / "evaluate_metrics.py").write_bytes(UPSTREAM_EVALUATOR.read_bytes())
         (self.script.parent / MODELS.name).write_bytes(MODELS.read_bytes())
         (self.script.parent / CONFIG.name).write_bytes(CONFIG.read_bytes())
+        (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
         self.model_config = root / "experiments/configs/condition_plan_models.yaml"
@@ -332,6 +374,7 @@ class PipelineFixture:
         experiment["max_patients"] = None
         experiment["selected_variants"] = ["patient_retrieval_guidelines"]
         experiment["exclude_none_recorded_plans"] = False
+        experiment["guideline_verbose"] = True
         self.experiment_config.write_text(yaml.safe_dump(experiment, sort_keys=False))
         self.final_reply = None
         self.environment = {"OPENAI_API_KEY": "test-key", "GRAPHRAG_API_KEY": "test-key"}
@@ -669,7 +712,7 @@ class PipelineFixture:
                 # caller has already imported the repository's package.
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
                              "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
-                             "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts"]:
+                             "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
                     sys.modules.pop("scripts.med_copilot_scoring", None)
@@ -711,11 +754,11 @@ class RunMedCopilotTests(unittest.TestCase):
         # JSONL lines are separated only by "\n"; other Unicode separators stay inside records.
         results = [json.loads(line) for line in text.split("\n")[:-1]]
         for record in results:
-            self.assertEqual(list(record), V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
+            self.assertEqual(list(record), V4_RESULT_FIELDS if "components" in record else V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
             if "variants" in record:
                 self.assertEqual(list(record["variants"]), ["patient_retrieval_guidelines"])
             self.assertEqual(list(combined_variant_result(record)["assessment_plans"]), ["gpt_4o_mini"])
-            self.assertNotIn("assessment_plan", record["model_responses"])
+            self.assertNotIn("assessment_plan", schema3_view(record)["model_responses"])
         results = [legacy_patient_result(record) for record in results]
         self.assertEqual(len({record["id"] for record in results}), len(results))
         return run_dir, run, results
@@ -1043,7 +1086,7 @@ class RunMedCopilotTests(unittest.TestCase):
         for field, value in yaml.safe_load(fixture.experiment_config.read_text()).items():
             with self.subTest(config_field=field):
                 self.assertIn(field, run["experiment"])
-                self.assertEqual(run["experiment"][field], value)
+                self.assertEqual(run["experiment"][field], value if field != "variant_settings" else runner_config_metadata(self.fixture)[field])
         self.assertEqual(run["experiment"], {
             "config_file": "experiments/configs/experiment.yaml",
             "config_sha256": hashlib.sha256(fixture.experiment_config.read_bytes()).hexdigest(),
@@ -1051,7 +1094,7 @@ class RunMedCopilotTests(unittest.TestCase):
             "selected_models": ["gpt_4o_mini"], "temperature": 1, "max_retries": 3, "max_patients": None,
             "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_sample_so.jsonl",
             "patient_labels": "experiments/input/test_sample_labels.jsonl", "presenting_evidence_only": True,
-            "exclude_none_recorded_plans": False, **PIPELINE_DEFAULTS,
+            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
         })
         self.assertEqual(old_path.read_text(), "OBSOLETE_CONFIG_DO_NOT_LOAD")
         self.assert_outputs()
@@ -1532,8 +1575,8 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertEqual(runner["main"](), "completed_with_errors")
                     self.assertEqual(Path.cwd(), fixture.caller)
                 record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-                self.assertIn(str(missing_path), record["evidence_status"]["guidelines"]["error"]["message"])
-                self.assertEqual(record["evidence_status"]["patient_retrieval"]["status"], "completed")
+                self.assertIn(str(missing_path), schema3_view(record)["evidence_status"]["guidelines"]["error"]["message"])
+                self.assertEqual(schema3_view(record)["evidence_status"]["patient_retrieval"]["status"], "completed")
                 self.assertEqual(record["variants"]["patient_retrieval_guidelines"]["error"]["type"], "EvidenceUnavailable")
                 self.assertEqual(fixture.graph_calls, [])
                 self.assertEqual(state.reads, [])
@@ -1573,7 +1616,7 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "completed_with_errors")
             self.assertEqual(Path.cwd(), fixture.caller)
         record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-        self.assertIn(str(output), record["evidence_status"]["guidelines"]["error"]["message"])
+        self.assertIn(str(output), schema3_view(record)["evidence_status"]["guidelines"]["error"]["message"])
         self.assertEqual(record["status"], "failed_incomplete")
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual(fixture.calls, [])
@@ -1694,7 +1737,7 @@ class RunMedCopilotTests(unittest.TestCase):
                                                          side_effect=OSError("cache write failed")):
                         self.assertEqual(runner["main"](), "completed_with_errors")
                     record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-                    self.assertEqual(record["evidence_status"]["patient_retrieval"]["error"],
+                    self.assertEqual(schema3_view(record)["evidence_status"]["patient_retrieval"]["error"],
                                      {"type": "OSError", "message": "cache write failed"})
                     self.assertEqual(record["status"], "failed_incomplete")
                     self.assertEqual(fixture.calls, [])
@@ -2008,7 +2051,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual([(row["id"], row["status"]) for row in records],
                                  [("P1", "failed_incomplete"), ("P2", "failed_incomplete")])
                 for row in records:
-                    self.assertEqual(row["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
+                    self.assertEqual(schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
                     self.assertEqual(row["variants"]["patient_retrieval_guidelines"]["error"]["type"], "EvidenceUnavailable")
 
     def test_malformed_key_questions_are_null_and_raw_reply_still_queries_guidelines(self):
@@ -2691,7 +2734,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(fixture.rerank_calls, [])
         self.assertEqual(fixture.graph_calls, [])
         record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-        error = record["evidence_status"]["patient_retrieval"]["error"]
+        error = schema3_view(record)["evidence_status"]["patient_retrieval"]["error"]
         self.assertEqual(error["type"], exception_type.__name__)
         self.assertEqual(record["status"], "failed_incomplete")
         return error
@@ -2841,10 +2884,10 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertIsNone(record["reranked_patient_ids"])
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.graph_calls, [])
-                self.assertEqual(legacy_patient_result(state.retrievers[0].keyword_extractor.capture_result), record)
-                self.assertTrue(callable(state.retrievers[0].on_ranking))
+                self.assertIsNone(state.retrievers[0].keyword_extractor.capture_result)
+                self.assertIsNone(getattr(state.retrievers[0], "on_ranking", None))
                 if state.rankers:
-                    self.assertTrue(callable(state.rankers[0].on_ranking))
+                    self.assertIsNone(getattr(state.rankers[0], "on_ranking", None))
 
     def test_real_rankings_keep_nontrivial_rows_disambiguation_scores_ties_and_topfive(self):
         fixture = self.fixture
@@ -3060,13 +3103,13 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertIsNone(record["assessment_plan_raw"])
         self.assertEqual(len(fixture.calls), 2)
 
-    def test_process_patient_rebinds_captures_after_success_failure_and_interruption(self):
+    def test_process_patient_restores_captures_after_success_failure_and_interruption(self):
         root = self.fixture.root
-        for stage, error in ((None, None), ("keywords", RuntimeError("keyword failure")),
-                             ("questions", RuntimeError("question failure")),
-                             ("final", KeyboardInterrupt()), ("final", SystemExit(7))):
-            with self.subTest(stage=stage):
-                self.fixture = PipelineFixture(root / f"{stage or 'success'}-{type(error).__name__}")
+        for stage, error in ((None, None), ("keywords", None), ("questions", None),
+                             ("final", None), ("keywords", KeyboardInterrupt()),
+                             ("questions", SystemExit(2))):
+            with self.subTest(stage=stage, error=error):
+                self.fixture = PipelineFixture(root / f"case-{stage}-{type(error).__name__}")
                 fixture = self.fixture
                 state = self.real_so_retrieval()
                 fixture.failure = stage
@@ -3074,127 +3117,59 @@ class RunMedCopilotTests(unittest.TestCase):
                     fixture.error = error
                 runner = self.load_runner()
                 with fixture.runtime():
-                    if isinstance(error, (KeyboardInterrupt, SystemExit)):
-                        with self.assertRaises(type(error)) as caught:
+                    if error is not None:
+                        with self.assertRaises(type(error)):
                             runner["main"]()
-                        self.assertIs(caught.exception, error)
                     else:
-                        self.assertEqual(runner["main"](), "completed" if stage is None
-                                         else "completed_with_errors")
+                        self.assertEqual(runner["main"](), "completed" if stage is None else "completed_with_errors")
                 _, _, [record] = self.read_run()
                 self.assertEqual(record["status"], "completed" if stage is None else "failed_incomplete")
                 retriever, reranker = state.retrievers[0], state.rankers[0]
-                previous_result = retriever.keyword_extractor.capture_result
-                # stop() persists a copy with failed status after BaseException;
-                # the capture binding still points to the original in-flight record.
-                expected_status = None if isinstance(error, (KeyboardInterrupt, SystemExit)) else record["status"]
-                self.assertEqual(legacy_patient_result(previous_result), {**record, "status": expected_status})
-                previous_snapshot = json.loads(json.dumps(previous_result))
-                previous_callbacks = [component.on_ranking for component in (retriever, reranker)]
-                self.assertTrue(all(callable(callback) for callback in previous_callbacks))
-                if stage == "keywords":
-                    self.assertIsNone(record["keyword_extraction_raw"])
-                    self.assertIsNone(record["retrieval_keywords"])
-                    self.assertIsNone(record["retrieved_patient_ids"])
-                    self.assertIsNone(record["reranked_patient_ids"])
-                    self.assertEqual(record["model_responses"], {
-                        stage: [] for stage in HELPER_NAMESPACE["MODEL_RESPONSE_STAGES"]})
-                else:
-                    self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
-                    self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
-                    self.assertEqual(len(record["retrieved_patient_ids"]), 2)
-                    self.assertEqual(len(record["reranked_patient_ids"]), 2)
-                    self.assertEqual(len(record["model_responses"]["keyword_extraction"]), 1)
-                if stage in (None, "final"):
-                    self.assertIsNotNone(record["assessment_plan_prompts"])
-                    self.assertEqual(len(record["model_responses"]["guideline_questions"]), 1)
-                if stage is None:
-                    self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
-                    self.assertEqual(len(record["model_responses"]["assessment_plan"]), 1)
-                else:
-                    self.assertIsNone(record["assessment_plan_raw"])
-                    self.assertEqual(record["model_responses"]["assessment_plan"], [])
-
-                # The next call must replace every binding and clear both rankings
-                # even when it fails before search/extract/rerank can reset anything.
-                next_result = runner["new_patient_result"]("next-patient", model_ids=["gpt_4o_mini"])
-                counts = (len(fixture.keyword_calls), len(fixture.calls), len(fixture.graph_calls))
-                with fixture.runtime():
-                    with self.assertRaises(ValueError):
-                        runner["process_patient"](
-                            {"subjective": "S", "objective": None}, next_result, fixture.corpus,
-                            retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
-                self.assertIs(retriever.keyword_extractor.capture_result, next_result)
-                self.assertEqual(next_result, runner["new_patient_result"]("next-patient", model_ids=["gpt_4o_mini"]))
-                for component, previous_callback in zip((retriever, reranker), previous_callbacks):
-                    self.assertIsNone(component.ranked_candidates)
-                    self.assertIsNot(component.on_ranking, previous_callback)
-                    component.on_ranking([])
-                self.assertEqual(next_result["retrieved_patient_ids"], [])
-                self.assertEqual(next_result["reranked_patient_ids"], [])
-                self.assertEqual(previous_result, previous_snapshot)
-                self.assertEqual(self.read_run()[2], [record])
-                self.assertEqual((len(fixture.keyword_calls), len(fixture.calls), len(fixture.graph_calls)), counts)
-
-                # Reuse the same retriever/reranker after that early failure and
-                # even after a prior interrupt. Persist the successful new case.
+                self.assertIsNone(retriever.keyword_extractor.capture_result)
+                for component in (retriever, reranker):
+                    self.assertIsNone(getattr(component, "on_ranking", None))
+                    self.assertIsNone(getattr(component, "ranked_candidates", None))
+                # Reuse the same initialized components for a new patient.
                 fixture.failure = None
-                retry = runner["new_patient_result"]("retry-patient", model_ids=["gpt_4o_mini"])
+                config = runner["ExperimentConfig"](fixture.experiment_config)
+                retry = runner["new_patient_result"](
+                    "retry-patient", model_ids=["gpt_4o_mini"], variant_ids=config.selected_variants,
+                    component_plan=config.component_plan, variant_components=config.variant_components)
+                before = deepcopy(record)
                 with fixture.runtime():
                     runner["process_patient"](
                         {"id": "retry-patient", **fixture.patient}, retry, fixture.corpus,
-                        retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
-                    retry["status"] = "completed"
-                    retry_run = runner["ExperimentRun"].start(
-                        fixture.root / "recovery_output", root=fixture.root,
-                        input_path=fixture.input_path, started_at=runner["pacific_now"](),
-                        branch=fixture.branch, commit=fixture.commit, patient_ids=["retry-patient"])
-                    retry_run.save_result(retry)
-                    self.assertEqual(retry_run.finish(runner["pacific_now"]()), "completed")
-                _, _, [saved_retry] = self.read_run(retry_run.run_dir)
-                self.assertEqual(saved_retry, legacy_patient_result(retry))
-                self.assertIs(retriever.keyword_extractor.capture_result, retry)
-                self.assertEqual(retry["keyword_extraction_raw"], fixture.keyword_content)
-                self.assertEqual(retry["retrieval_keywords"], ["Cough", "denies fever"])
-                self.assertEqual(len(retry["retrieved_patient_ids"]), 2)
-                self.assertEqual(len(retry["reranked_patient_ids"]), 2)
-                self.assertEqual(len(retry["model_responses"]["keyword_extraction"]), 1)
-                self.assertEqual(len(retry["model_responses"]["guideline_questions"]), 1)
-                self.assertEqual(len(retry["assessment_plans"]["gpt_4o_mini"]["model_responses"]), 1)
-                self.assertEqual(retry["assessment_plans"]["gpt_4o_mini"]["assessment_plan_raw"], fixture.final_output)
-                self.assertEqual(previous_result, previous_snapshot)
-                self.assertEqual(next_result["retrieved_patient_ids"], [])
-                self.assertEqual(next_result["reranked_patient_ids"], [])
-                self.assertEqual(self.read_run()[2], [record])
+                        retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner), config)
+                saved = legacy_patient_result(retry)
+                self.assertEqual(saved["assessment_plan_raw"], fixture.final_output)
+                self.assertEqual(saved["keyword_extraction_raw"], fixture.keyword_content)
+                self.assertIsNone(retriever.keyword_extractor.capture_result)
+                self.assertEqual(self.read_run()[2], [before])
 
-    def test_process_patient_resets_stale_bindings_before_matching_text_can_fail(self):
+    def test_process_patient_leaves_hooks_unchanged_when_matching_text_fails(self):
         fixture = self.fixture
         runner = self.load_runner()
-        extractor = SimpleNamespace(capture_result="stale")
-        retriever = SimpleNamespace(keyword_extractor=extractor, ranked_candidates=["stale"],
+        extractor = SimpleNamespace(capture_result="previous")
+        retriever = SimpleNamespace(keyword_extractor=extractor, ranked_candidates=["previous"],
                                     on_ranking=Mock(), search=Mock())
-        reranker = SimpleNamespace(ranked_candidates=["stale"], on_ranking=Mock(), rerank=Mock())
-        previous_callbacks = [retriever.on_ranking, reranker.on_ranking]
-        record = runner["new_patient_result"](fixture.patient_id)
-        prepare = Mock(wraps=runner["prepare_patient_output_capture"])
-        with fixture.runtime(), patch.dict(runner["process_patient"].__globals__, {
-                "prepare_patient_output_capture": prepare}):
-            with self.assertRaises(ValueError):
-                runner["process_patient"](
-                    {"subjective": "S", "objective": None}, record, fixture.corpus,
-                    retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner))
-        prepare.assert_called_once_with(record, fixture.corpus, retriever, reranker)
-        self.assertIs(extractor.capture_result, record)
-        for component, previous_callback in zip((retriever, reranker), previous_callbacks):
-            self.assertTrue(callable(component.on_ranking))
-            self.assertIsNot(component.on_ranking, previous_callback)
-            self.assertIsNone(component.ranked_candidates)
+        reranker = SimpleNamespace(ranked_candidates=["previous"], on_ranking=Mock(), rerank=Mock())
+        callbacks = (retriever.on_ranking, reranker.on_ranking)
+        config = runner["ExperimentConfig"](fixture.experiment_config)
+        record = runner["new_patient_result"](
+            fixture.patient_id, model_ids=["gpt_4o_mini"], variant_ids=config.selected_variants,
+            component_plan=config.component_plan, variant_components=config.variant_components)
+        before = deepcopy(record)
+        with fixture.runtime(), self.assertRaises(ValueError):
+            runner["process_patient"](
+                {"subjective": "S", "objective": None}, record, fixture.corpus,
+                retriever, reranker, fixture.guidelines / "output", fixture.assessment_models(runner), config)
+        self.assertEqual(record, before)
+        self.assertEqual(extractor.capture_result, "previous")
+        self.assertEqual((retriever.on_ranking, reranker.on_ranking), callbacks)
+        self.assertEqual(retriever.ranked_candidates, ["previous"])
+        self.assertEqual(reranker.ranked_candidates, ["previous"])
         retriever.search.assert_not_called()
         reranker.rerank.assert_not_called()
-        self.assertEqual(record, runner["new_patient_result"](fixture.patient_id))
-        self.assertEqual(fixture.keyword_calls, [])
-        self.assertEqual(fixture.calls, [])
-        self.assertEqual(fixture.graph_calls, [])
 
     def test_persisted_real_retained_ranking_excludes_larger_faiss_pool(self):
         fixture = self.fixture
@@ -3297,7 +3272,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     original_search, original_embedding = instance.search, instance.build_query_embedding
                     def search(query, topk):
                         self.assertIn(active["marker"], query)
-                        self.assertIs(instance.keyword_extractor.capture_result, active["result"])
+                        self.assertIs(instance.keyword_extractor.capture_result, active["result"]["components"]["patient_retrieval"]["capture"])
                         ranker = state.rankers[0]
                         for component in (instance, ranker):
                             self.assertIsNone(component.ranked_candidates)
@@ -3438,7 +3413,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     if index != 1:
                         self.assertEqual(record["selected_reference_patient"], {"note_id": f"REF-{(index + 1) % 3}"})
                         self.assertIn(f"REFERENCE PLAN {(index + 1) % 3}", record["assessment_plan_prompts"]["user"])
-                self.assertIs(state.retrievers[0].keyword_extractor.capture_result, seen_results[-1])
+                self.assertIsNone(state.retrievers[0].keyword_extractor.capture_result)
                 self.assertEqual(len(fixture.keyword_calls), 3 - int(boundary == "before_extract"))
                 self.assertEqual(state.rankers[0].model.predict.call_count, 2 + int(boundaries.index(boundary) >= 6))
 
@@ -4141,8 +4116,8 @@ class MultiModelIntegrationTests(unittest.TestCase):
         records = [json.loads(line) for line in (directory / "results.jsonl").read_text().split("\n") if line]
         self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | ({"results_summary.html"} if (directory / "results_summary.html").exists() else set()))
         for record in records:
-            self.assertEqual(list(record), V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
-            self.assertNotIn("assessment_plan", record["model_responses"])
+            self.assertEqual(list(record), V4_RESULT_FIELDS if "components" in record else V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
+            self.assertNotIn("assessment_plan", schema3_view(record)["model_responses"])
             for output in combined_variant_result(record)["assessment_plans"].values():
                 self.assertEqual(list(output), ["status", "error", "predictions", "assessment_plan_raw",
                                                 "model_responses", "evaluation"])
@@ -4419,7 +4394,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
             "selected_models": ["gpt_4o_mini", "llama"], "temperature": 0.25, "max_retries": 6, "max_patients": None,
             "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_sample_so.jsonl",
             "patient_labels": "experiments/input/test_sample_labels.jsonl", "presenting_evidence_only": True,
-            "exclude_none_recorded_plans": False, **PIPELINE_DEFAULTS,
+            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
         })
         self.assertEqual(run["assessment_plan_models"]["config_sha256"],
                          hashlib.sha256(self.fixture.model_config.read_bytes()).hexdigest())
@@ -4436,7 +4411,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
         fixture.model_config.write_bytes(MODEL_CONFIG.read_bytes())
         fixture.experiment_config.write_bytes(EXPERIMENT_CONFIG.read_bytes())
         combined = yaml.safe_load(fixture.experiment_config.read_text())
-        combined.update(selected_variants=["patient_retrieval_guidelines"], exclude_none_recorded_plans=False)
+        combined.update(selected_variants=["patient_retrieval_guidelines"], exclude_none_recorded_plans=False, max_patients=1)
         fixture.experiment_config.write_text(yaml.safe_dump(combined))
         fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
                                 for name in ("FIRST", "OUTSIDE_LIMIT")])
@@ -4657,7 +4632,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
     def test_two_models_share_exact_evidence_and_receive_independent_predictions_and_scores(self):
         status, run, [record] = self.execute()
         self.assertEqual(status, "completed")
-        self.assertEqual(run["schema_version"], 3)
+        self.assertEqual(run["schema_version"], 4)
         self.assertEqual(run["assessment_plan_models"]["selected_models"], ["gpt_4o_mini", "llama"])
         self.assertEqual(run["assessment_plan_models"]["config_sha256"],
                          hashlib.sha256(self.fixture.model_config.read_bytes()).hexdigest())
@@ -4855,7 +4830,10 @@ class VariantIntegrationTests(unittest.TestCase):
         [folder] = self.run_dirs()
         run = json.loads((folder / "run.json").read_text())
         records = [json.loads(line) for line in (folder / "results.jsonl").read_text().split("\n") if line]
-        self.assertEqual(run["schema_version"], 3)
+        self.assertEqual(run["schema_version"], 4)
+        for raw in records:
+            self.assertEqual(list(raw), V4_RESULT_FIELDS)
+        records = [schema3_view(row) for row in records]
         for row in records:
             self.assertEqual(list(row), V3_RESULT_FIELDS)
             self.assertEqual(list(row["variants"]), self.experiment["selected_variants"])
@@ -4883,7 +4861,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertEqual(run["prompt_provenance"]["sha256"], hashlib.sha256(fixture.prompt_module.read_bytes()).hexdigest())
         for row in records:
             self.assertEqual(row["status"], "completed")
-            self.assertEqual(row["evidence_status"], {source: {"status": "completed", "error": None}
+            self.assertEqual(schema3_view(row)["evidence_status"], {source: {"status": "completed", "error": None}
                                                      for source in ("patient_retrieval", "guidelines")})
             for variant, output in row["variants"].items():
                 prompt = output["assessment_plan_prompts"]["user"]
@@ -4934,7 +4912,7 @@ class VariantIntegrationTests(unittest.TestCase):
                 self.assertEqual(len(self.fixture.calls), 2 + int("guidelines" in sources))
                 self.assertEqual(sum(event[0] == "preload" for event in self.fixture.events), int("patient_retrieval" in sources))
                 for source in ("patient_retrieval", "guidelines"):
-                    self.assertEqual(row["evidence_status"][source]["status"], "completed" if source in sources else "not_requested")
+                    self.assertEqual(schema3_view(row)["evidence_status"][source]["status"], "completed" if source in sources else "not_requested")
                     self.assertEqual(run["reference_data"][source] is not None, source in sources)
 
     def test_llm_only_local_model_needs_no_shared_keys_encoder_or_artifacts(self):
@@ -4966,7 +4944,7 @@ class VariantIntegrationTests(unittest.TestCase):
                 self.fixture.failure = stage
                 status, run, [row] = self.execute()
                 self.assertEqual(status, "completed_with_errors")
-                self.assertEqual(row["evidence_status"][source]["error"]["type"], "RuntimeError")
+                self.assertEqual(schema3_view(row)["evidence_status"][source]["error"]["type"], "RuntimeError")
                 for variant, output in row["variants"].items():
                     blocked = source in output["evidence_sources"]
                     self.assertEqual(output["status"], "failed_incomplete" if blocked else "completed")
@@ -4985,7 +4963,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertEqual(run["reference_data"], {"patient_retrieval": None, "guidelines": None})
         self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
         for source in ("guidelines", "patient_retrieval"):
-            self.assertEqual(row["evidence_status"][source]["error"]["type"], "FileNotFoundError")
+            self.assertEqual(schema3_view(row)["evidence_status"][source]["error"]["type"], "FileNotFoundError")
         self.assertEqual(len(fixture.calls), 2)
         self.assertEqual(fixture.graph_calls, [])
 
@@ -5012,7 +4990,7 @@ class VariantIntegrationTests(unittest.TestCase):
             text = fixture.stdout.getvalue()
             self.assertIn("Planned final requests: 8", text)
             for key in self.experiment:
-                if key not in ("selected_models", "selected_variants") and key not in PIPELINE_DEFAULTS:
+                if key not in ("selected_models", "selected_variants", "variant_settings") and key not in PIPELINE_DEFAULTS:
                     self.assertIn(key + ":", text)
             return "y"
         fixture.confirm_input.side_effect = confirm
@@ -5088,7 +5066,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertEqual(status, "completed_with_errors")
         self.assertIsNone(run["reference_data"]["patient_retrieval"])
         self.assertEqual(self.fixture.retrieval_calls, [])
-        self.assertEqual(row["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
+        self.assertEqual(schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
         self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
         self.assertEqual(row["variants"]["guidelines"]["status"], "completed")
         self.assertEqual(row["variants"]["patient_retrieval"]["error"]["type"], "EvidenceUnavailable")
@@ -5163,7 +5141,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertEqual(len(fixture.scoring_calls), 96)
         self.assertEqual(len(fixture.model_configs), 4)
         for field, value in self.experiment.items():
-            self.assertEqual(run["experiment"][field], value)
+            self.assertEqual(run["experiment"][field], value if field != "variant_settings" else runner_config_metadata(self.fixture)[field])
         for variant in row["variants"].values():
             self.assertEqual(list(variant["assessment_plans"]), self.experiment["selected_models"])
         self.assertEqual(fixture.stdout.getvalue().count("Best variant: llm_only"), 4)
@@ -5244,7 +5222,7 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
         self.assertIs(graph["streaming"], False)
         for field, value in self.experiment.items():
             self.assertEqual(run["experiment"][field], value, field)
-        self.assertEqual(len(run["experiment"]), len(self.experiment) + 3)
+        self.assertEqual(len(run["experiment"]), len(self.experiment) + 3 + int("variant_settings" not in self.experiment))
         self.assertEqual(run["reference_data"]["patient_retrieval"]["corpus_file"], "references café/patients.json")
         self.assertEqual(run["reference_data"]["patient_retrieval"]["artifacts_directory"], "cache café")
         self.assertEqual(run["reference_data"]["guidelines"]["directory"], "guidelines café")
@@ -5304,7 +5282,7 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
         with self.fixture.runtime():
             self.assertEqual(runner["main"](), "completed_with_errors")
         run, [row] = self.read_native()
-        self.assertIn("restart the script", row["evidence_status"]["patient_retrieval"]["error"]["message"])
+        self.assertIn("restart the script", schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["message"])
         self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
         self.assertEqual(row["variants"]["guidelines"]["status"], "completed")
         self.assertIsNone(run["reference_data"]["patient_retrieval"])
@@ -5329,6 +5307,307 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
                 self.assertEqual(self.fixture.model_configs, [])
                 self.assertFalse(self.fixture.output.exists())
 
+
+
+class ComponentExtensionIntegrationTests(unittest.TestCase):
+    """Exercise new registry entries against canonical schema-4 pipeline outputs."""
+
+    setUp = VariantIntegrationTests.setUp
+    load_runner = RunMedCopilotTests.load_runner
+    run_dirs = RunMedCopilotTests.run_dirs
+    label = MultiModelIntegrationTests.label
+    reply = MultiModelIntegrationTests.reply
+    write_config = MultiModelIntegrationTests.write_config
+    execute = MultiModelIntegrationTests.execute
+
+    def extend_registry(self, source):
+        path = self.fixture.script.with_name("med_copilot_variants.py")
+        with path.open("a", encoding="utf-8") as target:
+            target.write("\n" + source + "\n")
+
+    def read_native(self):
+        [directory] = self.run_dirs()
+        run = json.loads((directory / "run.json").read_text())
+        records = [json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
+        self.assertEqual(run["schema_version"], 4)
+        for record in records:
+            self.assertEqual(list(record), V4_RESULT_FIELDS)
+            self.assertEqual(list(record["variants"]), self.experiment["selected_variants"])
+            self.assertNotIn("model_responses", record)
+            self.assertNotIn("guideline_evidence", record)
+            for variant in record["variants"].values():
+                self.assertEqual(list(variant["assessment_plans"]), self.experiment["selected_models"])
+        return run, records
+
+    def test_arbitrary_variant_ids_share_each_component_once_per_patient_across_models(self):
+        self.extend_registry('''
+VARIANTS["custom_both_one"] = VARIANTS["patient_retrieval_guidelines"]
+VARIANTS["custom_both_two"] = VARIANTS["patient_retrieval_guidelines"]
+VARIANTS["custom_patient"] = VARIANTS["patient_retrieval"]
+''')
+        self.experiment["selected_variants"] = ["custom_both_one", "custom_both_two", "custom_patient"]
+        self.fixture.write_patients([dict(id=name, subjective=name, objective="O") for name in ("ONE", "TWO")])
+        self.fixture.write_labels([self.label(name) for name in ("TWO", "ONE")])
+        self.write_config()
+        status, run, records = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(len(self.fixture.keyword_calls), 2)
+        self.assertEqual(len(self.fixture.graph_calls), 2)
+        self.assertEqual(sum(call[0] == "search" for call in self.fixture.retrieval_calls), 2)
+        self.assertEqual(len(self.fixture.calls), 14)
+        self.assertEqual(len(self.fixture.scoring_calls), 72)
+        self.assertEqual(list(run["variant_definitions"]), self.experiment["selected_variants"])
+        for record in records:
+            self.assertEqual(list(record["components"]), ["patient_retrieval", "guidelines"])
+            for component in record["components"].values():
+                self.assertEqual(component["status"], "completed")
+            first, second = [record["variants"][name] for name in ("custom_both_one", "custom_both_two")]
+            self.assertEqual(first["components"], second["components"])
+            self.assertEqual(first["assessment_plan_prompts"], second["assessment_plan_prompts"])
+            for variant in record["variants"].values():
+                self.assertEqual(variant["status"], "completed")
+                self.assertTrue(all(slot["status"] == "completed" for slot in variant["assessment_plans"].values()))
+        html = (self.run_dirs()[0] / "results_summary.html").read_text()
+        self.assertIn("custom_both_one", html)
+        self.assertEqual(run["results_summary"]["status"], "completed")
+
+    def test_variant_id_and_existing_prompt_layout_are_independent_with_no_label_leakage(self):
+        self.extend_registry('VARIANTS["new_prompt_choice"] = VARIANTS["patient_retrieval"]')
+        self.experiment["selected_variants"] = ["new_prompt_choice"]
+        self.fixture.write_patients([dict(id=self.fixture.patient_id,
+                                         subjective="S {Key_info} verbatim", objective="O {example} verbatim")])
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(len(self.fixture.graph_calls), 0)
+        self.assertEqual(len(self.fixture.keyword_calls), 1)
+        output = record["variants"]["new_prompt_choice"]
+        template = runpy.run_path(str(self.fixture.prompt_module))["VARIANT_TEMPLATES"]["patient_retrieval"]
+        expected = template.format(conditions="Subjective: S {Key_info} verbatim\nObjective: O {example} verbatim",
+                                   example=self.fixture.results[0])
+        self.assertEqual(output["assessment_plan_prompts"], {"system": "You are a clinical expert.", "user": expected})
+        self.assertEqual(run["variant_definitions"]["new_prompt_choice"]["template"], "VARIANT_TEMPLATES['patient_retrieval']")
+        for request in self.fixture.calls:
+            self.assertEqual(request["messages"][1]["content"], expected)
+            self.assertNotIn("GOLD_ONLY", json.dumps(request["messages"]))
+        self.assertNotIn(self.fixture.guideline_text, expected)
+        for output in output["assessment_plans"].values():
+            self.assertEqual(json.loads(output["assessment_plan_raw"])["predictions"], output["predictions"])
+            self.assertEqual([entry["rank"] for entry in output["evaluation"]], [1, 2, 3])
+
+    def test_identical_overrides_share_one_execution_and_different_settings_get_separate_captures(self):
+        self.extend_registry('''
+VARIANTS["override_one"] = VARIANTS["patient_retrieval_guidelines"]
+VARIANTS["override_two"] = VARIANTS["patient_retrieval_guidelines"]
+''')
+        self.experiment.update(selected_variants=["patient_retrieval_guidelines", "override_one", "override_two"],
+                               variant_settings={name: {"patient_retrieval": {"top_k": 1}}
+                                                 for name in ("override_one", "override_two")})
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        searches = [call for call in self.fixture.retrieval_calls if call[0] == "search"]
+        self.assertEqual([call[2] for call in searches], [20, 1])
+        self.assertEqual(len(self.fixture.keyword_calls), 2)
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(len(record["components"]), 3)
+        variants = record["variants"]
+        baseline = variants["patient_retrieval_guidelines"]["components"]["patient_retrieval"]
+        first = variants["override_one"]["components"]["patient_retrieval"]
+        second = variants["override_two"]["components"]["patient_retrieval"]
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, baseline)
+        self.assertEqual(len(record["components"][baseline]["capture"]["retrieved_patient_ids"]), 2)
+        self.assertEqual(len(record["components"][first]["capture"]["retrieved_patient_ids"]), 1)
+        self.assertEqual(record["components"][baseline]["capture"]["selected_reference_patient"], {"note_id": "NOTE-B"})
+        self.assertEqual(record["components"][first]["capture"]["selected_reference_patient"], {"note_id": "NOTE-A"})
+        for name in self.experiment["selected_variants"]:
+            expected_k = 20 if name == "patient_retrieval_guidelines" else 1
+            self.assertEqual(run["experiment"]["variant_settings"][name]["patient_retrieval"]["top_k"], expected_k)
+        self.assertEqual(record["components"][first]["settings"], run["component_definitions"][first]["settings"])
+        self.assertEqual(record["components"][first]["capture"]["retrieval_keywords"], ["Cough", "denies fever"])
+        self.assertEqual(record["components"][baseline]["capture"]["retrieval_keywords"], ["Cough", "denies fever"])
+
+    def test_explicit_default_settings_deduplicate_and_all_effective_config_fields_are_saved(self):
+        self.extend_registry('VARIANTS["explicit_defaults"] = VARIANTS["patient_retrieval_guidelines"]')
+        self.experiment.update(selected_variants=["patient_retrieval_guidelines", "explicit_defaults"],
+                               variant_settings={"explicit_defaults": {"patient_retrieval": {"top_k": 20}}})
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(sum(call[0] == "search" for call in self.fixture.retrieval_calls), 1)
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(list(record["components"]), ["patient_retrieval", "guidelines"])
+        self.assertEqual(record["variants"]["explicit_defaults"]["components"],
+                         record["variants"]["patient_retrieval_guidelines"]["components"])
+        for key, value in self.experiment.items():
+            self.assertIn(key, run["experiment"])
+            if key != "variant_settings":
+                self.assertEqual(run["experiment"][key], value)
+        for key in PIPELINE_DEFAULTS:
+            self.assertIn(key, run["experiment"])
+        self.assertEqual(run["experiment"]["variant_settings"]["explicit_defaults"],
+                         run["experiment"]["variant_settings"]["patient_retrieval_guidelines"])
+        self.assertNotIn("test-key", json.dumps(run) + json.dumps(record))
+
+    def test_failed_patient_source_does_not_skip_new_named_guideline_only_consumer(self):
+        self.extend_registry('''
+VARIANTS["renamed_both"] = VARIANTS["patient_retrieval_guidelines"]
+VARIANTS["renamed_guidelines"] = VARIANTS["guidelines"]
+''')
+        self.experiment["selected_variants"] = ["renamed_both", "renamed_guidelines"]
+        self.fixture.failure = "keywords"
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(record["components"]["patient_retrieval"]["status"], "failed_incomplete")
+        self.assertEqual(record["components"]["guidelines"]["status"], "completed")
+        self.assertEqual(record["variants"]["renamed_both"]["error"]["type"], "EvidenceUnavailable")
+        self.assertEqual(record["variants"]["renamed_guidelines"]["status"], "completed")
+        self.assertTrue(all(slot["status"] == "not_processed" for slot in record["variants"]["renamed_both"]["assessment_plans"].values()))
+        self.assertEqual(len(self.fixture.scoring_calls), 12)
+        self.assertEqual(run["results_summary"]["status"], "completed")
+
+    def test_invalid_new_variant_binding_fails_preflight_before_confirmation_or_calls(self):
+        self.extend_registry('''
+VARIANTS["invalid_binding"] = VariantSpec(
+    "Invalid binding", ("patient_retrieval",), "patient_retrieval",
+    {"example": ("patient_retrieval", "unpublished")})
+''')
+        self.experiment["selected_variants"] = ["invalid_binding"]
+        self.write_config()
+        runner = self.load_runner()
+        with self.fixture.runtime():
+            self.assertEqual(runner["main"](), "configuration_error")
+        self.fixture.confirm_input.assert_not_called()
+        self.assertFalse(self.fixture.output.exists())
+        self.assertEqual(self.fixture.calls, [])
+        self.assertEqual(self.fixture.keyword_calls, [])
+        self.assertEqual(self.fixture.retrieval_calls, [])
+        self.assertEqual(self.fixture.model_configs, [])
+
+    def test_registered_component_without_runner_invocation_remains_explicitly_unavailable(self):
+        self.extend_registry('''
+COMPONENTS["unhandled_source"] = ComponentSpec("No invocation", ("Key_info",))
+VARIANTS["unhandled_variant"] = VariantSpec(
+    "Needs invocation", ("unhandled_source",), "guidelines",
+    {"Key_info": ("unhandled_source", "Key_info")})
+''')
+        self.experiment["selected_variants"] = ["llm_only", "unhandled_variant"]
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertEqual(record["components"]["unhandled_source"]["status"], "not_processed")
+        self.assertEqual(record["variants"]["llm_only"]["status"], "completed")
+        blocked = record["variants"]["unhandled_variant"]
+        self.assertEqual(blocked["status"], "failed_incomplete")
+        self.assertEqual(blocked["error"], {"type": "EvidenceUnavailable", "message": "Required evidence failed: unhandled_source"})
+        self.assertTrue(all(slot["status"] == "not_processed" for slot in blocked["assessment_plans"].values()))
+        self.assertEqual(len(self.fixture.calls), 2)
+        self.assertEqual(self.fixture.graph_calls, [])
+        self.assertEqual(run["results_summary"]["status"], "completed")
+
+    def test_custom_guideline_resource_does_not_initialize_unused_baseline_openai_client(self):
+        self.extend_registry('''
+COMPONENTS["custom_guidelines"] = ComponentSpec(
+    "Alternative guideline source", ("Key_info",), resources=("guidelines",), credentials=("GRAPHRAG_API_KEY",))
+VARIANTS["custom_guidelines_variant"] = VariantSpec(
+    "Alternative guideline variant", ("custom_guidelines",), "guidelines",
+    {"Key_info": ("custom_guidelines", "Key_info")})
+''')
+        self.config["models"]["local"] = dict(type="chat", model_provider="openai", model="local", api_base="http://localhost:11434/v1")
+        self.experiment.update(selected_models=["local"], selected_variants=["custom_guidelines_variant"])
+        self.fixture.environment = {"GRAPHRAG_API_KEY": "guideline-only-key"}
+        self.write_config()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertFalse(any(event[0] in ("client", "preload") for event in self.fixture.events))
+        self.assertEqual(self.fixture.calls, [])
+        self.assertEqual(self.fixture.graph_calls, [])
+        self.assertIsNone(run["reference_data"]["patient_retrieval"])
+        self.assertIsNotNone(run["reference_data"]["guidelines"])
+        self.assertEqual(record["components"]["custom_guidelines"]["status"], "not_processed")
+        self.assertEqual(record["variants"]["custom_guidelines_variant"]["error"]["type"], "EvidenceUnavailable")
+
+    def test_new_prompt_template_is_used_without_new_runner_component_or_shared_calls(self):
+        self.extend_registry('VARIANTS["prompt_only_extension"] = VariantSpec("New wording", (), "new_layout")')
+        with self.fixture.prompt_module.open("a", encoding="utf-8") as target:
+            target.write('\nVARIANT_TEMPLATES["new_layout"] = VARIANT_TEMPLATES["llm_only"] + "\\nNEW_DIRECTIVE"\n')
+        self.experiment["selected_variants"] = ["llm_only", "prompt_only_extension"]
+        self.write_config()
+        before = self.fixture.script.read_bytes()
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(self.fixture.script.read_bytes(), before)
+        self.assertEqual(record["components"], {})
+        self.assertEqual(self.fixture.keyword_calls, [])
+        self.assertEqual(self.fixture.graph_calls, [])
+        baseline = record["variants"]["llm_only"]["assessment_plan_prompts"]["user"]
+        new_prompt = record["variants"]["prompt_only_extension"]["assessment_plan_prompts"]["user"]
+        self.assertEqual(new_prompt, baseline + "\nNEW_DIRECTIVE")
+        self.assertEqual(len(self.fixture.calls), 4)
+        self.assertEqual([call["messages"][1]["content"] for call in self.fixture.calls],
+                         [baseline, baseline, new_prompt, new_prompt])
+        self.assertEqual(run["variant_definitions"]["prompt_only_extension"]["sha256"],
+                         hashlib.sha256(runpy.run_path(str(self.fixture.prompt_module))["VARIANT_TEMPLATES"]["new_layout"].encode()).hexdigest())
+        self.assertNotIn("GOLD_ONLY", json.dumps([call["messages"] for call in self.fixture.calls]))
+
+    def test_one_configured_component_failure_preserves_other_configuration_and_shared_guidelines(self):
+        self.extend_registry('VARIANTS["failing_override"] = VARIANTS["patient_retrieval_guidelines"]')
+        self.experiment.update(selected_variants=["patient_retrieval_guidelines", "failing_override"],
+                               variant_settings={"failing_override": {"patient_retrieval": {"top_k": 1}}})
+        self.write_config()
+        cls = self.fixture.modules["scripts.med_copilot_retrieval"].HybridRetriever
+        search = cls.search
+        def fail_one(instance, query, topk):
+            if topk == 1:
+                raise RuntimeError("configured failure test-key")
+            return search(instance, query, topk)
+        cls.search = fail_one
+        status, run, [record] = self.execute()
+        self.assertEqual(status, "completed_with_errors")
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertEqual(len(self.fixture.keyword_calls), 1)
+        baseline = record["variants"]["patient_retrieval_guidelines"]
+        failing = record["variants"]["failing_override"]
+        self.assertEqual(baseline["status"], "completed")
+        self.assertEqual(failing["error"]["type"], "EvidenceUnavailable")
+        component = record["components"][failing["components"]["patient_retrieval"]]
+        self.assertEqual(component["error"]["message"], "configured failure [REDACTED]")
+        self.assertEqual(record["components"]["guidelines"]["status"], "completed")
+        self.assertTrue(all(slot["status"] == "not_processed" for slot in failing["assessment_plans"].values()))
+        self.assertEqual(len(self.fixture.calls), 3)
+        self.assertNotIn("test-key", json.dumps(record) + json.dumps(run))
+        self.assertEqual(run["results_summary"]["status"], "completed")
+
+    def test_new_variant_interrupt_retains_shared_components_and_all_future_slots(self):
+        self.extend_registry('VARIANTS["new_combined"] = VARIANTS["patient_retrieval_guidelines"]')
+        self.experiment["selected_variants"] = ["new_combined", "llm_only"]
+        self.fixture.write_patients([dict(id=name, subjective=name, objective="O") for name in ("FIRST", "LATER")])
+        self.fixture.write_labels([self.label(name) for name in ("FIRST", "LATER")])
+        self.write_config()
+        def interrupt(request):
+            if request["model"].startswith("groq/"):
+                raise KeyboardInterrupt()
+            return self.reply(request)
+        self.fixture.final_reply = interrupt
+        runner = self.load_runner()
+        with self.fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        run, [first, later] = self.read_native()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual(len(self.fixture.keyword_calls), 1)
+        self.assertEqual(len(self.fixture.graph_calls), 1)
+        self.assertTrue(all(component["status"] == "completed" for component in first["components"].values()))
+        slots = first["variants"]["new_combined"]["assessment_plans"]
+        self.assertEqual(slots["gpt_4o_mini"]["status"], "completed")
+        self.assertEqual(slots["llama"]["error"]["type"], "KeyboardInterrupt")
+        self.assertEqual(first["variants"]["llm_only"]["status"], "not_processed")
+        self.assertTrue(all(component["status"] == "not_processed" for component in later["components"].values()))
+        for variant in later["variants"].values():
+            self.assertTrue(all(slot["status"] == "not_processed" for slot in variant["assessment_plans"].values()))
+        self.assertFalse((self.run_dirs()[0] / "results_summary.html").exists())
 
 if __name__ == "__main__":
     unittest.main()

@@ -726,6 +726,63 @@ class VariantScoringTests(unittest.TestCase):
                 self.assertEqual(output["evaluation"][0]["condition"]["metrics"], self.metrics)
         self.assertNotIn("evaluation", record)
 
+    def test_schema_four_components_and_arbitrary_variant_ids_preserve_scoring_contract(self):
+        components = {
+            "shared_patient": {"status": "completed", "outputs": {"example": "Reference SOAP"},
+                               "trace": [{"query": "Prepared S/O", "ranked_ids": ["reference-1"]}]},
+            "new_guidelines": {"status": "failed_incomplete", "outputs": {},
+                               "error": {"type": "RuntimeError", "message": "Unavailable"}},
+        }
+        good = {**self.result(condition="custom:one"), "evaluation": None}
+        failed = {"status": "failed_incomplete", "predictions": None, "evaluation": None}
+        waiting = {"status": "not_processed", "predictions": None, "evaluation": None}
+        record = {
+            "id": "patient-a", "status": "failed_incomplete", "components": deepcopy(components),
+            "variants": {
+                "custom_variant": {"status": "failed_incomplete", "components": {"patient_retrieval": "shared_patient"},
+                                   "assessment_plans": {"one": good, "failed": failed}},
+                "another_new_variant": {"status": "completed", "components": {},
+                                        "assessment_plans": {
+                                            model: {**self.result(condition=f"another:{model}"), "evaluation": None}
+                                            for model in ("one", "two")}},
+                "blocked_variant": {"status": "failed_incomplete", "components": {"guidelines": "new_guidelines"},
+                                    "assessment_plans": {"waiting": waiting}},
+            },
+        }
+        before = deepcopy(record)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            self.assertIs(self.scorer().score_result(record), record)
+        self.assertEqual(evaluate.call_count, 18)
+        self.assertEqual(record["components"], components)
+        self.assertEqual(record["status"], before["status"])
+        for variant_id, variant in record["variants"].items():
+            self.assertEqual(variant["components"], before["variants"][variant_id]["components"])
+            for model_id, output in variant["assessment_plans"].items():
+                previous = before["variants"][variant_id]["assessment_plans"][model_id]
+                self.assertEqual(output["predictions"], previous["predictions"])
+                if output["status"] == "completed":
+                    self.assertEqual(len(output["evaluation"]), 3)
+                    self.assertEqual(output["evaluation"][0]["condition"]["metrics"], self.metrics)
+                else:
+                    self.assertIsNone(output["evaluation"])
+        self.assertNotIn("evaluation", record)
+
+    def test_new_variant_interruption_preserves_component_captures_and_prior_scores(self):
+        record = {
+            "id": "patient-a", "components": {"custom": {"status": "completed", "outputs": {"text": "Evidence"}}},
+            "variants": {name: {"assessment_plans": {
+                "one": {**self.result(condition=name), "evaluation": None}}}
+                for name in ("new_first", "new_interrupted", "new_later")},
+        }
+        components = deepcopy(record["components"])
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics] * 6 + [KeyboardInterrupt()]):
+            with self.assertRaises(KeyboardInterrupt):
+                self.scorer().score_result(record)
+        self.assertEqual(record["components"], components)
+        self.assertEqual(record["variants"]["new_first"]["assessment_plans"]["one"]["evaluation"][2]["plan"]["status"], "scored")
+        self.assertEqual(record["variants"]["new_interrupted"]["assessment_plans"]["one"]["evaluation"][0]["condition"]["status"], "interrupted")
+        self.assertIsNone(record["variants"]["new_later"]["assessment_plans"]["one"]["evaluation"])
+
 
 if __name__ == "__main__":
     unittest.main()

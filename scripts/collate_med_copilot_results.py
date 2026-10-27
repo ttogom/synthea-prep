@@ -18,21 +18,24 @@ import os
 from pathlib import Path
 import re
 from statistics import mean, pstdev
+import sys
 import tempfile
 
 
+# Standalone execution must find the lightweight registry from any directory.
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+    
+from scripts.med_copilot_variants import VARIANTS as REGISTERED_VARIANTS
+
+
 REPORT_FILE = "results_summary.html"
 # Match the saved evaluator contract without importing its model dependencies.
 METRICS = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 DISPLAY_METRICS = ("BERTScore_F1", "ROUGE-L", "BLEU", "METEOR", "ROUGE-1", "ROUGE-2")
-VARIANTS = {
-    "llm_only": "Patient S/O only",
-    "patient_retrieval": "S/O + similar-patient example",
-    "guidelines": "S/O + clinical guidelines",
-    "patient_retrieval_guidelines": "S/O + both evidence sources",
-    "not_recorded": "Evidence variant not recorded",
-}
+VARIANTS = {**{key: definition.description for key, definition in REGISTERED_VARIANTS.items()},
+            "not_recorded": "Evidence variant not recorded"}
 SCORE_REASONS = {
     "scored": "Scored",
     "skipped_no_recorded_plan": "No reference plan recorded; scoring skipped",
@@ -128,12 +131,32 @@ def _legacy_model(row):
     return _reported_model(responses.get("assessment_plan")) if isinstance(responses, dict) else None
 
 
-def _variant(row, metadata):
+def _variant_labels(metadata):
+    # Saved identities remain reportable after a variant is changed or removed
+    # from the current registry. Only the description is copied into the report.
+    labels = {**{key: definition.description for key, definition in REGISTERED_VARIANTS.items()},
+              "not_recorded": VARIANTS["not_recorded"]}
+    definitions = metadata.get("variant_definitions")
+    if definitions is None:
+        return labels
+    if not isinstance(definitions, dict):
+        raise ValueError("run.json.variant_definitions must be an object")
+    for variant, definition in definitions.items():
+        if not _text(variant) or variant == "not_recorded" or not isinstance(definition, dict):
+            raise ValueError("run.json.variant_definitions must contain named variant objects")
+        description = definition.get("description", labels.get(variant, variant))
+        if not _text(description):
+            raise ValueError(f"Saved description for variant {variant!r} must be a nonempty string")
+        labels[variant] = description
+    return labels
+
+
+def _variant(row, metadata, labels):
     experiment = metadata.get("experiment") or {}
     value = row.get("evidence_variant", experiment.get("evidence_variant"))
     if value is None:
         return "not_recorded"
-    if not isinstance(value, str) or value not in VARIANTS:
+    if not isinstance(value, str) or value not in labels:
         raise ValueError(f"Unsupported evidence_variant for patient {row.get('id')!r}: {value!r}")
     return value
 
@@ -233,6 +256,7 @@ def load_report_data(run_dir, *, root=ROOT):
     metadata = _json_object((run_dir / "run.json").read_text(encoding="utf-8"), run_dir / "run.json")
     if metadata.get("experiment") is not None and not isinstance(metadata["experiment"], dict):
         raise ValueError("run.json.experiment must be an object")
+    variant_labels = _variant_labels(metadata)
     evaluation = metadata.get("evaluation")
     if not isinstance(evaluation, dict) or not _text(evaluation.get("labels_path")):
         raise ValueError("run.json.evaluation.labels_path is required to join the reference labels")
@@ -255,22 +279,24 @@ def load_report_data(run_dir, *, root=ROOT):
     if (not isinstance(selected_ids, list) or not all(_text(value) for value in selected_ids)
             or len(set(selected_ids)) != len(selected_ids)):
         raise ValueError("run.json selected_patient_ids must be unique, nonempty strings")
-    # Schema v3 stores one patient row containing explicit variant/model slots.
+    # Schemas 3 and 4 store explicit variant/model slots in one patient row;
+    # component-scoped evidence in schema 4 does not change final-score handling.
     # Normalize it into the same report records used for historical schemas.
     selected_variants = (metadata.get("experiment") or {}).get("selected_variants", [])
-    if (not isinstance(selected_variants, list) or any(not isinstance(v, str) or v not in VARIANTS or v == "not_recorded"
+    if (not isinstance(selected_variants, list) or any(not isinstance(v, str) or v not in variant_labels or v == "not_recorded"
             for v in selected_variants) or len(set(selected_variants)) != len(selected_variants)):
         raise ValueError("run.json selected_variants must be unique supported variant IDs")
-    if metadata.get("schema_version") == 3:
+    if metadata.get("schema_version") in (3, 4):
+        schema = metadata["schema_version"]
         if not selected_variants:
-            raise ValueError("Schema v3 requires selected_variants")
+            raise ValueError(f"Schema v{schema} requires selected_variants")
         existing = set()
         for row in rows:
             patient_id = row.get("id")
             if not _text(patient_id) or patient_id in existing:
-                raise ValueError("Schema v3 requires unique, nonempty patient IDs")
+                raise ValueError(f"Schema v{schema} requires unique, nonempty patient IDs")
             if "variants" not in row:
-                raise ValueError("Schema v3 requires variants in every patient row")
+                raise ValueError(f"Schema v{schema} requires variants in every patient row")
             existing.add(patient_id)
         rows.extend({"id": patient_id, "status": "not_processed", "variants": {}}
                     for patient_id in selected_ids if patient_id not in existing)
@@ -283,7 +309,7 @@ def load_report_data(run_dir, *, root=ROOT):
         if not isinstance(variants, dict):
             raise ValueError("variants must be an object")
         for variant in dict.fromkeys([*selected_variants, *variants]):
-            if variant not in VARIANTS or variant == "not_recorded":
+            if variant not in variant_labels or variant == "not_recorded":
                 raise ValueError(f"Unsupported evidence_variant: {variant!r}")
             entry = variants.get(variant, {})
             if not isinstance(entry, dict) or not isinstance(entry.get("assessment_plans", {}), dict):
@@ -319,7 +345,7 @@ def load_report_data(run_dir, *, root=ROOT):
         patient_id = row.get("id")
         if not _text(patient_id) or patient_id not in labels:
             raise ValueError(f"No reference label for result patient {patient_id!r}")
-        variant = _variant(row, metadata)
+        variant = _variant(row, metadata, variant_labels)
         if (patient_id, variant) in seen:
             raise ValueError(f"Duplicate result for patient {patient_id!r}, variant {variant!r}")
         seen.add((patient_id, variant))
@@ -355,7 +381,8 @@ def load_report_data(run_dir, *, root=ROOT):
     if not patients:
         notices.append("No patient results were saved or selected. There are no scores to summarize.")
     return {"patients": patients, "summary": summary, "comparisons": comparisons, "notices": notices,
-            "selected_models": model_ids, "selected_variants": selected_variants}
+            "selected_models": model_ids, "selected_variants": selected_variants,
+            "variant_labels": variant_labels}
 
 
 def _e(value):
@@ -430,13 +457,13 @@ def _overview_rows(data, *, comparison=False):
     return ''.join(rendered)
 
 
-def _patient_html(patient, index):
+def _patient_html(patient, index, variant_labels):
     outputs = []
     for output in patient["outputs"]:
         heading = f'<h4>{_e(output["model_id"])}</h4>'
         if output["model_name"] != output["model_id"]:
             heading += f'<p class="model-name">{_e(output["model_name"])}</p>'
-        heading += f'<p class="variant-name">{_e(VARIANTS[output["variant"]])}</p>'
+        heading += f'<p class="variant-name">{_e(variant_labels[output["variant"]])}</p>'
         status = output["status"]
         note = output["generation_note"] or "Generation completed"
         pairs = []
@@ -514,6 +541,7 @@ def format_top_rank_summary(data):
 def render_report(data):
     """Render a self-contained HTML page; all source text is escaped, never executed."""
     patients = data["patients"]
+    variant_labels = data.get("variant_labels", VARIANTS)
     outputs = [output for patient in patients for output in patient["outputs"]]
     models = list(dict.fromkeys(output["model_id"] for output in outputs))
     variants = list(dict.fromkeys(output["variant"] for output in outputs))
@@ -537,10 +565,10 @@ def render_report(data):
         "SCRIPT": _SCRIPT,
         "HEALTH": _e(health), "HEALTH_CLASS": "attention" if attention else "healthy",
         "HEALTH_DETAIL": _e(health_detail), "PATIENTS": str(len(patients)), "MODELS": str(len(models)),
-        "NOTICES": notices, "MODEL_OPTIONS": options(models, {}), "VARIANT_OPTIONS": options(variants, VARIANTS),
+        "NOTICES": notices, "MODEL_OPTIONS": options(models, {}), "VARIANT_OPTIONS": options(variants, variant_labels),
         "SUMMARY": _overview_rows(data), "TOP_RANK_SUMMARY": _e(format_top_rank_summary(data)), "COMPARISONS": _overview_rows(data, comparison=True),
         "METRIC_HEADER": _metric_header(),
-        "DETAILS": ''.join(_patient_html(patient, index) for index, patient in enumerate(patients)),
+        "DETAILS": ''.join(_patient_html(patient, index, variant_labels) for index, patient in enumerate(patients)),
         # Escape script boundaries, including malicious labels and Unicode separators.
         "DATA": json.dumps(data, ensure_ascii=True, allow_nan=False).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026'),
     }

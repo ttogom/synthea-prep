@@ -36,7 +36,9 @@ from med_copilot.prompts.diagnosis_plan import (
 )
 from scripts.med_copilot_helpers import (
     ExperimentRun,
-    VARIANT_SOURCES,
+    capture_component,
+    component_needed,
+    prepare_variant_messages,
     JSONKeywordExtractor,
     format_assessment_plans,
     git_branch,
@@ -47,11 +49,12 @@ from scripts.med_copilot_helpers import (
     new_patient_result,
     pacific_now,
     parse_guideline_questions,
-    prepare_patient_output_capture,
     reference_data_metadata,
     selected_reference_patient,
     validate_guideline_tables,
 )
+
+from scripts.med_copilot_variants import COMPONENTS
 
 # The shared client is initialized only after startup validation and confirmation.
 client = None
@@ -59,151 +62,90 @@ client = None
 def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output,
                     assessment_models, experiment=None, setup_errors=None):
     """Run every pipeline stage for one patient, filling `result` as stages finish."""
-    prepare_patient_output_capture(result, corpus_records, retriever, reranker)
     s_o = matching_text(patient)
     experiment = experiment or retrieval_startup.experiment
-    setup_errors = setup_errors or {}
-    variants = (result["variants"] if "variants" in result else
-                {"patient_retrieval_guidelines": result})
-    states = result.get("evidence_status", {
-        source: {"status": "not_processed", "error": None}
-        for source in ("patient_retrieval", "guidelines")
-    })
-    for source, error in setup_errors.items():
-        states[source].update(status="failed_incomplete", error=error)
-    retrieved_info, key_info = "No reference patient available.", None
-# %% ------------------------------------------------------------------
-# Similar-patient retrieval + reranking
-# ---------------------------------------------------------------------
-    if experiment.needs_patient_retrieval and states["patient_retrieval"]["status"] != "failed_incomplete":
-        states["patient_retrieval"]["status"] = "failed_incomplete"
-        try:
-            candidates, results = [], []
-            if retriever is not None:
-                # EmbeddingRetriever uses relative paths for these artifacts.
-                with chdir(experiment.patient_retrieval_artifacts_dir):
-                    candidates = retriever.search(s_o, topk=experiment.patient_retrieval_top_k)
-
-                    if candidates:
-                        #CrossEncoderReranker jointly scores the target patient and each similar-patient candidate, then reorders candidates by relevance
-                        results = reranker.rerank(
-                            s_o,
-                            candidates,
-                            topk=experiment.patient_rerank_top_k,
-                        )
-
-            retrieved_info = results[0] if results else "No reference patient available."
-            result["selected_reference_patient"] = selected_reference_patient(
-                corpus_records, candidates, results,
-            )
-
-            print("\n========== TOP SIMILAR PATIENT ==========\n")
-            print(retrieved_info)
-            states["patient_retrieval"]["status"] = "completed"
-        except Exception as exc:
-            states["patient_retrieval"]["error"] = assessment_models.error_metadata(exc)
-            error = states["patient_retrieval"]["error"]
-            print(f"patient_retrieval failed ({error['type']}): {error['message']}", file=sys.stderr)
-            if "variants" not in result:
-                raise
-        except BaseException as exc:
-            states["patient_retrieval"]["error"] = {"type": type(exc).__name__, "message": "Evidence preparation interrupted"}
-            raise
+    for component in result["components"].values():
+        for resource in COMPONENTS[component["component"]].resources:
+            if resource in (setup_errors or {}):
+                component.update(status="failed_incomplete", error=setup_errors[resource])
 
 # %% ------------------------------------------------------------------
-# Clinical guidelines: questions and GraphRAG, once per patient
+# Similar-patient retrieval + reranking, once per distinct configuration
 # ---------------------------------------------------------------------
-    # Avoid spending calls when the only guideline-dependent variant is already
-    # blocked by failed patient retrieval. Standalone guidelines remain independent.
-    guidelines_needed = experiment.needs_guidelines and (
-        "guidelines" in variants or states["patient_retrieval"]["status"] != "failed_incomplete")
-    if guidelines_needed and states["guidelines"]["status"] != "failed_incomplete":
-        states["guidelines"]["status"] = "failed_incomplete"
-        try:
-            key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(
-                conditions=s_o
-            )
+    if experiment.needs("patient_retrieval"):
+        for instance, settings in experiment.component_instances("patient_retrieval"):
+            component = result["components"][instance]
+            if component["status"] != "not_processed":
+                continue
+            with capture_component(component, error_metadata=assessment_models.error_metadata,
+                                   corpus_records=corpus_records, retriever=retriever, reranker=reranker,
+                                   credential_names=experiment.required_credentials) as capture:
+                candidates, results = [], []
+                if retriever is not None:
+                    # The cache paths inherited from upstream are relative.
+                    with chdir(experiment.patient_retrieval_artifacts_dir):
+                        retriever.alpha = settings["alpha"]
+                        candidates = retriever.search(s_o, topk=settings["top_k"])
+                        if candidates:
+                            results = reranker.rerank(s_o, candidates, topk=settings["rerank_top_k"])
+                retrieved_info = results[0] if results else "No reference patient available."
+                capture["selected_reference_patient"] = selected_reference_patient(
+                    corpus_records, candidates, results)
+                component["outputs"]["example"] = retrieved_info
+                print("\n========== TOP SIMILAR PATIENT ==========\n")
+                print(retrieved_info)
 
-            key_response = client.chat.completions.create(
-                model=experiment.guideline_question_model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a clinical expert.",
-                    },
-                    {
-                        "role": "user",
-                        "content": key_questions_instance,
-                    },
-                ],
-            )
-            result["model_responses"]["guideline_questions"].append(model_response_metadata(key_response))
-
-            key_questions = key_response.choices[0].message.content
-            # The raw response remains the GraphRAG query; parsing only records it.
-            result["guideline_questions"] = parse_guideline_questions(key_questions)
-
-            print("\n========== KEY QUESTIONS ==========\n")
-            print(key_questions)
-
-            # GraphRAG clinical guideline retrieval
-
-            # The vendored table loader uses the working directory instead of storage's root.
-            with chdir(guideline_output), capture_graphrag_responses(result["model_responses"]):
-                key_info, graphrag_context = run_local_search(
-                    config_filepath=experiment.guidelines / "settings.yaml",
-                    data_dir=guideline_output,
-                    root_dir=experiment.guidelines,
-                    community_level=experiment.guideline_community_level,
-                    response_type=experiment.guideline_response_type,
-                    streaming=False,
-                    query=key_questions,
-                    verbose=experiment.guideline_verbose,
+# %% ------------------------------------------------------------------
+# Clinical guidelines: questions and GraphRAG, once per configuration
+# ---------------------------------------------------------------------
+    if experiment.needs("guidelines"):
+        for instance, settings in experiment.component_instances("guidelines"):
+            component = result["components"][instance]
+            if component["status"] != "not_processed" or not component_needed(experiment, instance, result):
+                continue
+            with capture_component(component, error_metadata=assessment_models.error_metadata,
+                                   credential_names=experiment.required_credentials) as capture:
+                key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(conditions=s_o)
+                key_response = client.chat.completions.create(
+                    model=settings["question_model"], response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": "You are a clinical expert."},
+                        {"role": "user", "content": key_questions_instance},
+                    ],
                 )
-
-            result["guideline_evidence"] = key_info
-            result["graphrag_context"] = graphrag_context_json(graphrag_context)
-
-            print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
-            print(key_info)
-            states["guidelines"]["status"] = "completed"
-        except Exception as exc:
-            states["guidelines"]["error"] = assessment_models.error_metadata(exc)
-            error = states["guidelines"]["error"]
-            print(f"guidelines failed ({error['type']}): {error['message']}", file=sys.stderr)
-            if "variants" not in result:
-                raise
-        except BaseException as exc:
-            states["guidelines"]["error"] = {"type": type(exc).__name__, "message": "Evidence preparation interrupted"}
-            raise
+                capture["model_responses"]["guideline_questions"].append(model_response_metadata(key_response))
+                key_questions = key_response.choices[0].message.content
+                # Preserve the raw JSON as the GraphRAG query; parse only for capture.
+                capture["guideline_questions"] = parse_guideline_questions(key_questions)
+                print("\n========== KEY QUESTIONS ==========\n")
+                print(key_questions)
+                # Vendored table loading uses cwd instead of the storage root.
+                with chdir(guideline_output), capture_graphrag_responses(capture["model_responses"]):
+                    key_info, graphrag_context = run_local_search(
+                        config_filepath=experiment.guidelines / "settings.yaml",
+                        data_dir=guideline_output, root_dir=experiment.guidelines,
+                        community_level=settings["community_level"], response_type=settings["response_type"],
+                        streaming=False, query=key_questions, verbose=settings["verbose"],
+                    )
+                capture["guideline_evidence"] = key_info
+                capture["graphrag_context"] = graphrag_context_json(graphrag_context)
+                component["outputs"]["Key_info"] = key_info
+                print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
+                print(key_info)
 
 # %% ------------------------------------------------------------------
-# Only evidence inclusion changes between final prompt variants
+# Render each variant from its component outputs; run all final models
 # ---------------------------------------------------------------------
-    for variant_name, output in variants.items():
-        failed = [source for source in VARIANT_SOURCES[variant_name]
-                  if states[source]["status"] != "completed"]
-        if failed:
-            output.update(status="failed_incomplete", error={
-                "type": "EvidenceUnavailable", "message": "Required evidence failed: " + ", ".join(failed),
-            })
+    for variant_name, output in result["variants"].items():
+        messages = prepare_variant_messages(
+            experiment, variant_name, s_o, result, output, templates=VARIANT_TEMPLATES,
+            error_metadata=assessment_models.error_metadata)
+        if messages is None:
             continue
-        final_prompt = VARIANT_TEMPLATES[variant_name].format(
-            conditions=s_o, example=retrieved_info, Key_info=key_info,
-        )
-        final_messages = [
-            {"role": "system", "content": "You are a clinical expert."},
-            {"role": "user", "content": final_prompt},
-        ]
-        output["assessment_plan_prompts"] = {
-            "system": final_messages[0]["content"], "user": final_messages[1]["content"],
-        }
-        output["status"] = "failed_incomplete"
-        assessment_models.generate(final_messages, output)
+        assessment_models.generate(messages, output)
         print(f"\n========== RANKED CONDITIONS AND PLANS: {variant_name} ==========\n")
         print(format_assessment_plans(output["assessment_plans"], assessment_models.metadata(ROOT)["models"]))
-    result["status"] = ("completed" if all(v["status"] == "completed" for v in variants.values())
+    result["status"] = ("completed" if all(v["status"] == "completed" for v in result["variants"].values())
                         else "failed_incomplete")
 
 
@@ -229,15 +171,10 @@ def main(argv=None):
     )
     patients = scorer.patients
     try:
-        shared_keys = set()
-        if experiment.needs_patient_retrieval or experiment.needs_guidelines:
-            shared_keys.add("OPENAI_API_KEY")
-        if experiment.needs_guidelines:
-            shared_keys.add("GRAPHRAG_API_KEY")
         assessment_models = AssessmentPlanModels(
             experiment.model_config, experiment.selected_models,
             temperature=experiment.temperature, max_retries=experiment.max_retries,
-            required_shared_keys=sorted(shared_keys),
+            required_shared_keys=experiment.required_credentials,
         )
     except (OSError, ValueError) as exc:
         print(f"Experiment configuration check failed:\n\n{exc}\n\n"
@@ -245,7 +182,7 @@ def main(argv=None):
         return "configuration_error"
     if not confirm_experiment(experiment, assessment_models.metadata(ROOT), ROOT, scorer.metadata(ROOT)):
         return "cancelled"
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"]) if experiment.needs_guidelines else None
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"]) if experiment.needs("guidelines") else None
     started_at = pacific_now()
     branch, commit = git_branch(ROOT), git_commit(ROOT)
 
@@ -253,6 +190,7 @@ def main(argv=None):
         experiment.experiment_output, root=ROOT, input_path=experiment.patient_input, started_at=started_at,
         branch=branch, commit=commit, patient_ids=[patient["id"] for patient in patients],
         model_ids=assessment_models.model_ids, variant_ids=experiment.selected_variants,
+        component_plan=experiment.component_plan, variant_components=experiment.variant_components,
     )
     print(f"Run directory: {run.run_dir}")
 
@@ -273,7 +211,7 @@ def main(argv=None):
                     corpus_records = json.load(f)
                 df = pd.DataFrame(corpus_records)
 
-                if not df.empty:
+                if not df.empty and experiment.needs("patient_retrieval"):
                     experiment.patient_retrieval_artifacts_dir.mkdir(parents=True, exist_ok=True)
                     with chdir(experiment.patient_retrieval_artifacts_dir):
                         retriever = HybridRetriever(
@@ -320,7 +258,9 @@ def main(argv=None):
         for number, patient in enumerate(patients, 1):
             print(f"\n========== PATIENT {number}/{len(patients)}: {patient['id']} ==========")
             current = new_patient_result(patient["id"], model_ids=assessment_models.model_ids,
-                                         variant_ids=experiment.selected_variants)
+                                         variant_ids=experiment.selected_variants,
+                                         component_plan=experiment.component_plan,
+                                         variant_components=experiment.variant_components)
             try:
                 process_patient(patient, current, corpus_records, retriever, reranker,
                                 guideline_output, assessment_models, experiment, setup_errors)

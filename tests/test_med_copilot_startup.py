@@ -2,6 +2,7 @@
 
 import ast
 import builtins
+from dataclasses import replace
 from pathlib import Path
 import runpy
 import sys
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.med_copilot_config import ExperimentConfig
+from scripts.med_copilot_variants import COMPONENTS, VARIANTS
 
 
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
@@ -124,6 +126,48 @@ class PatientRetrievalStartupTests(unittest.TestCase):
         self.write()
         self.assertIs(startup.encoder_for(ExperimentConfig(self.path)), self.encoder)
         self.factory.assert_called_once()
+
+    def test_new_variant_ids_reuse_the_same_encoder_for_shared_patient_component(self):
+        variants = {
+            "custom_patient": replace(VARIANTS["patient_retrieval"], description="Custom patient variant"),
+            "custom_combined": replace(VARIANTS["patient_retrieval_guidelines"], description="Custom combined variant"),
+        }
+        self.data["selected_variants"] = ["patient_retrieval", *variants]
+        self.write()
+        with patch.dict(VARIANTS, variants):
+            startup = self.startup_class(self.path)
+            config = ExperimentConfig(self.path)
+            self.assertTrue(config.needs_patient_retrieval)
+            self.assertIs(startup.encoder_for(config), self.encoder)
+            self.assertIs(startup.encoder_for(config), self.encoder)
+        self.factory.assert_called_once_with("custom/encoder")
+
+    def test_custom_components_select_encoder_by_resource_not_component_or_variant_name(self):
+        patient_component = replace(COMPONENTS["patient_retrieval"], description="Replacement patient component")
+        guideline_component = replace(COMPONENTS["guidelines"], description="Replacement guideline component")
+        variants = {
+            "custom_patient": replace(
+                VARIANTS["patient_retrieval"], components=("custom_patient_source",),
+                bindings={"example": ("custom_patient_source", "example")},
+            ),
+            "custom_guidelines": replace(
+                VARIANTS["guidelines"], components=("custom_guideline_source",),
+                bindings={"Key_info": ("custom_guideline_source", "Key_info")},
+            ),
+            "custom_prompt_only": replace(VARIANTS["llm_only"], description="Custom S/O prompt"),
+        }
+        with patch.dict(COMPONENTS, {"custom_patient_source": patient_component,
+                                     "custom_guideline_source": guideline_component}), patch.dict(VARIANTS, variants):
+            for variant, requires_encoder in (("custom_guidelines", False), ("custom_prompt_only", False),
+                                               ("custom_patient", True)):
+                with self.subTest(variant=variant):
+                    self.data["selected_variants"] = [variant]
+                    self.write()
+                    startup = self.startup_class(self.path)
+                    self.assertIsNotNone(startup.experiment)
+                    self.assertEqual(startup.experiment.needs_patient_retrieval, requires_encoder)
+                    self.assertIs(startup.encoder, self.encoder if requires_encoder else None)
+        self.factory.assert_called_once_with("custom/encoder")
 
     def test_imports_are_in_header_and_no_faiss_dependency_is_loaded(self):
         tree = ast.parse(STARTUP.read_text())
