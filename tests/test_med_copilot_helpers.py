@@ -9,6 +9,8 @@ initialization is needed. Keep this suite updated when helpers are added.
 import ast
 import builtins
 from datetime import datetime, timedelta, timezone
+from copy import deepcopy
+from dataclasses import replace
 import errno
 import hashlib
 import json
@@ -17,6 +19,7 @@ from pathlib import Path
 import runpy
 import shutil
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -26,6 +29,8 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Direct execution must resolve the lightweight project registry before runpy.
+sys.path.insert(0, str(ROOT))
 HELPERS = ROOT / "scripts/med_copilot_helpers.py"
 UPSTREAM_RETRIEVER = ROOT / "med_copilot/upstream/create_embeddings.py"
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
@@ -377,14 +382,15 @@ class HelperImportTests(unittest.TestCase):
                   if callable(value) and not name.startswith("_")
                   and getattr(value, "__module__", None) == "<run_path>"]
         self.assertEqual(sorted(public), sorted([
-            "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "git_branch", "git_commit",
+            "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "format_assessment_plans", "git_branch", "git_commit",
             "graphrag_context_json", "guideline_resource_files", "load_patient_records",
-            "make_run_name", "new_patient_result", "pacific_now", "pacific_time",
+            "make_run_name", "new_model_result", "new_patient_result", "pacific_now", "pacific_time",
             "parse_condition_plan", "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
             "write_run_json", "model_response_metadata", "reference_patient_identity",
             "ranked_reference_patients", "prepare_patient_output_capture",
+            "capture_component", "component_needed", "prepare_variant_messages",
         ]), "Add direct tests when adding a public helper")
 
     def test_all_helper_imports_are_in_the_module_header(self):
@@ -840,6 +846,93 @@ class FingerprintTests(TemporaryRootTestCase):
 
 
 class PatientOutputHelperTests(unittest.TestCase):
+    def test_formatted_output_numbers_three_condition_plan_pairs_under_the_model(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": "Condition café", "plan": ["First action", "Second action", "Third action"]},
+            {"condition": "Condition B", "plan": ["B action one", "B action two", "B action three"]},
+            {"condition": "Condition C", "plan": ["C action one", "C action two", "C action three"]},
+        ])
+        outputs = {"mini": output}
+        settings = {"mini": {"config": {"model_provider": "openai", "model": "gpt-4o-mini"}}}
+        before = json.dumps([outputs, settings])
+        self.assertEqual(H["format_assessment_plans"](outputs, settings), "\n".join([
+            "Model: mini (openai/gpt-4o-mini)",
+            "    1. Condition: Condition café", "        Plan:",
+            "            1. First action", "            2. Second action", "            3. Third action", "",
+            "    2. Condition: Condition B", "        Plan:",
+            "            1. B action one", "            2. B action two", "            3. B action three", "",
+            "    3. Condition: Condition C", "        Plan:",
+            "            1. C action one", "            2. C action two", "            3. C action three",
+        ]))
+        self.assertEqual(json.dumps([outputs, settings]), before)
+
+    def test_formatted_output_distinguishes_unavailable_fields_empty_plans_and_short_plans(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": None, "plan": ["One action", "Second action"]},
+            {"condition": "B", "plan": None}, {"condition": "C", "plan": []},
+        ])
+        settings = {"mini": {"config": {"model_provider": "openai", "model": "gpt-4o-mini"}}}
+        formatted = H["format_assessment_plans"]({"mini": output}, settings)
+        self.assertIn("    1. Condition: [unavailable]\n        Plan:\n"
+                      "            1. One action\n            2. Second action\n\n", formatted)
+        self.assertIn("    2. Condition: B\n        Plan:\n            [unavailable]\n\n", formatted)
+        self.assertTrue(formatted.endswith("    3. Condition: C\n        Plan:\n            No plan items returned."))
+        self.assertNotIn("            3.", formatted)
+
+    def test_formatted_output_preserves_model_order_and_shows_failed_unattempted_and_invalid_models(self):
+        failed = H["new_model_result"]()
+        failed.update(status="failed_incomplete", error={"type": "RuntimeError", "message": "failed\nmore detail"})
+        invalid = H["new_model_result"]()
+        invalid.update(status="completed", assessment_plan_raw="RAW_RESPONSE_SHOULD_NOT_BE_PRINTED")
+        outputs = {"failed": failed, "waiting": H["new_model_result"](), "invalid": invalid}
+        settings = {key: {"config": {"model_provider": "azure", "model": "base-model",
+                                    "deployment_name": "clinical-deployment"}} for key in outputs}
+        self.assertEqual(H["format_assessment_plans"](outputs, settings), "\n".join([
+            "Model: failed (azure/clinical-deployment)", "    Generation status: failed_incomplete",
+            "    Error (RuntimeError): failed", "    more detail", "",
+            "Model: waiting (azure/clinical-deployment)", "    Generation status: not_processed", "",
+            "Model: invalid (azure/clinical-deployment)", "    No valid ranked conditions and plans returned.",
+        ]))
+
+    def test_formatted_multiline_text_keeps_each_line_inside_its_model_and_plan(self):
+        output = H["new_model_result"]()
+        output.update(status="completed", predictions=[
+            {"condition": "A\ncontinuation", "plan": ["First action\ncontinuation café"]},
+            {"condition": "B", "plan": ["same", "same"]}, {"condition": "C", "plan": []},
+        ])
+        settings = {"llama": {"config": {"model_provider": "groq", "model": "llama-3.3-70b-versatile"}}}
+        formatted = H["format_assessment_plans"]({"llama": output}, settings)
+        self.assertIn("    1. Condition: A\n    continuation\n        Plan:\n"
+                      "            1. First action\n            continuation café", formatted)
+        self.assertIn("            1. same\n            2. same", formatted)
+        self.assertTrue(all(line.startswith("    ") for line in formatted.splitlines()[1:] if line))
+        self.assertEqual(H["format_assessment_plans"]({}, {}), "")
+
+    def test_model_slots_are_fresh_and_explicitly_unattempted(self):
+        expected = {"status": "not_processed", "error": None, "predictions": None,
+                    "assessment_plan_raw": None, "model_responses": [], "evaluation": None}
+        self.assertEqual(H["new_model_result"](), expected)
+        first = H["new_model_result"]()
+        first["model_responses"].append({"response_id": "first"})
+        first["evaluation"] = ["scored"]
+        self.assertEqual(H["new_model_result"](), expected)
+
+    def test_multiple_model_patient_shape_and_mutation_isolation(self):
+        first = H["new_patient_result"]("a", model_ids=["openai", "llama"])
+        second = H["new_patient_result"]("b", "not_processed", ["llama", "openai"])
+        self.assertEqual(list(first["assessment_plans"]), ["openai", "llama"])
+        self.assertEqual(list(second["assessment_plans"]), ["llama", "openai"])
+        self.assertEqual(second["status"], "not_processed")
+        for key in ("predictions", "assessment_plan_raw", "evaluation"):
+            self.assertNotIn(key, first)
+        self.assertNotIn("assessment_plan", first["model_responses"])
+        first["assessment_plans"]["openai"]["model_responses"].append({"response_id": "one"})
+        self.assertEqual(first["assessment_plans"]["llama"], H["new_model_result"]())
+        self.assertEqual(second["assessment_plans"]["openai"], H["new_model_result"]())
+        self.assertEqual(H["new_patient_result"]("empty", model_ids=[])["assessment_plans"], {})
+
     def test_new_patient_result_has_every_field_in_order_with_null_outputs(self):
         self.assertEqual(list(H["new_patient_result"]("p")), RESULT_FIELDS)
         self.assertEqual(H["new_patient_result"]("p"), {"id": "p", "status": None,
@@ -1213,6 +1306,86 @@ class RunFileTests(TemporaryRootTestCase):
 
 
 class ExperimentRunTests(TemporaryRootTestCase):
+    def test_variant_start_stop_preserves_partial_scores_and_every_unstarted_combination(self):
+        variants = list(H["VARIANT_SOURCES"])
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="variants", commit="0" * 40,
+            patient_ids=["a", "b"], model_ids=iter(["mini", "llama"]), variant_ids=iter(variants),
+        )
+        metadata, records, _ = self.read(run)
+        self.assertEqual(metadata["schema_version"], 3)
+        self.assertIsNone(metadata["variant_definitions"])
+        self.assertIsNone(metadata["prompt_provenance"])
+        self.assertEqual(records, [])
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"], variant_ids=variants)
+        current["variants"]["llm_only"].update(status="completed", assessment_plan_prompts={"user": "exact café\n"})
+        model = current["variants"]["llm_only"]["assessment_plans"]["mini"]
+        model.update(status="completed", assessment_plan_raw="RAW", predictions=[{"condition": "A", "plan": []}],
+                     evaluation=[{"rank": 1, "condition": {"metrics": {"BERTScore_F1": 0.0}}}])
+        run.stop(self.finished, current)
+        metadata, records, text = self.read(run)
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(records[0], {**current, "status": "failed_incomplete"})
+        self.assertEqual(records[1], H["new_patient_result"]("b", "not_processed", ["mini", "llama"], variants))
+        self.assertEqual(text.count("\n"), 2)
+        self.assertEqual(current["status"], None)
+        self.assertEqual(run.unsaved, [])
+
+    def test_variant_stop_fallback_and_completion_retain_the_selected_matrix(self):
+        variants, models = ["llm_only", "guidelines"], ["mini", "llama"]
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="variants", commit=None,
+            patient_ids=["a", "b"], model_ids=models, variant_ids=variants,
+        )
+        current = H["new_patient_result"]("a", model_ids=models, variant_ids=variants)
+        current["variants"]["guidelines"]["assessment_plans"]["llama"]["predictions"] = float("nan")
+        run.stop(self.finished, current)
+        self.assertEqual(self.read(run)[1], [H["new_patient_result"](id_, status, models, variants)
+                                           for id_, status in (("a", "failed_incomplete"), ("b", "not_processed"))])
+        completed = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="completed", commit=None,
+            patient_ids=["a"], model_ids=models, variant_ids=variants,
+        )
+        completed.save_result(H["new_patient_result"]("a", "completed", models, variants))
+        self.assertEqual(completed.finish(self.finished), "completed")
+        self.assertEqual(self.read(completed)[0]["schema_version"], 3)
+
+    def test_multimodel_stop_preserves_partial_outputs_and_initializes_unstarted_models(self):
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="feature", commit="0" * 40,
+            patient_ids=["a", "b"], model_ids=["mini", "llama"],
+        )
+        self.assertEqual(run.metadata["schema_version"], 2)
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"])
+        current["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="exact café\n", predictions=[{"condition": "A"}],
+            evaluation=[{"rank": 1, "condition": {"metrics": {"BLEU": 0.0}}}],
+        )
+        run.stop(self.finished, current)
+        metadata, records, _ = self.read(run)
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(records[0], {**current, "status": "failed_incomplete"})
+        self.assertEqual(records[1], H["new_patient_result"]("b", "not_processed", ["mini", "llama"]))
+        self.assertEqual(current["status"], None)
+        records[0]["assessment_plans"]["llama"]["model_responses"].append({"response_id": "x"})
+        self.assertEqual(records[1]["assessment_plans"]["llama"], H["new_model_result"]())
+
+    def test_multimodel_stop_serialization_fallback_keeps_model_slots(self):
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="feature", commit="0" * 40,
+            patient_ids=["a"], model_ids=["mini", "llama"],
+        )
+        current = H["new_patient_result"]("a", model_ids=["mini", "llama"])
+        current["assessment_plans"]["mini"]["predictions"] = float("nan")
+        run.stop(self.finished, current)
+        self.assertEqual(self.read(run)[1], [H["new_patient_result"](
+            "a", "failed_incomplete", ["mini", "llama"])])
+
     def setUp(self):
         super().setUp()
         self.repo = self.root / "repo"
@@ -1448,6 +1621,43 @@ class ExperimentRunTests(TemporaryRootTestCase):
 
 
 class CaptureHelperTests(unittest.TestCase):
+    def test_variant_factory_sources_statuses_and_nested_captures_are_independent(self):
+        variants = list(H["VARIANT_SOURCES"])
+        first = H["new_patient_result"]("a", model_ids=iter(["mini", "llama"]), variant_ids=iter(variants))
+        second = H["new_patient_result"]("b", model_ids=["mini", "llama"], variant_ids=variants)
+        self.assertEqual(list(first["variants"]), variants)
+        for field in ("predictions", "assessment_plan_raw", "evaluation", "assessment_plan_prompts", "assessment_plans"):
+            self.assertNotIn(field, first)
+        self.assertNotIn("assessment_plan", first["model_responses"])
+        self.assertEqual(first["evidence_status"], {source: {"status": "not_processed", "error": None}
+                                                  for source in ("patient_retrieval", "guidelines")})
+        for name, variant in first["variants"].items():
+            self.assertEqual(variant["evidence_sources"], list(H["VARIANT_SOURCES"][name]))
+            self.assertEqual(variant["status"], "not_processed")
+            self.assertIsNone(variant["error"])
+            self.assertIsNone(variant["assessment_plan_prompts"])
+            self.assertEqual(list(variant["assessment_plans"]), ["mini", "llama"])
+            self.assertEqual(variant["assessment_plans"]["mini"], H["new_model_result"]())
+        slot = first["variants"]["llm_only"]["assessment_plans"]["mini"]
+        slot["model_responses"].append({"response_id": "private"})
+        first["variants"]["guidelines"]["evidence_sources"].append("changed")
+        first["evidence_status"]["guidelines"]["error"] = {"type": "Error"}
+        self.assertEqual(second["variants"]["llm_only"]["assessment_plans"]["mini"], H["new_model_result"]())
+        self.assertEqual(first["variants"]["llm_only"]["assessment_plans"]["llama"], H["new_model_result"]())
+        self.assertEqual(first["variants"]["guidelines"]["assessment_plans"]["mini"], H["new_model_result"]())
+        self.assertEqual(H["VARIANT_SOURCES"]["guidelines"], ("guidelines",))
+        self.assertIsNone(second["evidence_status"]["guidelines"]["error"])
+
+    def test_variant_factory_marks_unused_sources_without_inventing_evidence(self):
+        for variant, required in H["VARIANT_SOURCES"].items():
+            with self.subTest(variant=variant):
+                row = H["new_patient_result"]("a", "not_processed", ["model"], [variant])
+                for source, state in row["evidence_status"].items():
+                    self.assertEqual(state["status"], "not_processed" if source in required else "not_requested")
+                    self.assertIsNone(state["error"])
+                self.assertIsNone(row["guideline_evidence"])
+                self.assertIsNone(row["selected_reference_patient"])
+
     def test_patient_initial_capture_values_and_stage_lists_are_independent(self):
         first, second = H["new_patient_result"]("a"), H["new_patient_result"]("b", "not_processed")
         for field in ("keyword_extraction_raw", "retrieval_keywords", "retrieved_patient_ids", "reranked_patient_ids"):
@@ -1708,6 +1918,324 @@ class PreparePatientOutputCaptureTests(unittest.TestCase):
             snapshots.append(json.loads(json.dumps(record)))
             self.assertEqual(records, snapshots)
         self.assertEqual(client.chat.completions.create.call_count, 3)
+
+
+class SchemaFourHelperTests(unittest.TestCase):
+    def setUp(self):
+        self.plan = {
+            "patient_retrieval": {"component": "patient_retrieval", "settings": {"alpha": 0.5}},
+            "guidelines": {"component": "guidelines", "settings": {"verbose": False}},
+        }
+        self.references = {
+            "llm_only": {}, "patient_retrieval": {"patient_retrieval": "patient_retrieval"},
+            "guidelines": {"guidelines": "guidelines"},
+            "patient_retrieval_guidelines": {"patient_retrieval": "patient_retrieval", "guidelines": "guidelines"},
+        }
+        self.templates = runpy.run_path(str(ROOT / "med_copilot/prompts/diagnosis_plan.py"))["VARIANT_TEMPLATES"]
+        self.experiment = SimpleNamespace(variant_components=self.references)
+
+    def result(self, patient_id="a", **overrides):
+        arguments = dict(model_ids=["mini", "llama"], variant_ids=list(self.references),
+                         component_plan=self.plan, variant_components=self.references)
+        arguments.update(overrides)
+        return H["new_patient_result"](patient_id, **arguments)
+
+    def complete(self, record):
+        for component, key, text in (("patient_retrieval", "example", "Reference SOAP {verbatim}"),
+                                      ("guidelines", "Key_info", "Guideline answer {verbatim}")):
+            with H["capture_component"](record["components"][component]):
+                record["components"][component]["outputs"][key] = text
+        return record
+
+    def test_component_result_factory_copies_settings_references_and_all_mutable_slots(self):
+        first, second = self.result(), self.result("b")
+        before_plan, before_refs = deepcopy(self.plan), deepcopy(self.references)
+        self.assertEqual(set(first), {"id", "status", "components", "variants"})
+        for component in first["components"].values():
+            self.assertEqual(component["status"], "not_processed")
+            self.assertIsNone(component["error"])
+            self.assertEqual(component["outputs"], {})
+            self.assertNotIn("assessment_plan", component["capture"]["model_responses"])
+        first["components"]["patient_retrieval"]["settings"]["alpha"] = 0.1
+        first["components"]["patient_retrieval"]["capture"]["model_responses"]["keyword_extraction"].append({"response_id": "a"})
+        first["variants"]["guidelines"]["components"]["guidelines"] = "changed"
+        first["variants"]["llm_only"]["assessment_plans"]["mini"]["model_responses"].append({"response_id": "final"})
+        self.assertEqual(self.plan, before_plan)
+        self.assertEqual(self.references, before_refs)
+        self.assertEqual(second["components"]["patient_retrieval"]["settings"], {"alpha": 0.5})
+        self.assertEqual(second["components"]["patient_retrieval"]["capture"]["model_responses"]["keyword_extraction"], [])
+        self.assertEqual(second["variants"]["guidelines"]["components"], {"guidelines": "guidelines"})
+        self.assertEqual(first["variants"]["llm_only"]["assessment_plans"]["llama"], H["new_model_result"]())
+        self.assertEqual(second["variants"]["llm_only"]["assessment_plans"]["mini"], H["new_model_result"]())
+
+    def test_component_factory_materializes_generator_model_ids_for_every_variant(self):
+        record = self.result(model_ids=iter(["mini", "llama"]), variant_ids=iter(self.references))
+        self.assertEqual(list(record["variants"]), list(self.references))
+        for variant in record["variants"].values():
+            self.assertEqual(list(variant["assessment_plans"]), ["mini", "llama"])
+
+    def test_success_publishes_exact_outputs_and_allows_empty_string(self):
+        for text in ("Evidence café\n", ""):
+            with self.subTest(text=text):
+                component = self.result()["components"]["guidelines"]
+                with H["capture_component"](component) as capture:
+                    self.assertIs(capture, component["capture"])
+                    self.assertEqual(component["status"], "failed_incomplete")
+                    capture["guideline_evidence"] = text
+                    component["outputs"]["Key_info"] = text
+                self.assertEqual(component["status"], "completed")
+                self.assertIsNone(component["error"])
+                self.assertEqual(component["outputs"]["Key_info"], text)
+
+    def test_missing_or_nonstring_outputs_fail_locally_and_retain_partial_capture(self):
+        for outputs in ({}, {"Key_info": None}, {"Key_info": 12}, {"other": "text"}):
+            with self.subTest(outputs=outputs):
+                record = self.result()
+                component = record["components"]["guidelines"]
+                with H["capture_component"](component) as capture:
+                    capture["guideline_questions"] = ["Exact question"]
+                    component["outputs"].update(outputs)
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(component["error"]["type"], "ValueError")
+                self.assertEqual(component["capture"]["guideline_questions"], ["Exact question"])
+                self.assertEqual(record["components"]["patient_retrieval"]["status"], "not_processed")
+
+    def test_ordinary_error_is_local_retains_metadata_and_uses_supplied_redactor(self):
+        component = self.result()["components"]["patient_retrieval"]
+        formatter = Mock(return_value={"type": "RuntimeError", "message": "safe"})
+        error = RuntimeError("sensitive")
+        with H["capture_component"](component, error_metadata=formatter) as capture:
+            capture["retrieved_patient_ids"] = [{"note_id": "partial"}]
+            raise error
+        formatter.assert_called_once_with(error)
+        self.assertEqual(component["error"], {"type": "RuntimeError", "message": "safe"})
+        self.assertEqual(component["capture"]["retrieved_patient_ids"], [{"note_id": "partial"}])
+        self.assertEqual(component["status"], "failed_incomplete")
+
+    def test_custom_credentials_are_redacted_longest_first_without_saved_values(self):
+        component = self.result()["components"]["guidelines"]
+        with patch.dict(os.environ, {"FIRST_KEY": "prefix", "SECOND_KEY": "prefix-secret"}):
+            with H["capture_component"](component, credential_names=("FIRST_KEY", "SECOND_KEY")):
+                raise RuntimeError("prefix-secret and prefix")
+        self.assertEqual(component["error"]["message"], "[REDACTED] and [REDACTED]")
+        self.assertNotIn("prefix", json.dumps(component))
+
+    def test_interruptions_rethrow_after_partial_capture_and_status_are_saved(self):
+        for error in (KeyboardInterrupt(), SystemExit(2), GeneratorExit()):
+            with self.subTest(error=type(error).__name__):
+                component = self.result()["components"]["guidelines"]
+                with self.assertRaises(type(error)) as caught:
+                    with H["capture_component"](component) as capture:
+                        capture["guideline_questions"] = ["Partial"]
+                        raise error
+                self.assertIs(caught.exception, error)
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(component["error"]["type"], type(error).__name__)
+                self.assertEqual(component["capture"]["guideline_questions"], ["Partial"])
+
+    def test_duplicate_attempt_is_rejected_before_body_runs(self):
+        for status in ("completed", "failed_incomplete"):
+            component = self.result()["components"]["guidelines"]
+            component["status"] = status
+            with self.subTest(status=status), self.assertRaisesRegex(ValueError, "already attempted"):
+                with H["capture_component"](component):
+                    self.fail("A repeated component must not execute")
+            self.assertEqual(component["status"], status)
+
+    def test_nested_component_hooks_restore_outer_then_original_bindings(self):
+        outer = self.result()["components"]["patient_retrieval"]
+        inner = self.result("b")["components"]["patient_retrieval"]
+        old_capture, old_rankings, old_callback = object(), [], Mock()
+        extractor = SimpleNamespace(capture_result=old_capture)
+        retriever = SimpleNamespace(keyword_extractor=extractor, ranked_candidates=old_rankings,
+                                    on_ranking=old_callback)
+        reranker = SimpleNamespace()
+        corpus = [{"note_id": "REF"}]
+        with H["capture_component"](outer, corpus_records=corpus, retriever=retriever, reranker=reranker):
+            outer_callback = retriever.on_ranking
+            self.assertIs(extractor.capture_result, outer["capture"])
+            retriever.on_ranking([{"idx": 0, "hybrid_score": 0.2}])
+            with H["capture_component"](inner, corpus_records=corpus, retriever=retriever, reranker=reranker):
+                self.assertIs(extractor.capture_result, inner["capture"])
+                retriever.on_ranking([{"idx": 0, "hybrid_score": 0.7}])
+                inner["outputs"]["example"] = "Inner"
+            self.assertIs(extractor.capture_result, outer["capture"])
+            self.assertIs(retriever.on_ranking, outer_callback)
+            reranker.on_ranking([{"idx": 0, "rerank_score": 0.3}])
+            outer["outputs"]["example"] = "Outer"
+        self.assertIs(extractor.capture_result, old_capture)
+        self.assertIs(retriever.ranked_candidates, old_rankings)
+        self.assertIs(retriever.on_ranking, old_callback)
+        self.assertFalse(hasattr(reranker, "on_ranking"))
+        self.assertFalse(hasattr(reranker, "ranked_candidates"))
+        self.assertEqual(outer["capture"]["retrieved_patient_ids"], [{"note_id": "REF", "hybrid_score": 0.2}])
+        self.assertEqual(inner["capture"]["retrieved_patient_ids"], [{"note_id": "REF", "hybrid_score": 0.7}])
+        self.assertEqual(outer["capture"]["reranked_patient_ids"], [{"note_id": "REF", "rerank_score": 0.3}])
+        self.assertIsNone(inner["capture"]["reranked_patient_ids"])
+
+    def test_hook_attributes_are_removed_after_failure_or_interruption(self):
+        for error in (RuntimeError("failure"), KeyboardInterrupt()):
+            component = self.result()["components"]["patient_retrieval"]
+            extractor = SimpleNamespace()
+            retriever, reranker = SimpleNamespace(keyword_extractor=extractor), SimpleNamespace()
+            try:
+                with H["capture_component"](component, retriever=retriever, reranker=reranker):
+                    raise error
+            except KeyboardInterrupt:
+                pass
+            self.assertFalse(hasattr(extractor, "capture_result"))
+            for target in (retriever, reranker):
+                self.assertFalse(hasattr(target, "on_ranking"))
+                self.assertFalse(hasattr(target, "ranked_candidates"))
+
+    def test_component_needed_uses_all_consumers_and_configured_instance_references(self):
+        record = self.result()
+        record["components"]["patient_retrieval"]["status"] = "failed_incomplete"
+        combined = SimpleNamespace(variant_components={"renamed_combined": self.references["patient_retrieval_guidelines"]})
+        self.assertFalse(H["component_needed"](combined, "guidelines", record))
+        self.assertTrue(H["component_needed"](self.experiment, "guidelines", record))
+        self.assertFalse(H["component_needed"](self.experiment, "unselected", record))
+        record["components"]["patient_retrieval"]["status"] = "not_processed"
+        self.assertTrue(H["component_needed"](combined, "guidelines", record))
+        record["components"]["custom__settings"] = {"status": "not_processed"}
+        custom = SimpleNamespace(variant_components={"new_id": {"custom": "custom__settings"}})
+        self.assertTrue(H["component_needed"](custom, "custom__settings", record))
+        self.assertFalse(H["component_needed"](custom, "custom", record))
+
+    def test_all_existing_prompts_remain_exact_and_component_payloads_are_unchanged(self):
+        record = self.complete(self.result())
+        components = deepcopy(record["components"])
+        s_o = "Subjective: S {literal braces}\nObjective: O"
+        for name, output in record["variants"].items():
+            with self.subTest(variant=name):
+                messages = H["prepare_variant_messages"](
+                    self.experiment, name, s_o, record, output, templates=self.templates)
+                expected = self.templates[name].format(
+                    conditions=s_o, example="Reference SOAP {verbatim}", Key_info="Guideline answer {verbatim}")
+                self.assertEqual(messages, [{"role": "system", "content": "You are a clinical expert."},
+                                            {"role": "user", "content": expected}])
+                self.assertEqual(output["assessment_plan_prompts"], {"system": messages[0]["content"], "user": expected})
+                self.assertEqual(output["status"], "failed_incomplete")
+        self.assertEqual(record["components"], components)
+
+    def test_failed_dependency_blocks_only_its_consumers(self):
+        record = self.complete(self.result())
+        record["components"]["guidelines"]["status"] = "failed_incomplete"
+        for name in self.references:
+            output = record["variants"][name]
+            messages = H["prepare_variant_messages"](self.experiment, name, "S/O", record, output, templates=self.templates)
+            if name in ("guidelines", "patient_retrieval_guidelines"):
+                self.assertIsNone(messages)
+                self.assertEqual(output["error"], {"type": "EvidenceUnavailable", "message": "Required evidence failed: guidelines"})
+                self.assertIsNone(output["assessment_plan_prompts"])
+                self.assertEqual(output["assessment_plans"]["mini"]["status"], "not_processed")
+            else:
+                self.assertIsNotNone(messages)
+
+    def test_prompt_failure_is_local_and_later_variant_can_prepare(self):
+        record = self.complete(self.result())
+        output = record["variants"]["patient_retrieval"]
+        formatter = Mock(return_value={"type": "KeyError", "message": "safe"})
+        templates = {**self.templates, "patient_retrieval": "Missing {unknown}"}
+        self.assertIsNone(H["prepare_variant_messages"](
+            self.experiment, "patient_retrieval", "S/O", record, output, templates=templates, error_metadata=formatter))
+        self.assertEqual(output["error"], {"type": "KeyError", "message": "safe"})
+        formatter.assert_called_once()
+        self.assertIsNotNone(H["prepare_variant_messages"](
+            self.experiment, "llm_only", "S/O", record, record["variants"]["llm_only"], templates=templates))
+
+    def test_missing_published_output_fails_safely_without_mutating_other_slots(self):
+        record = self.complete(self.result())
+        del record["components"]["patient_retrieval"]["outputs"]["example"]
+        output = record["variants"]["patient_retrieval"]
+        untouched = deepcopy(record["variants"]["guidelines"])
+        self.assertIsNone(H["prepare_variant_messages"](
+            self.experiment, "patient_retrieval", "S/O", record, output, templates=self.templates))
+        self.assertEqual(output["error"], {"type": "KeyError", "message": "Variant prompt preparation failed"})
+        self.assertEqual(record["variants"]["guidelines"], untouched)
+
+    def test_new_registry_variant_reuses_existing_component_bindings_without_helper_edits(self):
+        name = "new_combination"
+        definition = replace(H["VARIANTS"]["patient_retrieval_guidelines"], description="Another composition")
+        with patch.dict(H["VARIANTS"], {name: definition}):
+            references = {name: self.references["patient_retrieval_guidelines"]}
+            record = self.complete(self.result(variant_ids=[name], variant_components=references))
+            messages = H["prepare_variant_messages"](
+                SimpleNamespace(variant_components=references), name, "S/O", record,
+                record["variants"][name], templates=self.templates)
+        self.assertEqual(messages[1]["content"], self.templates["patient_retrieval_guidelines"].format(
+            conditions="S/O", example="Reference SOAP {verbatim}", Key_info="Guideline answer {verbatim}"))
+
+
+class SchemaFourExperimentRunTests(TemporaryRootTestCase):
+    read = ExperimentRunTests.read
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.root / "repo"
+        self.input = self.repo / "experiments/input/patient_records_so.jsonl"
+        self.input.parent.mkdir(parents=True)
+        self.input.write_text('{"id": "a"}\n', encoding="utf-8")
+        self.started = H["pacific_time"](datetime(2026, 10, 17, 22, 30, 45, tzinfo=timezone.utc))
+        self.finished = H["pacific_time"](datetime(2026, 10, 17, 22, 48, 12, tzinfo=timezone.utc))
+
+    def plan(self):
+        return {"patient_retrieval": {"component": "patient_retrieval", "settings": {"alpha": 0.5}}}
+
+    def references(self):
+        return {"llm_only": {}, "patient_retrieval": {"patient_retrieval": "patient_retrieval"}}
+
+    def start_four(self, ids=("a", "b")):
+        return H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="schema-four", commit=None,
+            patient_ids=list(ids), model_ids=iter(["mini", "llama"]), variant_ids=iter(self.references()),
+            component_plan=self.plan(), variant_components=self.references())
+
+    def result_four(self, patient_id="a", status=None):
+        return H["new_patient_result"](patient_id, status, ["mini", "llama"], list(self.references()),
+                                       component_plan=self.plan(), variant_components=self.references())
+
+    def test_schema_four_start_stop_preserves_components_partial_models_and_all_remaining_slots(self):
+        run = self.start_four()
+        self.assertEqual(run.metadata["schema_version"], 4)
+        self.assertIsNone(run.metadata["component_definitions"])
+        self.assertIsNone(run.metadata["registry_provenance"])
+        current = self.result_four()
+        component = current["components"]["patient_retrieval"]
+        component["status"] = "failed_incomplete"
+        component["capture"]["retrieved_patient_ids"] = [{"note_id": "PARTIAL"}]
+        current["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="Exact response", predictions=[{"condition": "A", "plan": []}])
+        run.stop(self.finished, current)
+        metadata, records, _ = self.read(run)
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(records[0], {**current, "status": "failed_incomplete"})
+        self.assertEqual(records[1], self.result_four("b", "not_processed"))
+        self.assertEqual(run.unsaved, [])
+
+    def test_schema_four_stop_serialization_fallback_retains_components_and_variant_matrix(self):
+        run = self.start_four()
+        current = self.result_four()
+        current["components"]["patient_retrieval"]["capture"]["retrieved_patient_ids"] = float("nan")
+        run.stop(self.finished, current)
+        self.assertEqual(self.read(run)[1], [self.result_four("a", "failed_incomplete"),
+                                            self.result_four("b", "not_processed")])
+
+    def test_schema_four_start_snapshots_plans_and_finish_keeps_schema(self):
+        plan, references = self.plan(), self.references()
+        run = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.started, branch="copied", commit=None, patient_ids=["a"],
+            model_ids=["mini", "llama"], variant_ids=list(references),
+            component_plan=plan, variant_components=references)
+        plan["patient_retrieval"]["settings"]["alpha"] = 0.1
+        references["patient_retrieval"]["patient_retrieval"] = "changed"
+        self.assertEqual(run.component_plan, self.plan())
+        self.assertEqual(run.variant_components, self.references())
+        run.save_result(self.result_four(status="completed"))
+        self.assertEqual(run.finish(self.finished), "completed")
+        self.assertEqual(self.read(run)[0]["schema_version"], 4)
 
 
 if __name__ == "__main__":

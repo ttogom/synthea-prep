@@ -1,5 +1,7 @@
 """Helpers for the project-owned MED-COPILOT runner."""
 
+from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 import errno
 import hashlib
@@ -9,9 +11,13 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+from textwrap import indent
 from zoneinfo import ZoneInfo
 
 import yaml
+
+from scripts.med_copilot_variants import COMPONENTS, VARIANTS
 
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -33,6 +39,9 @@ MODEL_RESPONSE_STAGES = (
     "keyword_extraction", "guideline_questions", "guideline_query_embedding",
     "guideline_evidence", "assessment_plan",
 )
+# Historical helper callers retain these views; schema 4 resolves the live registry.
+VARIANT_SOURCES = {name: spec.components for name, spec in VARIANTS.items()}
+VARIANT_DESCRIPTIONS = {name: spec.description for name, spec in VARIANTS.items()}
 # Legacy Markdown-parser compatibility: a line naming one generated section,
 # such as "## Assessment", "## Plan", or a standalone label ("Assessment:",
 # "**Plan**") like the reference patient's. Heading level, case, bold, an
@@ -274,8 +283,88 @@ def reference_data_metadata(root, *, corpus_file, artifacts_directory, artifact_
 # Per-patient outputs
 # ---------------------------------------------------------------------
 
-def new_patient_result(patient_id, status=None):
+def new_model_result():
+    """Fresh final-model slot, including explicit unattempted generation status."""
+    return {"status": "not_processed", "error": None, "predictions": None,
+            "assessment_plan_raw": None, "model_responses": [], "evaluation": None}
+
+
+def format_assessment_plans(assessment_plans, model_settings):
+    """Render model-grouped ranked condition/Plan pairs without changing results."""
+    groups = []
+    for model_id, output in assessment_plans.items():
+        config = model_settings[model_id]["config"]
+        model_name = config.get("deployment_name") or config["model"]
+        lines = [f"Model: {model_id} ({config['model_provider']}/{model_name})"]
+        if output["status"] != "completed":
+            lines.append(f"    Generation status: {output['status']}")
+            if output["error"] is not None:
+                error = output["error"]
+                lines.append(indent(f"Error ({error['type']}): {error['message']}", "    "))
+        elif output["predictions"] is None:
+            lines.append("    No valid ranked conditions and plans returned.")
+        else:
+            for rank, pair in enumerate(output["predictions"], 1):
+                condition = pair["condition"] if pair["condition"] is not None else "[unavailable]"
+                lines.append(indent(f"{rank}. Condition: {condition}", "    "))
+                lines.append("        Plan:")
+                if pair["plan"] is None:
+                    lines.append("            [unavailable]")
+                elif not pair["plan"]:
+                    lines.append("            No plan items returned.")
+                else:
+                    for step, action in enumerate(pair["plan"], 1):
+                        lines.append(indent(f"{step}. {action}", "            "))
+                lines.append("")
+        groups.append("\n".join(lines).rstrip("\n"))
+    return "\n\n".join(groups)
+
+
+def new_patient_result(patient_id, status=None, model_ids=None, variant_ids=None, *,
+                       component_plan=None, variant_components=None):
     """Fresh patient outputs; provider response lists are independent per stage/patient."""
+    if component_plan is not None:
+        model_ids, variant_ids = tuple(model_ids), tuple(variant_ids)
+        fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
+            "predictions", "assessment_plan_raw", "evaluation", "assessment_plan_prompts", "model_responses")]
+        return {
+            "id": patient_id, "status": status,
+            "components": {key: {
+                "component": item["component"], "status": "not_processed", "error": None,
+                "settings": deepcopy(item["settings"]), "outputs": {},
+                "capture": {**dict.fromkeys(fields), "model_responses": {
+                    stage: [] for stage in MODEL_RESPONSE_STAGES if stage != "assessment_plan"}},
+            } for key, item in component_plan.items()},
+            "variants": {variant: {
+                "status": "not_processed", "error": None,
+                "components": dict(variant_components[variant]), "assessment_plan_prompts": None,
+                "assessment_plans": {model: new_model_result() for model in model_ids},
+            } for variant in variant_ids},
+        }
+    if variant_ids is not None:
+        model_ids, variant_ids = tuple(model_ids), tuple(variant_ids)
+        sources = {source for variant in variant_ids for source in VARIANT_SOURCES[variant]}
+        fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
+            "predictions", "assessment_plan_raw", "evaluation", "assessment_plan_prompts")]
+        return {
+            "id": patient_id, "status": status, **dict.fromkeys(fields),
+            "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES if stage != "assessment_plan"},
+            "evidence_status": {source: {"status": "not_processed" if source in sources else "not_requested",
+                                         "error": None} for source in ("patient_retrieval", "guidelines")},
+            "variants": {variant: {
+                "status": "not_processed", "error": None,
+                "evidence_sources": list(VARIANT_SOURCES[variant]), "assessment_plan_prompts": None,
+                "assessment_plans": {model: new_model_result() for model in model_ids},
+            } for variant in variant_ids},
+        }
+    if model_ids is not None:
+        fields = [field for field in PATIENT_RESULT_FIELDS if field not in (
+            "predictions", "assessment_plan_raw", "evaluation")]
+        return {"id": patient_id, "status": status, **dict.fromkeys(fields),
+                "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES
+                                    if stage != "assessment_plan"},
+                "assessment_plans": {model_id: new_model_result() for model_id in model_ids}}
+    # Preserve the public helper's historical single-model calling convention.
     return {"id": patient_id, "status": status, **dict.fromkeys(PATIENT_RESULT_FIELDS),
             "model_responses": {stage: [] for stage in MODEL_RESPONSE_STAGES}}
 
@@ -335,6 +424,87 @@ def prepare_patient_output_capture(result, corpus_records, retriever, reranker):
             def save_ranking(ranking, field=field):
                 result[field] = ranked_reference_patients(corpus_records, ranking)
             component.on_ranking = save_ranking
+
+
+@contextmanager
+def capture_component(component, *, error_metadata=None, corpus_records=(), retriever=None,
+                      reranker=None, credential_names=()):
+    """Capture one scheduled execution, restoring mutable hooks on every exit.
+
+    Ordinary failures remain local. Interruptions propagate after recording the
+    partial capture. Only validated published outputs count as completed evidence.
+    """
+    if component["status"] != "not_processed":
+        raise ValueError("Component was already attempted; shared components must be scheduled once")
+    previous = []
+    extractor = getattr(retriever, "keyword_extractor", None)
+    for target, names in ((extractor, ("capture_result",)),
+                          (retriever, ("ranked_candidates", "on_ranking", "alpha")),
+                          (reranker, ("ranked_candidates", "on_ranking"))):
+        if target is not None:
+            for name in names:
+                previous.append((target, name, hasattr(target, name), getattr(target, name, None)))
+    component["status"] = "failed_incomplete"
+    try:
+        prepare_patient_output_capture(component["capture"], corpus_records, retriever, reranker)
+        yield component["capture"]
+        expected = COMPONENTS[component["component"]].outputs
+        if any(name not in component["outputs"] or not isinstance(component["outputs"][name], str)
+               for name in expected):
+            raise ValueError("Component did not publish its declared string outputs")
+        component["status"] = "completed"
+    except Exception as exc:
+        error = error_metadata(exc) if error_metadata else {"type": type(exc).__name__, "message": str(exc)}
+        secrets = {os.environ.get(key) for key in credential_names} - {None, ""}
+        for secret in sorted(secrets, key=len, reverse=True):
+            error["message"] = error["message"].replace(secret, "[REDACTED]")
+        component["error"] = error
+        print(f"{component['component']} failed ({error['type']}): {error['message']}", file=sys.stderr)
+    except BaseException as exc:
+        component["error"] = {"type": type(exc).__name__, "message": "Evidence preparation interrupted"}
+        raise
+    finally:
+        for target, name, existed, value in reversed(previous):
+            if existed:
+                setattr(target, name, value)
+            elif hasattr(target, name):
+                delattr(target, name)
+
+
+def component_needed(experiment, component_id, result):
+    """Skip work only when every selected consumer is already blocked elsewhere."""
+    for references in experiment.variant_components.values():
+        if component_id in references.values() and not any(
+                result["components"][other]["status"] == "failed_incomplete"
+                for other in references.values() if other != component_id):
+            return True
+    return False
+
+
+def prepare_variant_messages(experiment, variant_id, s_o, result, output, *, templates,
+                             error_metadata=None):
+    """Resolve component bindings and save exact final messages, or fail this variant."""
+    try:
+        variant = VARIANTS[variant_id]
+        references = experiment.variant_components[variant_id]
+        unavailable = [name for name, instance in references.items()
+                       if result["components"][instance]["status"] != "completed"]
+        if unavailable:
+            output.update(status="failed_incomplete", error={
+                "type": "EvidenceUnavailable", "message": "Required evidence failed: " + ", ".join(unavailable)})
+            return None
+        values = {field: result["components"][references[component]]["outputs"][name]
+                  for field, (component, name) in variant.bindings.items()}
+        prompt = templates[variant.prompt_key].format(conditions=s_o, **values)
+        messages = [{"role": "system", "content": "You are a clinical expert."},
+                    {"role": "user", "content": prompt}]
+        output["assessment_plan_prompts"] = {"system": messages[0]["content"], "user": prompt}
+        output["status"] = "failed_incomplete"
+        return messages
+    except Exception as exc:
+        output.update(status="failed_incomplete", error=(error_metadata(exc) if error_metadata else
+                      {"type": type(exc).__name__, "message": "Variant prompt preparation failed"}))
+        return None
 
 
 def selected_reference_patient(corpus_records, candidates, reranked):
@@ -474,15 +644,23 @@ def run_status(patient_statuses, stopped=False):
 class ExperimentRun:
     """Own one run directory: run.json plus one results.jsonl line per patient."""
 
-    def __init__(self, run_dir, metadata, patient_ids):
+    def __init__(self, run_dir, metadata, patient_ids, model_ids=None, variant_ids=None,
+                 component_plan=None, variant_components=None):
         self.run_dir = Path(run_dir)
         self.metadata = metadata
         self.unsaved = list(patient_ids)
         self.statuses = []
         self.results_writable = True
+        self.model_ids = None if model_ids is None else tuple(model_ids)
+        self.variant_ids = None if variant_ids is None else tuple(variant_ids)
+        self.component_plan = deepcopy(component_plan)
+        self.variant_components = deepcopy(variant_components)
 
     @classmethod
-    def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids):
+    def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids,
+              model_ids=None, variant_ids=None, component_plan=None, variant_components=None):
+        model_ids = None if model_ids is None else tuple(model_ids)
+        variant_ids = None if variant_ids is None else tuple(variant_ids)
         run_dir = create_run_dir(output_root, make_run_name(started_at, input_path, branch))
         metadata = {
             "run_name": run_dir.name,
@@ -494,8 +672,14 @@ class ExperimentRun:
             "git_commit": commit,
             "reference_data": None,
         }
+        if model_ids is not None:
+            metadata.update(schema_version=2, assessment_plan_models=None)
+        if variant_ids is not None:
+            metadata.update(schema_version=3, variant_definitions=None, prompt_provenance=None)
+        if component_plan is not None:
+            metadata.update(schema_version=4, component_definitions=None, registry_provenance=None)
         (run_dir / RESULTS_FILE).touch(exist_ok=False)
-        run = cls(run_dir, metadata, patient_ids)
+        run = cls(run_dir, metadata, patient_ids, model_ids, variant_ids, component_plan, variant_components)
         run.update()
         return run
 
@@ -538,7 +722,9 @@ class ExperimentRun:
         """
         if current is not None and current["id"] in self.unsaved and self.results_writable:
             current = {**current, "status": "failed_incomplete"}
-            for record in (current, new_patient_result(current["id"], "failed_incomplete")):
+            for record in (current, new_patient_result(
+                    current["id"], "failed_incomplete", self.model_ids, self.variant_ids,
+                    component_plan=self.component_plan, variant_components=self.variant_components)):
                 try:
                     self.save_result(record)
                     break
@@ -549,7 +735,8 @@ class ExperimentRun:
             if not self.results_writable:
                 break
             try:
-                self.save_result(new_patient_result(patient_id, "not_processed"))
+                self.save_result(new_patient_result(patient_id, "not_processed", self.model_ids, self.variant_ids,
+                                 component_plan=self.component_plan, variant_components=self.variant_components))
             except Exception:
                 break
         try:

@@ -28,6 +28,10 @@ Generate a concise, clinically useful response that summarizes the most relevant
 ---Data tables---
 {context_data}
 
+---Output type---
+Return the entire answer as a single text string, using the Markdown formatting below.
+Do not wrap it in a JSON object, array, or enclosing quotation marks, and do not return null.
+
 ---Formatting Rules---
 - Use **markdown sections** with short headers (e.g., "Scorpion Sting vs Obesity").
 - Present information in **bullet points or short sentences** to highlight discriminating features.
