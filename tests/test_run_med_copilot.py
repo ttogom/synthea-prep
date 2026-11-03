@@ -49,6 +49,7 @@ SCORING = ROOT / "scripts" / "med_copilot_scoring.py"
 MODELS = ROOT / "scripts" / "med_copilot_models.py"
 CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
+RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
 PIPELINE_DEFAULTS = ast.literal_eval(next(node.value for node in ast.parse(CONFIG.read_text()).body
     if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "PIPELINE_DEFAULTS" for t in node.targets)))
 EXPERIMENT_CONFIG = ROOT / "experiments/configs/experiment.yaml"
@@ -76,7 +77,7 @@ RESULT_FIELDS = [
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
-    "reference_data", "schema_version", "assessment_plan_models", "variant_definitions", "prompt_provenance", "component_definitions", "registry_provenance", "experiment", "evaluation",
+    "reference_data", "errors", "schema_version", "assessment_plan_models", "variant_definitions", "prompt_provenance", "component_definitions", "registry_provenance", "experiment", "evaluation",
 ]
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 FINAL_RESPONSE_FORMAT = {
@@ -362,6 +363,7 @@ class PipelineFixture:
         (self.script.parent / CONFIG.name).write_bytes(CONFIG.read_bytes())
         (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
+        (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
         self.model_config = root / "experiments/configs/condition_plan_models.yaml"
         self.model_config.parent.mkdir()
@@ -712,7 +714,8 @@ class PipelineFixture:
                 # caller has already imported the repository's package.
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
                              "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
-                             "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants", "scripts"]:
+                             "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
+                             "scripts.med_copilot_run_file", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
                     sys.modules.pop("scripts.med_copilot_scoring", None)
@@ -722,7 +725,46 @@ class PipelineFixture:
             os.chdir(old_cwd)
 
 
-class RunMedCopilotTests(unittest.TestCase):
+class FailedRunAssertions:
+    def assert_fatal_shared_failure(self, stage, exception_type):
+        """A shared-resource failure stops the run before any patient, saving one run-level error."""
+        [run_dir] = sorted(self.fixture.output.iterdir())
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertLessEqual(datetime.fromisoformat(run["started_at"]),
+                             datetime.fromisoformat(run["finished_at"]))
+        [error] = run["errors"]
+        self.assertEqual((error["patient_id"], error["stage"], error["exception_type"]),
+                         (None, stage, exception_type.__name__))
+        lines = (run_dir / "results.jsonl").read_text(encoding="utf-8").split("\n")[:-1]
+        self.assertEqual({json.loads(line)["status"] for line in lines}, {"not_processed"})
+        return run, error
+
+    def assert_run_pending(self):
+        """Before confirmation only a running run.json exists, with no errors or results."""
+        [run_dir] = sorted(self.fixture.output.iterdir())
+        self.assertEqual([path.name for path in run_dir.iterdir()], ["run.json"])
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual((run["status"], run["finished_at"], run["errors"]), ("running", None, []))
+
+    def assert_failed_before_confirmation(self, stage=None, exception_type=None):
+        """One failed run holding only run.json and its error; removed for the next subtest."""
+        output = self.fixture.output
+        [run_dir] = sorted(output.iterdir()) if output.exists() else [None]
+        self.assertEqual([path.name for path in run_dir.iterdir()], ["run.json"])
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertLessEqual(datetime.fromisoformat(run["started_at"]),
+                             datetime.fromisoformat(run["finished_at"]))
+        [error] = run["errors"]
+        self.assertIn(error["stage"], (stage,) if stage else ("startup", "input_loading"))
+        if exception_type is not None:
+            self.assertEqual(error["exception_type"], exception_type)
+        shutil.rmtree(output)
+        return run_dir, run, error
+
+
+class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -1027,16 +1069,19 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertIn(".env in the repository root", fixture.stderr.getvalue())
                 self.assertNotIn("Traceback", fixture.stderr.getvalue())
                 fixture.confirm_input.assert_not_called()
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertFalse(any(event[0] == "client" for event in fixture.events))
                 self.assertEqual(fixture.calls, [])
 
     def test_all_imports_are_in_the_header_before_function_or_class_definitions(self):
-        for source in (RUNNER, HELPERS, RETRIEVAL, STARTUP):
+        for source in (RUNNER, HELPERS, RETRIEVAL, STARTUP, RUN_FILE_MODULE):
             with self.subTest(file=source.name):
                 tree = ast.parse(source.read_text(encoding="utf-8"))
                 imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
-                top_level_imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+                # A top-level try may guard header imports so startup failures are saved.
+                header = [child for node in tree.body
+                          for child in (node.body if isinstance(node, ast.Try) else [node])]
+                top_level_imports = [node for node in header if isinstance(node, (ast.Import, ast.ImportFrom))]
                 self.assertEqual(set(imports), set(top_level_imports))
                 first_definition = min(
                     node.lineno for node in tree.body
@@ -1120,7 +1165,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.retrieval_calls, [])
                 self.assertEqual(fixture.graph_calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation()
 
     def test_dependency_startup_failures_stop_before_processing_input(self):
         fixture_root = self.fixture.root
@@ -1140,7 +1185,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.retrieval_calls, [])
                 self.assertEqual(fixture.graph_calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(sys.path, original_path)
 
     def test_full_main_preserves_pipeline_contract_and_saves_evidence(self):
@@ -1272,7 +1317,7 @@ class RunMedCopilotTests(unittest.TestCase):
                             self.assertRaisesRegex(RuntimeError, "Git"):
                         runner["main"]()
                     self.assertEqual(Path.cwd(), fixture.caller)
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.retrieval_calls, [])
 
@@ -1290,7 +1335,13 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assertEqual(caught.exception.filename, str(existing))
         self.assertIn("already exists", str(caught.exception))
-        self.assertEqual(self.run_dirs(), [existing])
+        # The failure stays in the provisional run; the existing run is untouched.
+        [provisional] = [path for path in self.run_dirs() if path != existing]
+        self.assertTrue(provisional.name.startswith("2026-10-17_153045PDT__starting-"))
+        run = json.loads((provisional / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertEqual([(error["stage"], error["exception_type"]) for error in run["errors"]],
+                         [("startup", "FileExistsError")])
         self.assertEqual([path.name for path in existing.iterdir()], ["run.json"])
         self.assertEqual((existing / "run.json").read_text(encoding="utf-8"), "PREVIOUS_RUN")
         self.assertEqual(fixture.calls, [])
@@ -1557,7 +1608,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_run_metadata(run_dir, run, "completed", reference_data=(
             self.expected_reference_data(guidelines=selected)))
 
-    def test_missing_guideline_table_blocks_dependent_variants_and_restores_cwd(self):
+    def test_missing_guideline_table_stops_the_run_and_restores_cwd(self):
         fixture_root = self.fixture.root
         for missing in GUIDELINE_TABLES:
             with self.subTest(missing=missing):
@@ -1572,18 +1623,16 @@ class RunMedCopilotTests(unittest.TestCase):
                 state = self.real_guideline_search()
                 runner = self.load_runner()
                 with fixture.runtime(), patch("pandas.read_parquet", side_effect=state.read_parquet):
-                    self.assertEqual(runner["main"](), "completed_with_errors")
+                    with self.assertRaises(FileNotFoundError):
+                        runner["main"]()
                     self.assertEqual(Path.cwd(), fixture.caller)
-                record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-                self.assertIn(str(missing_path), schema3_view(record)["evidence_status"]["guidelines"]["error"]["message"])
-                self.assertEqual(schema3_view(record)["evidence_status"]["patient_retrieval"]["status"], "completed")
-                self.assertEqual(record["variants"]["patient_retrieval_guidelines"]["error"]["type"], "EvidenceUnavailable")
+                _, error = self.assert_fatal_shared_failure("retrieval_initialization", FileNotFoundError)
+                self.assertIn(str(missing_path), error["message"])
                 self.assertEqual(fixture.graph_calls, [])
                 self.assertEqual(state.reads, [])
                 self.assertEqual(state.api_calls, [])
                 self.assertEqual(fixture.calls, [])
-                self.assertEqual(len(fixture.keyword_calls), 1)
-                self.assertEqual(record["status"], "failed_incomplete")
+                self.assertEqual(fixture.keyword_calls, [])
 
     def test_real_guideline_api_failure_fails_patient_and_stops_its_final_generation(self):
         fixture = self.fixture
@@ -1606,18 +1655,18 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_run_metadata(run_dir, run, "completed_with_errors")
         self.assertIn("mock stage failure", fixture.stderr.getvalue())
 
-    def test_missing_guideline_output_directory_blocks_without_search_fallback(self):
+    def test_missing_guideline_output_directory_stops_the_run_without_search_fallback(self):
         fixture = self.fixture
         output = fixture.guidelines / "output"
         shutil.rmtree(output)
         self.write_guideline_tables(fixture.caller, prefix="WRONG_CALLER")
         runner = self.load_runner()
         with fixture.runtime():
-            self.assertEqual(runner["main"](), "completed_with_errors")
+            with self.assertRaises(FileNotFoundError):
+                runner["main"]()
             self.assertEqual(Path.cwd(), fixture.caller)
-        record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-        self.assertIn(str(output), schema3_view(record)["evidence_status"]["guidelines"]["error"]["message"])
-        self.assertEqual(record["status"], "failed_incomplete")
+        _, error = self.assert_fatal_shared_failure("retrieval_initialization", FileNotFoundError)
+        self.assertIn(str(output), error["message"])
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual(fixture.calls, [])
 
@@ -1724,7 +1773,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual((fixture.upstream / "index.faiss").read_bytes(), b"LEGACY_SOA")
         self.assertEqual((fixture.upstream / "embeddings.npy").read_bytes(), b"LEGACY_SOA")
 
-    def test_real_so_cache_write_and_reranker_failures_block_dependent_variants(self):
+    def test_real_so_cache_write_failure_stops_the_run_and_reranker_failure_fails_the_patient(self):
         fixture_root = self.fixture.root
         for stage in ("cache_write", "reranking"):
             with self.subTest(stage=stage):
@@ -1734,12 +1783,11 @@ class RunMedCopilotTests(unittest.TestCase):
                 runner = self.load_runner()
                 if stage == "cache_write":
                     with fixture.runtime(), patch.object(state.module.faiss, "write_index",
-                                                         side_effect=OSError("cache write failed")):
-                        self.assertEqual(runner["main"](), "completed_with_errors")
-                    record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-                    self.assertEqual(schema3_view(record)["evidence_status"]["patient_retrieval"]["error"],
-                                     {"type": "OSError", "message": "cache write failed"})
-                    self.assertEqual(record["status"], "failed_incomplete")
+                                                         side_effect=OSError("cache write failed")), \
+                            self.assertRaises(OSError):
+                        runner["main"]()
+                    _, error = self.assert_fatal_shared_failure("retrieval_initialization", OSError)
+                    self.assertEqual(error["message"], "cache write failed")
                     self.assertEqual(fixture.calls, [])
                 else:
                     ranker = runner["CrossEncoderReranker"]()
@@ -2032,7 +2080,7 @@ class RunMedCopilotTests(unittest.TestCase):
                                             **dict.fromkeys(unavailable[stage])}])
                 self.assert_run_metadata(run_dir, run, "completed_with_errors")
 
-    def test_shared_retrieval_initialization_failure_blocks_all_dependent_patients(self):
+    def test_shared_retrieval_initialization_failure_stops_the_run_before_any_patient(self):
         fixture_root = self.fixture.root
         for stage in ["retriever_init", "reranker_init"]:
             with self.subTest(stage=stage):
@@ -2042,17 +2090,17 @@ class RunMedCopilotTests(unittest.TestCase):
                 fixture.failure = stage
                 runner = self.load_runner()
                 with fixture.runtime():
-                    self.assertEqual(runner["main"](), "completed_with_errors")
+                    with self.assertRaises(RuntimeError) as caught:
+                        runner["main"]()
+                    self.assertIs(caught.exception, fixture.error)
                     self.assertEqual(Path.cwd(), fixture.caller)
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.graph_calls, [])
                 self.assertEqual(len([call for call in fixture.retrieval_calls if call[0] == "init"]), 1)
-                records = [json.loads(line) for line in (self.run_dirs()[0] / "results.jsonl").read_text().splitlines()]
-                self.assertEqual([(row["id"], row["status"]) for row in records],
-                                 [("P1", "failed_incomplete"), ("P2", "failed_incomplete")])
-                for row in records:
-                    self.assertEqual(schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
-                    self.assertEqual(row["variants"]["patient_retrieval_guidelines"]["error"]["type"], "EvidenceUnavailable")
+                self.assert_fatal_shared_failure("retrieval_initialization", RuntimeError)
+                _, _, results = self.read_run()
+                self.assertEqual([(row["id"], row["status"]) for row in results],
+                                 [("P1", "not_processed"), ("P2", "not_processed")])
 
     def test_malformed_key_questions_are_null_and_raw_reply_still_queries_guidelines(self):
         fixture_root = self.fixture.root
@@ -2287,6 +2335,271 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assert_outputs()
 
     # ----------------------------------------------------------------
+    # Error details saved in run.json
+    # ----------------------------------------------------------------
+
+    def saved_errors(self):
+        [run_dir] = self.run_dirs()
+        return json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["errors"]
+
+    def assert_error(self, entry, patient_id, stage, exception_type, message):
+        self.assertEqual(list(entry), ["timestamp", "patient_id", "stage", "exception_type",
+                                       "message", "traceback"])
+        self.assertEqual((entry["patient_id"], entry["stage"], entry["exception_type"], entry["message"]),
+                         (patient_id, stage, exception_type, message))
+        self.assertIn(f"{exception_type}: {message}", entry["traceback"])
+        datetime.fromisoformat(entry["timestamp"])
+
+    def test_completed_run_saves_an_empty_errors_array(self):
+        runner = self.load_runner()
+        with self.fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        self.assertEqual(self.saved_errors(), [])
+
+    def test_each_patient_stage_failure_is_saved_once_with_its_stage(self):
+        fixture_root = self.fixture.root
+        for failure, stage in [("retrieval", "patient_retrieval"), ("keywords", "keyword_extraction"),
+                               ("reranking", "reranking"), ("questions", "guideline_question_generation"),
+                               ("graphrag", "guideline_retrieval"), ("final", "final_generation")]:
+            with self.subTest(failure=failure):
+                self.fixture = PipelineFixture(fixture_root / failure)
+                self.fixture.failure = failure
+                runner = self.load_runner()
+                with self.fixture.runtime():
+                    self.assertEqual(runner["main"](), "completed_with_errors")
+                [entry] = self.saved_errors()
+                self.assert_error(entry, self.fixture.patient_id, stage, "RuntimeError", "mock stage failure")
+
+    def test_mixed_batch_saves_only_the_failed_patient_before_continuing(self):
+        fixture = self.fixture
+        records = self.write_marked_patients()
+        fixture.failure = "graphrag"
+        fixture.failure_marker = "MARKER_BRAVO"
+        observed = []
+        reply = fixture.reply
+
+        def observing_reply(stage, text):
+            if stage == "questions" and "MARKER_CHARLIE" in text:
+                observed.extend(self.saved_errors())
+            return reply(stage, text)
+
+        fixture.reply = observing_reply
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        errors = self.saved_errors()
+        self.assertEqual(observed, errors)
+        [entry] = errors
+        self.assert_error(entry, records[1]["id"], "guideline_retrieval", "RuntimeError", "mock stage failure")
+
+    def test_chained_exception_cause_is_saved_in_the_traceback(self):
+        fixture = self.fixture
+        try:
+            try:
+                raise KeyError("UNDERLYING_CAUSE")
+            except KeyError as cause:
+                raise ValueError("wrapped failure") from cause
+        except ValueError as exc:
+            fixture.error = exc
+        fixture.failure = "final"
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        [entry] = self.saved_errors()
+        self.assert_error(entry, fixture.patient_id, "final_generation", "ValueError", "wrapped failure")
+        self.assertIn("KeyError: 'UNDERLYING_CAUSE'", entry["traceback"])
+        self.assertIn("direct cause", entry["traceback"])
+
+    def test_credentials_are_redacted_from_saved_errors(self):
+        fixture = self.fixture
+        fixture.environment = {"OPENAI_API_KEY": "sk-openai-SECRET", "GRAPHRAG_API_KEY": "sk-graph-SECRET"}
+        fixture.error = RuntimeError("rejected sk-openai-SECRET and sk-graph-SECRET")
+        fixture.failure = "questions"
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        [entry] = self.saved_errors()
+        self.assertEqual(entry["message"], "rejected [REDACTED] and [REDACTED]")
+        self.assertNotIn("SECRET", (self.run_dirs()[0] / "run.json").read_text(encoding="utf-8"))
+
+    def test_shared_resource_failures_stop_the_run_with_one_saved_error(self):
+        fixture_root = self.fixture.root
+        cases = [("retriever_init", "retrieval_initialization"), ("reranker_init", "retrieval_initialization"),
+                 ("preload", "startup"), ("corpus", "corpus_loading"), ("guidelines", "retrieval_initialization")]
+        for failure, stage in cases:
+            with self.subTest(failure=failure):
+                self.fixture = fixture = PipelineFixture(fixture_root / failure)
+                fixture.write_patients([{"id": "P1", **fixture.patient}, {"id": "P2", **fixture.patient}])
+                if failure == "guidelines":
+                    (fixture.guidelines / "output/entities.parquet").unlink()
+                elif failure != "corpus":
+                    fixture.failure = failure
+                runner = self.load_runner()
+                if failure == "corpus":
+                    fixture.update_experiment(patient_corpus=str(fixture.root / "missing.json"))
+                expected = RuntimeError if failure not in ("corpus", "guidelines") else FileNotFoundError
+                with fixture.runtime(), self.assertRaises(expected):
+                    runner["main"]()
+                self.assert_fatal_shared_failure(stage, expected)
+                self.assertEqual(fixture.calls, [])
+
+    def test_interruption_is_saved_with_its_patient_and_marks_the_run_failed(self):
+        fixture = self.fixture
+        records = self.write_marked_patients()
+        fixture.failure = "final"
+        fixture.failure_marker = "MARKER_BRAVO"
+        fixture.error = KeyboardInterrupt()
+        runner = self.load_runner()
+        with fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runner["main"]()
+        _, run, _ = self.read_run()
+        self.assertEqual(run["status"], "failed_incomplete")
+        self.assertIsNotNone(run["finished_at"])
+        [entry] = run["errors"]
+        self.assertEqual((entry["patient_id"], entry["stage"], entry["exception_type"]),
+                         (records[1]["id"], "final_generation", "KeyboardInterrupt"))
+
+    def test_results_write_failure_is_saved_as_a_fatal_output_error(self):
+        fixture = self.fixture
+        records = self.write_marked_patients()
+        original_open = Path.open
+        appends = []
+
+        def failing_open(path, mode="r", *args, **kwargs):
+            if path.name == "results.jsonl" and mode == "a":
+                appends.append(path)
+                if len(appends) == 2:
+                    raise OSError(errno.ENOSPC, "No space left on device", str(path))
+            return original_open(path, mode, *args, **kwargs)
+
+        runner = self.load_runner()
+        with fixture.runtime(), patch.object(Path, "open", failing_open), self.assertRaises(OSError):
+            runner["main"]()
+        _, run, _ = self.read_run()
+        self.assertEqual(run["status"], "failed_incomplete")
+        [entry] = run["errors"]
+        self.assertEqual((entry["patient_id"], entry["stage"], entry["exception_type"]),
+                         (records[1]["id"], "output_saving", "OSError"))
+        self.assertIn("No space left on device", entry["message"])
+
+    def test_report_failure_is_saved_without_changing_the_run_status(self):
+        fixture = self.fixture
+        fixture.modules["scripts.collate_med_copilot_results"].generate_report = Mock(
+            side_effect=RuntimeError("report template broken"))
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "report_error")
+        _, run, _ = self.read_run()
+        self.assertEqual(run["status"], "completed")
+        [entry] = run["errors"]
+        self.assert_error(entry, None, "output_saving", "RuntimeError", "report template broken")
+
+    def test_metadata_write_failure_reports_both_failures_and_stops_unsuccessfully(self):
+        fixture = self.fixture
+        records = self.write_marked_patients()
+        fixture.failure = "graphrag"
+        fixture.failure_marker = "MARKER_BRAVO"
+        original_replace = os.replace
+
+        def failing_replace(source, destination):
+            # Fail every run.json write that would add an error entry.
+            if Path(destination).name == "run.json" and json.loads(Path(source).read_text())["errors"]:
+                raise OSError("run.json disk failure")
+            return original_replace(source, destination)
+
+        runner = self.load_runner()
+        with fixture.runtime(), patch.object(os, "replace", failing_replace), \
+                self.assertRaises(Exception) as caught:
+            runner["main"]()
+        # The runner loads its own helper module, so compare the class by name.
+        self.assertEqual(type(caught.exception).__name__, "RunMetadataError")
+        stderr = fixture.stderr.getvalue()
+        self.assertIn("RuntimeError: mock stage failure", stderr)
+        self.assertIn("OSError: run.json disk failure", stderr)
+        self.assertIn("Could not mark run.json as stopped", stderr)
+        # The last readable run.json predates the failure; results stay intact.
+        [run_dir] = self.run_dirs()
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual((run["status"], run["errors"]), ("running", []))
+        text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
+        results = [json.loads(line) for line in text.split("\n")[:-1]]
+        self.assertEqual([(row["id"], row["status"]) for row in results], [
+            (records[0]["id"], "completed"), (records[1]["id"], "failed_incomplete"),
+            (records[2]["id"], "not_processed")])
+
+    def test_entry_point_exits_nonzero_after_a_saved_fatal_error(self):
+        fixture = self.fixture
+        fixture.failure = "final"
+        fixture.error = KeyboardInterrupt()
+        with fixture.runtime(), self.assertRaises(KeyboardInterrupt):
+            runpy.run_path(str(fixture.script), run_name="__main__")
+        [entry] = self.saved_errors()
+        self.assertEqual(entry["exception_type"], "KeyboardInterrupt")
+
+    def test_import_failure_in_a_launched_script_is_saved_as_a_failed_startup(self):
+        fixture = self.fixture
+        fixture.failure = "upstream_import"
+        with fixture.runtime(), self.assertRaises(RuntimeError):
+            runpy.run_path(str(fixture.script), run_name="__main__")
+        run_dir, run, error = self.assert_failed_before_confirmation("startup", "RuntimeError")
+        # The config was never loaded, so the run keeps its provisional name.
+        self.assertRegex(run_dir.name, r"^\d{4}-\d{2}-\d{2}_\d{6}P[DS]T__starting-")
+        self.assertEqual(error["message"], "mock stage failure")
+        self.assertIn("RuntimeError: mock stage failure", error["traceback"])
+        self.assertEqual(fixture.calls, [])
+
+    def test_configuration_failure_is_saved_and_the_entry_point_exits_nonzero(self):
+        fixture = self.fixture
+        fixture.update_experiment(temperature=-1)
+        with fixture.runtime(), self.assertRaises(SystemExit) as caught:
+            runpy.run_path(str(fixture.script), run_name="__main__")
+        self.assertEqual(caught.exception.code, 1)
+        run_dir, _, error = self.assert_failed_before_confirmation("startup", "ValueError")
+        self.assertIn("__starting-", run_dir.name)
+        self.assertIn("temperature", error["message"])
+        fixture.confirm_input.assert_not_called()
+
+    def test_malformed_input_is_saved_under_input_loading_in_the_named_run(self):
+        fixture = self.fixture
+        fixture.input_path.write_text('{"id": "A", "subjective": "S", "objective": "O"}\nnot json\n',
+                                      encoding="utf-8")
+        runner = self.load_runner()
+        with fixture.runtime(), self.assertRaises(ValueError):
+            runner["main"]()
+        run_dir, run, error = self.assert_failed_before_confirmation("input_loading", "ValueError")
+        self.assertTrue(run_dir.name.endswith(f"__{Path(INPUT_NAME).stem}__{SAFE_BRANCH}"))
+        self.assertEqual((run["branch"], run["git_commit"]), (fixture.branch, fixture.commit))
+        self.assertIsNone(error["patient_id"])
+        fixture.confirm_input.assert_not_called()
+        self.assertEqual(fixture.calls, [])
+
+    def test_cancellation_is_not_an_error_and_removes_only_the_cancelled_run(self):
+        fixture = self.fixture
+        fixture.confirm_input.return_value = "n"
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "cancelled")
+        self.assertFalse(fixture.output.exists())
+        previous = fixture.output / "previous-run"
+        previous.mkdir(parents=True)
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "cancelled")
+        self.assertEqual(self.run_dirs(), [previous])
+        self.assertIn("Run cancelled. No experiment output was created.", fixture.stdout.getvalue())
+
+    def test_help_exit_leaves_no_run_but_an_invalid_flag_is_saved(self):
+        fixture = self.fixture
+        runner = self.load_runner()
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {
+                "parse_scoring_args": Mock(side_effect=SystemExit(0))}), self.assertRaises(SystemExit):
+            runner["main"]()
+        self.assertFalse(fixture.output.exists())
+        with fixture.runtime(), patch.dict(runner["main"].__globals__, {
+                "parse_scoring_args": Mock(side_effect=SystemExit(2))}), self.assertRaises(SystemExit):
+            runner["main"]()
+        self.assert_failed_before_confirmation("startup", "SystemExit")
+
+    # ----------------------------------------------------------------
     # Prepared input
     # ----------------------------------------------------------------
 
@@ -2435,7 +2748,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertEqual(fixture.retrieval_calls, [])
                     self.assertEqual(fixture.rerank_calls, [])
                     self.assertEqual(fixture.graph_calls, [])
-                    self.assertFalse(fixture.output.exists())
+                    self.assert_failed_before_confirmation("input_loading")
                     self.assertEqual(fixture.input_path.read_text(encoding="utf-8"), contents)
 
     def test_empty_jsonl_stops_before_pipeline_or_output(self):
@@ -2453,7 +2766,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertIn(str(fixture.input_path), str(caught.exception))
                 self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
                 self.assertEqual(fixture.calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation("input_loading")
 
     def test_missing_jsonl_stops_without_falling_back_to_legacy_inputs(self):
         fixture = self.fixture
@@ -2473,7 +2786,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(caught.exception.filename, str(fixture.input_path))
         self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
         self.assertEqual(fixture.calls, [])
-        self.assertFalse(fixture.output.exists())
+        self.assert_failed_before_confirmation("input_loading")
         self.assertEqual(list((fixture.root / "data_run_med_copilot").rglob("*")),
                          [legacy_input.parent, legacy_input])
 
@@ -2503,7 +2816,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual([event[0] for event in fixture.events], ["preload", "import"])
                 self.assertEqual(fixture.keyword_calls, [])
                 self.assertEqual(fixture.calls, [])
-                self.assertFalse(fixture.output.exists())
+                self.assert_run_pending()
                 loaded_patients.append(record)
             return record
 
@@ -2727,24 +3040,22 @@ class RunMedCopilotTests(unittest.TestCase):
         runner = self.load_runner()
         fixture.update_experiment(patient_corpus=str(corpus_path))
         with fixture.runtime():
-            self.assertEqual(runner["main"](), "completed_with_errors")
+            with self.assertRaises(exception_type):
+                runner["main"]()
             self.assertEqual(Path.cwd(), fixture.caller)
         self.assertEqual(len(fixture.calls), 0)
         self.assertEqual(fixture.retrieval_calls, [])
         self.assertEqual(fixture.rerank_calls, [])
         self.assertEqual(fixture.graph_calls, [])
-        record = json.loads((self.run_dirs()[0] / "results.jsonl").read_text())
-        error = schema3_view(record)["evidence_status"]["patient_retrieval"]["error"]
-        self.assertEqual(error["type"], exception_type.__name__)
-        self.assertEqual(record["status"], "failed_incomplete")
+        _, error = self.assert_fatal_shared_failure("corpus_loading", exception_type)
         return error
 
-    def test_missing_configured_corpus_blocks_pipeline_without_fallback(self):
+    def test_missing_configured_corpus_stops_the_run_without_fallback(self):
         corpus_path = self.fixture.root / "missing-patients.json"
         error = self.assert_corpus_load_failure(corpus_path, FileNotFoundError)
         self.assertIn(str(corpus_path), error["message"])
 
-    def test_invalid_configured_corpus_blocks_pipeline_without_fallback(self):
+    def test_invalid_configured_corpus_stops_the_run_without_fallback(self):
         corpus_path = self.fixture.root / "invalid-patients.json"
         corpus_path.write_text("not valid JSON", encoding="utf-8")
         error = self.assert_corpus_load_failure(corpus_path, json.JSONDecodeError)
@@ -3515,7 +3826,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(fixture.graph_calls, [])
 
 
-class ScoringIntegrationTests(unittest.TestCase):
+class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
     """Real scoring wrapper, parser and labels; only metric/model runtimes are mocked."""
 
     load_runner = RunMedCopilotTests.load_runner
@@ -3614,7 +3925,7 @@ class ScoringIntegrationTests(unittest.TestCase):
         self.assertEqual(fixture.retrieval_calls, [])
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual(fixture.scoring_calls, [])
-        self.assertFalse(fixture.output.exists())
+        self.assert_failed_before_confirmation()
 
     def test_real_wrapper_scores_each_saved_field_against_sidecar_and_never_leaks_labels(self):
         fixture = self.fixture
@@ -4070,7 +4381,7 @@ class ScoringIntegrationTests(unittest.TestCase):
 
 
 
-class MultiModelIntegrationTests(unittest.TestCase):
+class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
     """Check combined-variant compatibility with real config/parsing/scoring orchestration."""
 
     load_runner = RunMedCopilotTests.load_runner
@@ -4135,7 +4446,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
         load_patients = Mock(wraps=runner["load_patient_records"])
         def confirm(prompt):
             self.assertEqual(prompt, "Is this configuration correct? Start the run? [y/N]: ")
-            self.assertFalse(fixture.output.exists())
+            self.assert_run_pending()
             self.assertFalse(any(event[0] == "client" for event in fixture.events))
             self.assertEqual(fixture.calls, [])
             self.assertEqual(fixture.retrieval_calls, [])
@@ -4197,14 +4508,14 @@ class MultiModelIntegrationTests(unittest.TestCase):
         for expected in ("Experiment configuration check failed", "Unknown model alias: gpt_typo",
                          "experiment.yaml", "condition_plan_models.yaml", "Available aliases",
                          "OPENAI_API_KEY", "GROQ_API_KEY", "GRAPHRAG_API_KEY", ".env in the repository root",
-                         "Run not started."):
+                         "Run stopped; details saved in"):
             self.assertIn(expected, message)
         self.assertNotIn("Traceback", message)
         fixture.confirm_input.assert_not_called()
         self.assertEqual(fixture.model_configs, [])
         self.assertEqual(fixture.calls, [])
         self.assertFalse(any(event[0] == "client" for event in fixture.events))
-        self.assertFalse(fixture.output.exists())
+        self.assert_failed_before_confirmation("startup", "ValueError")
 
     def test_shared_graph_key_is_required_before_confirmation_and_not_exposed(self):
         fixture = self.fixture
@@ -4219,7 +4530,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
         fixture.confirm_input.assert_not_called()
         self.assertEqual(fixture.model_configs, [])
         self.assertEqual(fixture.calls, [])
-        self.assertFalse(fixture.output.exists())
+        self.assert_failed_before_confirmation()
 
     def test_keyless_local_model_is_confirmed_and_runs_with_shared_credentials(self):
         self.experiment["selected_models"] = ["local"]
@@ -4306,7 +4617,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 self.fixture.confirm_input.assert_not_called()
                 self.assertEqual(self.fixture.model_configs, [])
                 self.assertEqual(self.fixture.calls, [])
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertFalse(any(event[0] == "client" for event in self.fixture.events))
 
     def test_patient_limit_does_not_hide_invalid_input_or_labels_later_in_file(self):
@@ -4335,7 +4646,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 runner = self.load_runner()
                 with fixture.runtime(), self.assertRaises(ValueError):
                     runner["main"]()
-                self.assertFalse(fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(fixture.calls, [])
                 self.assertEqual(fixture.keyword_calls, [])
                 self.assertEqual(fixture.graph_calls, [])
@@ -4376,7 +4687,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, 1)
         self.fixture.confirm_input.assert_not_called()
         self.assertIn("Unknown model alias: typo", self.fixture.stderr.getvalue())
-        self.assertFalse(self.fixture.output.exists())
+        self.assert_failed_before_confirmation()
         self.assertEqual(self.fixture.calls, [])
 
     def test_experiment_settings_are_passed_to_all_models_and_saved_with_both_fingerprints(self):
@@ -4459,7 +4770,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as error:
                     runner["main"]([option, "override"])
                 self.assertEqual(error.exception.code, 2)
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.fixture.confirm_input.assert_not_called()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.model_configs, [])
@@ -4475,7 +4786,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 with self.fixture.runtime():
                     self.assertEqual(runner["main"](), "configuration_error")
                 self.fixture.confirm_input.assert_not_called()
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(self.fixture.model_configs, [])
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.retrieval_calls, [])
@@ -4491,7 +4802,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 with self.fixture.runtime():
                     self.assertEqual(runner["main"](), "configuration_error")
                 self.fixture.confirm_input.assert_not_called()
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(self.fixture.model_configs, [])
                 self.assertEqual(self.fixture.calls, [])
 
@@ -4506,7 +4817,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                     self.assertEqual(runner["main"](), "configuration_error")
                 self.assertIn("experiment.yaml", self.fixture.stderr.getvalue())
                 self.fixture.confirm_input.assert_not_called()
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.model_configs, [])
 
@@ -4553,7 +4864,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "configuration_error")
             self.assertIn("GROQ_API_KEY", fixture.stderr.getvalue())
             fixture.confirm_input.assert_not_called()
-            self.assertFalse(fixture.output.exists())
+            self.assert_failed_before_confirmation()
             self.assertEqual(fixture.calls, [])
             self.assertEqual(fixture.retrieval_calls, [])
             self.experiment["selected_models"] = ["gpt_4o_mini"]
@@ -4718,7 +5029,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
                 self.write_config()
                 with self.fixture.runtime():
                     self.assertEqual(runner["main"](), "configuration_error")
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.fixture.confirm_input.assert_not_called()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.retrieval_calls, [])
@@ -4729,7 +5040,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "configuration_error")
         self.assertIn("UNCONFIGURED_TOKEN", self.fixture.stderr.getvalue())
         self.assertIn(".env in the repository root", self.fixture.stderr.getvalue())
-        self.assertFalse(self.fixture.output.exists())
+        self.assert_failed_before_confirmation("startup", "ValueError")
 
     def test_generation_interrupt_keeps_first_model_and_unattempted_slots_and_patients(self):
         self.experiment["selected_models"].append("third")
@@ -4809,7 +5120,7 @@ class MultiModelIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(second["assessment_plan_raw"])
 
 
-class VariantIntegrationTests(unittest.TestCase):
+class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
     """Native v3 artifacts, real config/scoring/collator; only external dependencies mocked."""
     load_runner = RunMedCopilotTests.load_runner
     run_dirs = RunMedCopilotTests.run_dirs
@@ -4954,17 +5265,17 @@ class VariantIntegrationTests(unittest.TestCase):
                             self.assertIsNone(slot["evaluation"])
                 self.assertTrue((self.run_dirs()[0] / "results_summary.html").exists())
 
-    def test_source_initialization_failure_still_runs_baseline_and_saves_safe_errors(self):
+    def test_source_initialization_failure_stops_the_run_before_the_baseline(self):
         fixture = self.fixture
         (fixture.upstream / "soap_with_metadata.json").unlink()
         (fixture.guidelines / "output/entities.parquet").unlink()
-        status, run, [row] = self.execute()
-        self.assertEqual(status, "completed_with_errors")
-        self.assertEqual(run["reference_data"], {"patient_retrieval": None, "guidelines": None})
-        self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
-        for source in ("guidelines", "patient_retrieval"):
-            self.assertEqual(schema3_view(row)["evidence_status"][source]["error"]["type"], "FileNotFoundError")
-        self.assertEqual(len(fixture.calls), 2)
+        runner = self.load_runner()
+        with fixture.runtime(), self.assertRaises(FileNotFoundError):
+            runner["main"]()
+        # The first shared-resource failure stops the run; the second is never reached.
+        run, _ = self.assert_fatal_shared_failure("corpus_loading", FileNotFoundError)
+        self.assertIsNone(run["reference_data"])
+        self.assertEqual(fixture.calls, [])
         self.assertEqual(fixture.graph_calls, [])
 
     def test_config_paths_filters_limit_and_confirmation_match_saved_effective_cohort(self):
@@ -4983,7 +5294,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertNotIn("PATIENT_INPUT", runner)
         self.assertNotIn("PATIENT_LABELS", runner)
         def confirm(prompt):
-            self.assertFalse(fixture.output.exists())
+            self.assert_run_pending()
             self.assertEqual(fixture.calls, [])
             self.assertEqual(fixture.retrieval_calls, [])
             self.assertEqual(fixture.scoring_calls, [])
@@ -5060,17 +5371,15 @@ class VariantIntegrationTests(unittest.TestCase):
         self.assertEqual(row["status"], "completed")
         self.assertIn("saved run.json/results.jsonl were preserved", self.fixture.stderr.getvalue())
 
-    def test_encoder_load_failure_blocks_retrieval_variants_and_preserves_independent_generation(self):
+    def test_encoder_load_failure_stops_the_run_before_any_generation(self):
         self.fixture.failure = "preload"
-        status, run, [row] = self.execute()
-        self.assertEqual(status, "completed_with_errors")
-        self.assertIsNone(run["reference_data"]["patient_retrieval"])
+        runner = self.load_runner()
+        with self.fixture.runtime(), self.assertRaises(RuntimeError):
+            runner["main"]()
+        run, _ = self.assert_fatal_shared_failure("startup", RuntimeError)
+        self.assertIsNone(run["reference_data"])
         self.assertEqual(self.fixture.retrieval_calls, [])
-        self.assertEqual(schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["type"], "RuntimeError")
-        self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
-        self.assertEqual(row["variants"]["guidelines"]["status"], "completed")
-        self.assertEqual(row["variants"]["patient_retrieval"]["error"]["type"], "EvidenceUnavailable")
-        self.assertEqual(len(self.fixture.calls), 5)
+        self.assertEqual(self.fixture.calls, [])
 
     def test_one_model_failure_in_one_variant_keeps_all_other_combinations_and_report(self):
         calls = []
@@ -5104,7 +5413,7 @@ class VariantIntegrationTests(unittest.TestCase):
                 with self.fixture.runtime():
                     self.assertEqual(runner["main"](), "configuration_error")
                 self.fixture.confirm_input.assert_not_called()
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.model_configs, [])
 
@@ -5121,7 +5430,7 @@ class VariantIntegrationTests(unittest.TestCase):
                 self.fixture.write_labels(labels)
                 with self.fixture.runtime(), self.assertRaises(ValueError):
                     runner["main"]()
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
                 self.fixture.confirm_input.assert_not_called()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.scoring_calls, [])
@@ -5163,7 +5472,7 @@ class VariantIntegrationTests(unittest.TestCase):
             self.assertIn('"predictions": [', rendered)
 
 
-class PipelineConfigurationIntegrationTests(unittest.TestCase):
+class PipelineConfigurationIntegrationTests(FailedRunAssertions, unittest.TestCase):
     """Exercise configured paths/models/tuning through saved v3 outputs and real startup."""
     load_runner = RunMedCopilotTests.load_runner
     run_dirs = RunMedCopilotTests.run_dirs
@@ -5275,18 +5584,17 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
         for field in PIPELINE_DEFAULTS:
             self.assertEqual(run["experiment"][field], self.experiment[field])
 
-    def test_encoder_setting_changed_after_import_cannot_silently_mislabel_cached_embeddings(self):
+    def test_encoder_setting_changed_after_import_stops_the_run_before_mislabelling_embeddings(self):
         runner = self.load_runner()
         self.experiment["patient_embedding_model"] = "changed/encoder"
         self.write_config()
-        with self.fixture.runtime():
-            self.assertEqual(runner["main"](), "completed_with_errors")
-        run, [row] = self.read_native()
-        self.assertIn("restart the script", schema3_view(row)["evidence_status"]["patient_retrieval"]["error"]["message"])
-        self.assertEqual(row["variants"]["llm_only"]["status"], "completed")
-        self.assertEqual(row["variants"]["guidelines"]["status"], "completed")
-        self.assertIsNone(run["reference_data"]["patient_retrieval"])
+        with self.fixture.runtime(), self.assertRaises(ValueError):
+            runner["main"]()
+        run, error = self.assert_fatal_shared_failure("startup", ValueError)
+        self.assertIn("restart the script", error["message"])
+        self.assertIsNone(run["reference_data"])
         self.assertEqual(self.fixture.retrieval_calls, [])
+        self.assertEqual(self.fixture.calls, [])
         self.assertEqual(sum(event[0] == "preload" for event in self.fixture.events), 1)
 
     def test_invalid_new_parameters_stop_before_confirmation_generation_or_output_creation(self):
@@ -5305,11 +5613,11 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
                 self.fixture.confirm_input.assert_not_called()
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.model_configs, [])
-                self.assertFalse(self.fixture.output.exists())
+                self.assert_failed_before_confirmation()
 
 
 
-class ComponentExtensionIntegrationTests(unittest.TestCase):
+class ComponentExtensionIntegrationTests(FailedRunAssertions, unittest.TestCase):
     """Exercise new registry entries against canonical schema-4 pipeline outputs."""
 
     setUp = VariantIntegrationTests.setUp
@@ -5547,7 +5855,7 @@ VARIANTS["invalid_binding"] = VariantSpec(
         with self.fixture.runtime():
             self.assertEqual(runner["main"](), "configuration_error")
         self.fixture.confirm_input.assert_not_called()
-        self.assertFalse(self.fixture.output.exists())
+        self.assert_failed_before_confirmation()
         self.assertEqual(self.fixture.calls, [])
         self.assertEqual(self.fixture.keyword_calls, [])
         self.assertEqual(self.fixture.retrieval_calls, [])

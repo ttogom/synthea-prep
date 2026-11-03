@@ -177,7 +177,8 @@ sample live model response.
 
 ## Status, failures and interruption
 
-Ordinary component failures block only consuming variants. Their final-model
+Ordinary per-patient component failures block only consuming variants
+(shared-resource initialization failures stop the run; see Run errors). Their final-model
 slots remain `not_processed` and prompts remain `null`; completed component
 captures survive. Ordinary model failures remain local to that model, and other
 models/variants/patients continue. Refused or truncated replies retain available
@@ -199,6 +200,54 @@ selected patients/variants/models. Excluded patients receive no result rows or
 placeholders. Persistence is at patient boundaries plus best-effort interruption
 finalization; this schema does not add resume-existing-run support or protection
 against uncatchable process termination.
+
+### Run errors
+
+Launching `scripts/run_med_copilot.py` creates the run directory and `run.json`
+(`status: running`, `errors: []`) before any heavy import, using the
+standard-library-only `scripts/med_copilot_run_file.py`. Until the experiment
+config and Git branch are known, the directory is provisional,
+`<timestamp>__starting-<suffix>` under `experiments/output/`; it is then renamed
+to `<timestamp>__<input stem>__<branch>` under `experiment_output`. Cancelling at
+the confirmation prompt (or a successful exit such as `--help`) is not an error:
+the run directory, and any output directory created only for it, is removed.
+
+Each failure is appended to `errors` and saved (atomically, through a temporary
+file and `os.replace()`) as soon as it is handled, before the run continues or
+stops:
+
+| Field | Meaning |
+|---|---|
+| `timestamp` | Pacific time the failure was recorded. |
+| `patient_id` | Patient being processed, or `null` for run-level failures. |
+| `stage` | `startup`, `input_loading`, `corpus_loading`, `retrieval_initialization`, `keyword_extraction`, `patient_retrieval`, `reranking`, `guideline_question_generation`, `guideline_retrieval`, `final_generation`, `scoring`, or `output_saving`. |
+| `exception_type` | Exception class name, e.g. `RuntimeError` or `KeyboardInterrupt`. |
+| `message` | `str()` of the exception, with configured credentials replaced by `[REDACTED]`. |
+| `traceback` | Full formatted traceback including chained causes, also redacted. |
+
+Fatal failures are recorded once, then the run is marked `failed_incomplete`
+with `finished_at` and the script exits nonzero with the normal console
+traceback (configuration errors print their summary instead). Fatal failures are:
+
+- startup: imports, dependency/encoder initialization, experiment/model
+  configuration and credential preflight, Git lookup, or client creation;
+- input loading: malformed or missing patient input or labels;
+- shared resources: the patient corpus (`corpus_loading`), the retriever,
+  reranker, or guideline tables (`retrieval_initialization`); unfinished
+  patients are saved as `not_processed`;
+- any other unhandled failure or interruption (`KeyboardInterrupt`), recorded
+  with the in-flight patient and stage.
+
+Component, final-model and variant-prompt failures are isolated to their patient:
+they are recorded once with that patient, the batch continues, and the run ends
+`completed_with_errors`. An empty reference corpus or no matching reference
+remains the supported fallback, not an error. A results-report failure is
+recorded without changing the run status.
+
+If `run.json` itself cannot be written, the original failure and the write
+failure are both printed to stderr and the run stops unsuccessfully. Forced
+termination (e.g. `SIGKILL`) or power loss can prevent the final update, but
+errors saved earlier remain readable.
 
 ## Configuration and provenance
 

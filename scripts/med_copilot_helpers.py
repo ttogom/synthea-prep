@@ -2,7 +2,6 @@
 
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
 import errno
 import hashlib
 import json
@@ -13,15 +12,19 @@ import re
 import subprocess
 import sys
 from textwrap import indent
-from zoneinfo import ZoneInfo
 
 import yaml
 
+# Run naming, run.json, and error recording are standard-library only so the
+# runner can use them before its heavy imports; re-exported for callers.
+from scripts.med_copilot_run_file import (
+    PACIFIC, RUN_FILE, RUN_STAGES, RunFile, RunMetadataError, create_run_dir, error_scope,
+    make_run_name, pacific_now, pacific_time, path_safe_branch, pipeline_stage, record_error,
+    redact_secrets, write_run_json,
+)
 from scripts.med_copilot_variants import COMPONENTS, VARIANTS
 
 
-PACIFIC = ZoneInfo("America/Los_Angeles")
-RUN_FILE = "run.json"
 RESULTS_FILE = "results.jsonl"
 # Tables read by the vendored GraphRAG local search (graphrag/cli/query.py).
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
@@ -104,29 +107,6 @@ def validate_guideline_tables(guideline_output):
 # Run naming and Git identity
 # ---------------------------------------------------------------------
 
-def pacific_time(instant):
-    """Convert an aware datetime to whole-second America/Los_Angeles time."""
-    return instant.astimezone(PACIFIC).replace(microsecond=0)
-
-
-def pacific_now():
-    return pacific_time(datetime.now(timezone.utc))
-
-
-def path_safe_branch(branch):
-    """Make a branch name usable as one directory-name component."""
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip(".-")
-    if not safe:
-        raise ValueError(f"Branch name {branch!r} has no path-safe characters")
-    return safe
-
-
-def make_run_name(started_at, input_path, branch):
-    """<Pacific timestamp>__<input filename stem>__<branch name>."""
-    timestamp = started_at.strftime("%Y-%m-%d_%H%M%S") + started_at.tzname()
-    return f"{timestamp}__{Path(input_path).stem}__{path_safe_branch(branch)}"
-
-
 def _git(repo, *args):
     try:
         return subprocess.run(["git", "-C", str(repo), *args],
@@ -159,23 +139,6 @@ def git_commit(repo):
         return None
     return commit.stdout.strip() if commit.returncode == 0 and commit.stdout.strip() else None
 
-
-def create_run_dir(output_root, run_name):
-    """Create a new run directory, never reusing an existing one."""
-    output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    run_dir = output_root / run_name
-    try:
-        run_dir.mkdir()
-    except FileExistsError as exc:
-        raise FileExistsError(errno.EEXIST, "Run directory already exists; refusing to overwrite",
-                              str(run_dir)) from exc
-    return run_dir
-
-
-# %% ------------------------------------------------------------------
-# Resource metadata and fingerprints
-# ---------------------------------------------------------------------
 
 def repo_path(path, root):
     """Repository-relative POSIX path inside `root`; absolute path outside it."""
@@ -455,11 +418,10 @@ def capture_component(component, *, error_metadata=None, corpus_records=(), retr
         component["status"] = "completed"
     except Exception as exc:
         error = error_metadata(exc) if error_metadata else {"type": type(exc).__name__, "message": str(exc)}
-        secrets = {os.environ.get(key) for key in credential_names} - {None, ""}
-        for secret in sorted(secrets, key=len, reverse=True):
-            error["message"] = error["message"].replace(secret, "[REDACTED]")
+        error["message"] = redact_secrets(error["message"], [os.environ.get(key) for key in credential_names])
         component["error"] = error
         print(f"{component['component']} failed ({error['type']}): {error['message']}", file=sys.stderr)
+        record_error(exc)
     except BaseException as exc:
         component["error"] = {"type": type(exc).__name__, "message": "Evidence preparation interrupted"}
         raise
@@ -504,6 +466,7 @@ def prepare_variant_messages(experiment, variant_id, s_o, result, output, *, tem
     except Exception as exc:
         output.update(status="failed_incomplete", error=(error_metadata(exc) if error_metadata else
                       {"type": type(exc).__name__, "message": "Variant prompt preparation failed"}))
+        record_error(exc)
         return None
 
 
@@ -619,18 +582,6 @@ def graphrag_context_json(context):
     ))
 
 
-def write_run_json(run_dir, metadata):
-    """Atomically replace run.json so readers never see a partial file."""
-    run_dir = Path(run_dir)
-    temporary = run_dir / f".{RUN_FILE}.tmp"
-    try:
-        temporary.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, allow_nan=False)
-                             + "\n", encoding="utf-8")
-        os.replace(temporary, run_dir / RUN_FILE)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def run_status(patient_statuses, stopped=False):
     """Aggregate final patient statuses into the run status."""
     if stopped or any(status not in ("completed", "failed_incomplete")
@@ -644,10 +595,9 @@ def run_status(patient_statuses, stopped=False):
 class ExperimentRun:
     """Own one run directory: run.json plus one results.jsonl line per patient."""
 
-    def __init__(self, run_dir, metadata, patient_ids, model_ids=None, variant_ids=None,
+    def __init__(self, run_file, patient_ids, model_ids=None, variant_ids=None,
                  component_plan=None, variant_components=None):
-        self.run_dir = Path(run_dir)
-        self.metadata = metadata
+        self.file = run_file
         self.unsaved = list(patient_ids)
         self.statuses = []
         self.results_writable = True
@@ -658,34 +608,50 @@ class ExperimentRun:
 
     @classmethod
     def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids,
-              model_ids=None, variant_ids=None, component_plan=None, variant_components=None):
+              model_ids=None, variant_ids=None, component_plan=None, variant_components=None,
+              run_file=None, redact=None):
+        """Start a run, adopting an already named run_file (and its started_at) if given."""
         model_ids = None if model_ids is None else tuple(model_ids)
         variant_ids = None if variant_ids is None else tuple(variant_ids)
-        run_dir = create_run_dir(output_root, make_run_name(started_at, input_path, branch))
-        metadata = {
-            "run_name": run_dir.name,
-            "started_at": started_at.isoformat(),
-            "finished_at": None,
-            "status": "running",
+        if run_file is None:
+            run_file = RunFile.begin(output_root, started_at=started_at,
+                                     run_name=make_run_name(started_at, input_path, branch))
+        if redact is not None:
+            run_file.redact = redact
+        fields = {
             "branch": branch,
             "input": {"file": repo_path(input_path, root), "sha256": sha256_file(input_path)},
             "git_commit": commit,
-            "reference_data": None,
         }
         if model_ids is not None:
-            metadata.update(schema_version=2, assessment_plan_models=None)
+            fields.update(schema_version=2, assessment_plan_models=None)
         if variant_ids is not None:
-            metadata.update(schema_version=3, variant_definitions=None, prompt_provenance=None)
+            fields.update(schema_version=3, variant_definitions=None, prompt_provenance=None)
         if component_plan is not None:
-            metadata.update(schema_version=4, component_definitions=None, registry_provenance=None)
-        (run_dir / RESULTS_FILE).touch(exist_ok=False)
-        run = cls(run_dir, metadata, patient_ids, model_ids, variant_ids, component_plan, variant_components)
-        run.update()
+            fields.update(schema_version=4, component_definitions=None, registry_provenance=None)
+        (run_file.run_dir / RESULTS_FILE).touch(exist_ok=False)
+        run = cls(run_file, patient_ids, model_ids, variant_ids, component_plan, variant_components)
+        run.update(**fields)
         return run
 
+    @property
+    def run_dir(self):
+        return self.file.run_dir
+
+    @property
+    def metadata(self):
+        return self.file.metadata
+
+    @property
+    def redact(self):
+        return self.file.redact
+
     def update(self, **fields):
-        self.metadata.update(fields)
-        write_run_json(self.run_dir, self.metadata)
+        self.file.update(**fields)
+
+    def add_error(self, entry):
+        """Append one error entry and persist it before execution continues."""
+        self.file.add_error(entry)
 
     def save_result(self, result):
         """Append one final patient record as a single JSONL line."""
@@ -739,11 +705,12 @@ class ExperimentRun:
                                  component_plan=self.component_plan, variant_components=self.variant_components))
             except Exception:
                 break
-        try:
-            self.update(status=run_status(self.statuses, stopped=True),
-                        finished_at=finished_at.isoformat())
-        except Exception:
-            pass
+        self.file.stop(finished_at)
+
+    def fail(self, exc, finished_at, current=None):
+        """Record a fatal failure (including an interruption), then stop()."""
+        self.file.record_fatal(exc)
+        self.stop(finished_at, current)
 
 
 class JSONKeywordExtractor:
@@ -754,6 +721,7 @@ class JSONKeywordExtractor:
         self.model = model
         self.capture_result = None
 
+    @pipeline_stage("keyword_extraction")
     def extract(self, text):
         capture = self.capture_result
         if capture is not None:
