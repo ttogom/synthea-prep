@@ -8,11 +8,13 @@ initialization is needed. Keep this suite updated when helpers are added.
 
 import ast
 import builtins
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 from dataclasses import replace
 import errno
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -42,7 +45,7 @@ RESULT_FIELDS = [
 ]
 RUN_FIELDS = [
     "run_name", "started_at", "finished_at", "status", "branch", "input", "git_commit",
-    "reference_data",
+    "reference_data", "errors",
 ]
 
 
@@ -382,13 +385,13 @@ class HelperImportTests(unittest.TestCase):
                   if callable(value) and not name.startswith("_")
                   and getattr(value, "__module__", None) == "<run_path>"]
         self.assertEqual(sorted(public), sorted([
-            "ExperimentRun", "JSONKeywordExtractor", "create_run_dir", "format_assessment_plans", "git_branch", "git_commit",
+            "ExperimentRun", "JSONKeywordExtractor", "format_assessment_plans", "git_branch", "git_commit",
             "graphrag_context_json", "guideline_resource_files", "load_patient_records",
-            "make_run_name", "new_model_result", "new_patient_result", "pacific_now", "pacific_time",
-            "parse_condition_plan", "parse_guideline_questions", "path_safe_branch", "reference_data_metadata",
+            "new_model_result", "new_patient_result",
+            "parse_condition_plan", "parse_guideline_questions", "reference_data_metadata",
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
-            "write_run_json", "model_response_metadata", "reference_patient_identity",
+            "model_response_metadata", "reference_patient_identity",
             "ranked_reference_patients", "prepare_patient_output_capture",
             "capture_component", "component_needed", "prepare_variant_messages",
         ]), "Add direct tests when adding a public helper")
@@ -1426,6 +1429,7 @@ class ExperimentRunTests(TemporaryRootTestCase):
                       "sha256": hashlib.sha256(b'{"id": "a"}\n').hexdigest()},
             "git_commit": "0" * 40,
             "reference_data": None,
+            "errors": [],
         })
         self.assertEqual(list(metadata), RUN_FIELDS)
         self.assertEqual(results, [])
@@ -2236,6 +2240,141 @@ class SchemaFourExperimentRunTests(TemporaryRootTestCase):
         run.save_result(self.result_four(status="completed"))
         self.assertEqual(run.finish(self.finished), "completed")
         self.assertEqual(self.read(run)[0]["schema_version"], 4)
+
+
+class ErrorRecordingTests(TemporaryRootTestCase):
+    def setUp(self):
+        super().setUp()
+        self.input = self.root / "input.jsonl"
+        self.input.write_text('{"id": "a"}\n', encoding="utf-8")
+
+    def start(self, redact=None):
+        return H["ExperimentRun"].start(
+            self.root / "output", root=self.root, input_path=self.input,
+            started_at=H["pacific_now"](), branch="errors", commit=None, patient_ids=["a", "b"],
+            redact=redact,
+        )
+
+    def saved_errors(self, run):
+        return json.loads((run.run_dir / "run.json").read_text(encoding="utf-8"))["errors"]
+
+    def raise_chained(self):
+        try:
+            raise KeyError("missing table")
+        except KeyError as exc:
+            raise ValueError("guideline load failed") from exc
+
+    def test_patient_failure_is_saved_immediately_with_stage_and_chained_traceback(self):
+        run = self.start()
+        self.assertEqual(self.saved_errors(run), [])
+        with H["error_scope"](run, patient_id="a"):
+            try:
+                with H["pipeline_stage"]("guideline_retrieval"):
+                    self.raise_chained()
+            except ValueError as exc:
+                entry = H["record_error"](exc)
+        self.assertEqual(self.saved_errors(run), [entry])
+        self.assertEqual(list(entry), ["timestamp", "patient_id", "stage", "exception_type",
+                                       "message", "traceback"])
+        self.assertEqual((entry["patient_id"], entry["stage"], entry["exception_type"], entry["message"]),
+                         ("a", "guideline_retrieval", "ValueError", "guideline load failed"))
+        self.assertIn("KeyError: 'missing table'", entry["traceback"])
+        self.assertIn("direct cause", entry["traceback"])
+        self.assertIn("ValueError: guideline load failed", entry["traceback"])
+        self.assertIn(datetime.fromisoformat(entry["timestamp"]).utcoffset(),
+                      (timedelta(hours=-7), timedelta(hours=-8)))
+        self.assertEqual(sorted(path.name for path in run.run_dir.iterdir()), ["results.jsonl", "run.json"])
+
+    def test_innermost_stage_and_patient_survive_to_a_run_level_handler(self):
+        run = self.start()
+        error = KeyboardInterrupt()
+        for patient_id in ("a", "b"):
+            try:
+                with H["error_scope"](run, patient_id=patient_id), H["pipeline_stage"]("patient_retrieval"):
+                    with H["pipeline_stage"]("reranking"):
+                        raise error
+            except KeyboardInterrupt as exc:
+                H["record_error"](exc, run=run)
+        # The same exception object is attributed afresh on each failure.
+        self.assertEqual([(entry["patient_id"], entry["stage"], entry["exception_type"])
+                          for entry in self.saved_errors(run)],
+                         [("a", "reranking", "KeyboardInterrupt"), ("b", "reranking", "KeyboardInterrupt")])
+
+    def test_run_level_failure_has_null_patient_and_explicit_stage_wins(self):
+        run = self.start()
+        with H["pipeline_stage"]("retrieval_initialization"):
+            entry = H["record_error"](RuntimeError("reranker init"), run=run)
+        explicit = H["record_error"](RuntimeError("report"), run=run, stage="output_saving")
+        self.assertEqual([(e["patient_id"], e["stage"]) for e in (entry, explicit)],
+                         [(None, "retrieval_initialization"), (None, "output_saving")])
+        self.assertEqual(self.saved_errors(run), [entry, explicit])
+
+    def test_scope_and_stage_are_restored_after_each_block(self):
+        run = self.start()
+        with H["error_scope"](run, patient_id="a"), H["pipeline_stage"]("keyword_extraction"):
+            pass
+        entry = H["record_error"](RuntimeError("outside"))
+        self.assertEqual((entry["patient_id"], entry["stage"]), (None, None))
+        self.assertEqual(self.saved_errors(run), [])
+        with self.assertRaises(ValueError):
+            with H["pipeline_stage"]("not_a_stage"):
+                pass
+
+    def test_secrets_are_redacted_from_message_and_traceback(self):
+        run = self.start(redact=lambda text: H["redact_secrets"](text, ["sk-secret", "sk-secret-long", None, ""]))
+        try:
+            raise RuntimeError("bad key sk-secret-long and sk-secret")
+        except RuntimeError as exc:
+            entry = H["record_error"](exc, run=run)
+        saved = json.dumps(self.saved_errors(run))
+        self.assertNotIn("sk-secret", saved)
+        self.assertEqual(entry["message"], "bad key [REDACTED] and [REDACTED]")
+        self.assertIn("[REDACTED]", entry["traceback"])
+
+    def test_metadata_write_failure_reports_both_and_keeps_earlier_errors(self):
+        run = self.start()
+        first = H["record_error"](RuntimeError("first failure"), run=run)
+        stderr = io.StringIO()
+        with patch.object(os, "replace", side_effect=OSError("disk full")), redirect_stderr(stderr), \
+                self.assertRaises(H["RunMetadataError"]) as raised:
+            H["record_error"](RuntimeError("second failure"), run=run)
+        self.assertIsInstance(raised.exception.__cause__, OSError)
+        self.assertIn("RuntimeError: second failure", stderr.getvalue())
+        self.assertIn("OSError: disk full", stderr.getvalue())
+        self.assertEqual(self.saved_errors(run), [first])
+        self.assertEqual(sorted(path.name for path in run.run_dir.iterdir()), ["results.jsonl", "run.json"])
+
+    def test_stop_reports_a_failed_final_update(self):
+        run = self.start()
+        stderr = io.StringIO()
+        with patch.object(os, "replace", side_effect=OSError("disk full")), redirect_stderr(stderr):
+            run.stop(H["pacific_now"]())
+        self.assertIn("Could not mark run.json as stopped", stderr.getvalue())
+        self.assertIn("OSError: disk full", stderr.getvalue())
+
+    def test_concurrent_errors_are_all_persisted(self):
+        run = self.start()
+        threads = [threading.Thread(target=H["record_error"], args=(RuntimeError(f"failure {n}"),),
+                                    kwargs={"run": run}) for n in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(entry["message"] for entry in self.saved_errors(run)),
+                         sorted(f"failure {n}" for n in range(20)))
+
+    def test_run_directory_is_absolute_from_a_relative_output_root(self):
+        old_cwd = Path.cwd()
+        os.chdir(self.root)
+        try:
+            run = H["ExperimentRun"].start(
+                Path("output"), root=self.root, input_path=self.input, started_at=H["pacific_now"](),
+                branch="errors", commit=None, patient_ids=["a"])
+        finally:
+            os.chdir(old_cwd)
+        self.assertTrue(run.run_dir.is_absolute())
+        H["record_error"](RuntimeError("after chdir"), run=run)
+        self.assertEqual(len(self.saved_errors(run)), 1)
 
 
 if __name__ == "__main__":

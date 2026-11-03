@@ -10,7 +10,9 @@ from graphrag.config.models.language_model_config import LanguageModelConfig
 from graphrag.language_model.factory import ModelFactory
 from med_copilot.prompts.diagnosis_plan import CONDITION_PLAN_RESPONSE_FORMAT
 from scripts.med_copilot_config import configured_model_credentials, read_yaml_config
-from scripts.med_copilot_helpers import model_response_metadata, parse_condition_plan, repo_path
+from scripts.med_copilot_helpers import (
+    model_response_metadata, parse_condition_plan, record_error, redact_secrets, repo_path,
+)
 
 
 class AssessmentPlanModels:
@@ -134,6 +136,7 @@ class AssessmentPlanModels:
                 output["status"] = "completed"
             except Exception as exc:
                 output["error"] = self.error_metadata(exc)
+                record_error(exc)
             except BaseException as exc:
                 output["error"] = {"type": type(exc).__name__, "message": "Generation interrupted"}
                 raise
@@ -143,10 +146,11 @@ class AssessmentPlanModels:
             output["status"] == "completed" for output in result["assessment_plans"].values()
         ) else "failed_incomplete")
 
+    def redact(self, text):
+        """Replace selected and shared keys in text, such as an error traceback."""
+        return redact_secrets(text, self._secrets + [os.environ.get(name)
+                                                     for name in ("OPENAI_API_KEY", "GRAPHRAG_API_KEY")])
+
     def error_metadata(self, exc):
         """Describe source/model failures without exposing selected or shared keys."""
-        message = str(exc)
-        secrets = self._secrets + [os.environ.get(name) for name in ("OPENAI_API_KEY", "GRAPHRAG_API_KEY")]
-        for secret in sorted({value for value in secrets if value}, key=len, reverse=True):
-            message = message.replace(secret, "[REDACTED]")
-        return {"type": type(exc).__name__, "message": message}
+        return {"type": type(exc).__name__, "message": self.redact(str(exc))}
