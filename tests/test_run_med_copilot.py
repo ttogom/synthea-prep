@@ -1818,6 +1818,7 @@ class RunMedCopilotTests(unittest.TestCase):
             for row in range(4)
         ]
         fixture.write_corpus()
+        # "assessment" alias: same reason as in test_reranker_callbacks_preserve_ranking_when_test_double_formatting_fails.
         fixture.candidates = [
             {"idx": row, **{field: fixture.corpus[row][field]
                             for field in ("subjective", "objective", "condition", "plan")},
@@ -3432,6 +3433,11 @@ class RunMedCopilotTests(unittest.TestCase):
                 if implementation == "stub":
                     fixture.failure = "rerank_formatting"
                 else:
+                    # "assessment" alias: frozen_reranker_class instruments the
+                    # vendored upstream CrossEncoderReranker, which reads c["assessment"]
+                    # before on_ranking fires. Production always uses the project's
+                    # CrossEncoderReranker whose rerank() is fully overridden and never
+                    # reads "assessment"; this alias is test-double-only.
                     fixture.candidates = [
                         {"idx": row, **record, "assessment": record["condition"], "dominant_terms": [{}]}
                         for row, record in enumerate(fixture.corpus)
