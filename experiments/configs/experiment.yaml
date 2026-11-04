@@ -16,7 +16,7 @@ selected_variants:
 variant_settings: {}  # Optional variant -> component -> parameter overrides; omitted values use shared defaults.
 
 # Similar-patient retrieval and reranking.
-patient_corpus: med_copilot/upstream/soap_with_metadata.json  # Reference SOAP cases, separate from experiment inputs.
+patient_corpus: med_copilot/data/patient_corpus/reference_patients.json  # Reference SOAP cases, separate from experiment inputs.
 patient_retrieval_artifacts_dir: med_copilot/data/patient_retrieval_so  # S/O embedding, FAISS index cache, and matching manifest.
 patient_embedding_model: emilyalsentzer/Bio_ClinicalBERT  # Encoder shared by corpus and query embeddings.
 patient_keyword_model: gpt-4o-mini  # OpenAI model extracting query keywords.

@@ -391,10 +391,10 @@ class PipelineFixture:
         self.prompt_module.write_text(PROJECT_PROMPTS.read_text(encoding="utf-8"), encoding="utf-8")
         self.prompts = PROMPTS.copy()
         self.corpus = [
-            {"note_id": "NOTE-A", "subjective": "Corpus S", "objective": "Corpus O",
-             "assessment": "Corpus A", "plan": "Corpus P"},
-            {"note_id": "NOTE-B", "subjective": "Second corpus S", "objective": "Second corpus O",
-             "assessment": "Second corpus A", "plan": "Second corpus P"},
+            {"id": "NOTE-A", "subjective": "Corpus S", "objective": "Corpus O",
+             "condition": "Corpus A", "plan": ["Corpus P"]},
+            {"id": "NOTE-B", "subjective": "Second corpus S", "objective": "Second corpus O",
+             "condition": "Second corpus A", "plan": ["Second corpus P"]},
         ]
         self.write_corpus()
         self.patient_id = "FIRST_PATIENT_ID"
@@ -416,9 +416,9 @@ class PipelineFixture:
         self.candidates = [{"idx": 0, "id": "candidate-one"}, {"idx": 1, "id": "candidate-two"}]
         # The reranker moves the second candidate (corpus row 1) to the top.
         self.rerank_scores = [0.2, 0.9]
-        self.reference = {"note_id": "NOTE-B"}
+        self.reference = {"id": "NOTE-B"}
         self.results = [
-            "SELECTED_SIMILAR_CASE\nAssessment: REFERENCE_DIAGNOSIS\nPlan: REFERENCE_PLAN",
+            "SELECTED_SIMILAR_CASE\nCondition: REFERENCE_DIAGNOSIS\nPlan:\n- REFERENCE_PLAN",
             "UNSELECTED_SIMILAR_CASE",
         ]
         self.context = {
@@ -475,7 +475,9 @@ class PipelineFixture:
         (vectors / "fragment.lance").write_bytes(b"MOCK_VECTORS")
 
     def write_corpus(self, path=None):
-        path = self.upstream / "soap_with_metadata.json" if path is None else path
+        if path is None:
+            path = self.root / "med_copilot/data/patient_corpus/reference_patients.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.corpus, ensure_ascii=False), encoding="utf-8")
 
     def write_patients(self, records=None):
@@ -788,9 +790,9 @@ class RunMedCopilotTests(unittest.TestCase):
         ids = []
         for candidate in fixture.candidates:
             row = candidate["idx"]
-            note = fixture.corpus[row].get("note_id") if fixture.corpus else None
-            identity = {"note_id": note} if isinstance(note, str) and note.strip() else {"corpus_row": row}
-            if note and sum(record.get("note_id") == note for record in fixture.corpus) > 1:
+            record_id = fixture.corpus[row].get("id") if fixture.corpus else None
+            identity = {"id": record_id} if isinstance(record_id, str) and record_id.strip() else {"corpus_row": row}
+            if record_id and sum(record.get("id") == record_id for record in fixture.corpus) > 1:
                 identity["corpus_row"] = row
             ids.append(identity)
         ran = bool(fixture.corpus) and fixture.failure not in ("retrieval", "keywords")
@@ -834,7 +836,7 @@ class RunMedCopilotTests(unittest.TestCase):
                                 retrieval_initialized=True, tables=GUIDELINE_TABLES):
         # Enumerate the expected files independently of the helper's resolver.
         fixture = self.fixture
-        corpus = fixture.upstream / "soap_with_metadata.json" if corpus is None else corpus
+        corpus = fixture.root / "med_copilot/data/patient_corpus/reference_patients.json" if corpus is None else corpus
         artifacts = fixture.artifacts if artifacts is None else artifacts
         guidelines = fixture.guidelines if guidelines is None else guidelines
         retrieval_entries = [("corpus", corpus)]
@@ -940,7 +942,7 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(sys.path[:2], [str(fixture.upstream), str(fixture.root)])
         self.assertTrue(callable(runner["main"]))
         experiment = runner["retrieval_startup"].experiment
-        self.assertEqual(experiment.patient_corpus, fixture.upstream / "soap_with_metadata.json")
+        self.assertEqual(experiment.patient_corpus, fixture.root / "med_copilot/data/patient_corpus/reference_patients.json")
         self.assertEqual(experiment.patient_retrieval_artifacts_dir, fixture.artifacts)
         for name in ("PATIENT_CORPUS", "PATIENT_RETRIEVAL_ARTIFACTS_DIR", "GUIDELINES", "EXPERIMENT_OUTPUT", "api_key"):
             self.assertNotIn(name, runner)
@@ -1195,8 +1197,8 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.retrieval_calls[1][1])
         self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.rerank_calls[1][1])
         self.assertNotIn("REFERENCE_DIAGNOSIS", fixture.calls[0]["messages"][-1]["content"])
-        self.assertIn("Assessment: REFERENCE_DIAGNOSIS", fixture.calls[1]["messages"][-1]["content"])
-        self.assertIn("Plan: REFERENCE_PLAN", fixture.calls[1]["messages"][-1]["content"])
+        self.assertIn("Condition: REFERENCE_DIAGNOSIS", fixture.calls[1]["messages"][-1]["content"])
+        self.assertIn("Plan:\n- REFERENCE_PLAN", fixture.calls[1]["messages"][-1]["content"])
         self.assert_outputs()
 
     def test_script_entry_point_runs_the_full_pipeline(self):
@@ -1332,7 +1334,7 @@ class RunMedCopilotTests(unittest.TestCase):
         baseline = run_once()["reference_data"]
         self.assertEqual(baseline, self.expected_reference_data())
         self.assertEqual(baseline["patient_retrieval"]["corpus_file"],
-                         "med_copilot/upstream/soap_with_metadata.json")
+                         "med_copilot/data/patient_corpus/reference_patients.json")
         self.assertEqual(baseline["patient_retrieval"]["artifacts_directory"], "med_copilot/data/patient_retrieval_so")
         self.assertEqual(baseline["guidelines"]["directory"], "med_copilot/data/guidelines")
 
@@ -1348,7 +1350,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 fixture.guidelines / "output/lancedb/default-entity-description.lance/data/new.lance"
             ).write_bytes(b"NEW VECTORS")),
             "corpus contents": ("patient_retrieval", lambda: (
-                fixture.corpus[0].update(plan="Changed plan"), fixture.write_corpus())),
+                fixture.corpus[0].update(plan=["Changed plan"]), fixture.write_corpus())),
             "regenerated artifacts": ("patient_retrieval", lambda: setattr(
                 fixture, "regenerated_artifacts",
                 {"embeddings.npy": b"REBUILT_EMBEDDINGS", "index.faiss": b"REBUILT_INDEX"})),
@@ -1668,10 +1670,10 @@ class RunMedCopilotTests(unittest.TestCase):
     def test_real_so_matching_excludes_reference_ap_and_keeps_full_soap_in_final_request_and_outputs(self):
         fixture = self.fixture
         fixture.corpus = [
-            {"note_id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
-             "assessment": "cough ONLY_IN_REFERENCE_A", "plan": "cough ONLY_IN_REFERENCE_P"},
-            {"note_id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
-             "assessment": "MATCH_ASSESSMENT", "plan": "MATCH_PLAN\nfollow-up"},
+            {"id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
+             "condition": "cough ONLY_IN_REFERENCE_A", "plan": ["cough ONLY_IN_REFERENCE_P"]},
+            {"id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
+             "condition": "MATCH_ASSESSMENT", "plan": ["MATCH_PLAN", "follow-up"]},
         ]
         fixture.write_corpus()
         state = self.real_so_retrieval()
@@ -1680,14 +1682,16 @@ class RunMedCopilotTests(unittest.TestCase):
         with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
             self.assertEqual(runner["main"](), "completed")
         first_dir, first_run, first_results = self.read_run()
-        self.assertEqual(first_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        self.assertEqual(first_results[0]["selected_reference_patient"], {"id": "MATCH"})
         first_pairs = state.rankers[0].model.calls[0]
         self.assertEqual(first_pairs, [(fixture.conditions, runner["matching_text"](record))
                                       for record in reversed(fixture.corpus)])
         self.assertEqual(state.encoder.calls[0], [runner["matching_text"](record)
                                                 for record in fixture.corpus])
-        for field in ("subjective", "objective", "assessment", "plan"):
+        for field in ("subjective", "objective", "condition"):
             self.assertIn(fixture.corpus[1][field], fixture.calls[-1]["messages"][-1]["content"])
+        for item in fixture.corpus[1]["plan"]:
+            self.assertIn(item, fixture.calls[-1]["messages"][-1]["content"])
         self.assertEqual(first_results[0]["assessment_plan_raw"], fixture.final_output)
         self.assertEqual(first_results[0]["assessment_plan_prompts"], {
             "system": fixture.calls[-1]["messages"][0]["content"],
@@ -1703,14 +1707,14 @@ class RunMedCopilotTests(unittest.TestCase):
                         for item in candidates_before]
         embedding_calls_before = len(state.encoder.calls)
         for number, record in enumerate(fixture.corpus):
-            record.update(assessment=f"CHANGED_A_{number}", plan=f"CHANGED_P_{number}")
+            record.update(condition=f"CHANGED_A_{number}", plan=[f"CHANGED_P_{number}"])
         fixture.write_corpus()
         with fixture.runtime(), patch.dict(runner["main"].__globals__, {"pacific_now": clock}):
             self.assertEqual(runner["main"](), "completed")
             self.assertEqual(Path.cwd(), fixture.caller)
         second_dir = self.run_dirs()[-1]
         _, second_run, second_results = self.read_run(second_dir)
-        self.assertEqual(second_results[0]["selected_reference_patient"], {"note_id": "MATCH"})
+        self.assertEqual(second_results[0]["selected_reference_patient"], {"id": "MATCH"})
         self.assertEqual(state.rankers[1].model.calls[0], first_pairs)
         self.assertEqual(cache_before, {path.name: path.read_bytes() for path in fixture.artifacts.iterdir()})
         self.assertEqual(len(state.encoder.calls), embedding_calls_before + 1)  # query only, cache reused
@@ -1809,14 +1813,15 @@ class RunMedCopilotTests(unittest.TestCase):
     def test_selected_reference_identity_survives_real_upstream_reranking(self):
         fixture = self.fixture
         fixture.corpus = [
-            {"note_id": f"NOTE-{row}", "subjective": f"Reference S{row}", "objective": f"Reference O{row}",
-             "assessment": f"Reference A{row}", "plan": f"Reference P{row}"}
+            {"id": f"NOTE-{row}", "subjective": f"Reference S{row}", "objective": f"Reference O{row}",
+             "condition": f"Reference A{row}", "plan": [f"Reference P{row}"]}
             for row in range(4)
         ]
         fixture.write_corpus()
         fixture.candidates = [
             {"idx": row, **{field: fixture.corpus[row][field]
-                            for field in ("subjective", "objective", "assessment", "plan")},
+                            for field in ("subjective", "objective", "condition", "plan")},
+             "assessment": fixture.corpus[row]["condition"],
              "dominant_terms": [{"original_text": f"term {row}", "contribution": 0.9}]}
             for row in (3, 1, 2)
         ]
@@ -1829,30 +1834,30 @@ class RunMedCopilotTests(unittest.TestCase):
             "query", [dict(candidate) for candidate in fixture.candidates], topk=5)
         reference_text = fixture.results[0]
         self.assertIn("Reference P1", reference_text)
-        fixture.reference = {"note_id": "NOTE-1"}
+        fixture.reference = {"id": "NOTE-1"}
         runner = self.load_runner()
         with fixture.runtime():
             runner["main"]()
         self.assert_outputs(reference_text=reference_text)
         _, _, [record] = self.read_run()
         self.assertEqual(record["retrieved_patient_ids"], [
-            {"note_id": "NOTE-3"}, {"note_id": "NOTE-1"}, {"note_id": "NOTE-2"}])
+            {"id": "NOTE-3"}, {"id": "NOTE-1"}, {"id": "NOTE-2"}])
         self.assertEqual(record["reranked_patient_ids"], [
-            {"note_id": "NOTE-1", "rerank_score": .9},
-            {"note_id": "NOTE-2", "rerank_score": .9},
-            {"note_id": "NOTE-3", "rerank_score": .5}])
+            {"id": "NOTE-1", "rerank_score": .9},
+            {"id": "NOTE-2", "rerank_score": .9},
+            {"id": "NOTE-3", "rerank_score": .5}])
 
-    def test_corpus_without_note_ids_uses_corpus_row_and_duplicates_disambiguate(self):
+    def test_corpus_without_ids_uses_corpus_row_and_duplicates_disambiguate(self):
         fixture_root = self.fixture.root
         for case, corpus, reference in [
-            ("no_note_id", [{"subjective": "S0", "objective": "O0", "assessment": "A0", "plan": "P0"},
-                            {"subjective": "S1", "objective": "O1", "assessment": "A1", "plan": "P1"}],
+            ("no_id", [{"subjective": "S0", "objective": "O0", "condition": "A0", "plan": ["P0"]},
+                       {"subjective": "S1", "objective": "O1", "condition": "A1", "plan": ["P1"]}],
              {"corpus_row": 1}),
-            ("duplicate_note_id", [{"note_id": "SAME", "subjective": "S0", "objective": "O0",
-                                    "assessment": "A0", "plan": "P0"},
-                                   {"note_id": "SAME", "subjective": "S1", "objective": "O1",
-                                    "assessment": "A1", "plan": "P1"}],
-             {"note_id": "SAME", "corpus_row": 1}),
+            ("duplicate_id", [{"id": "SAME", "subjective": "S0", "objective": "O0",
+                               "condition": "A0", "plan": ["P0"]},
+                              {"id": "SAME", "subjective": "S1", "objective": "O1",
+                               "condition": "A1", "plan": ["P1"]}],
+             {"id": "SAME", "corpus_row": 1}),
         ]:
             with self.subTest(case=case):
                 self.fixture = PipelineFixture(fixture_root / case)
@@ -2555,7 +2560,7 @@ class RunMedCopilotTests(unittest.TestCase):
         )
         for evidence in [self.fixture.conditions, self.fixture.results[0], self.fixture.guideline_text]:
             self.assertIn(evidence, rendered)
-        self.assertIn("Assessment: REFERENCE_DIAGNOSIS", rendered)
+        self.assertIn("Condition: REFERENCE_DIAGNOSIS", rendered)
         for requirement in [
             "top 3 most likely conditions", "ranked from most to least likely",
             "separate plan of at most 3 items for each condition",
@@ -2691,12 +2696,12 @@ class RunMedCopilotTests(unittest.TestCase):
         corpus_path.parent.mkdir()
         fixture.corpus = [
             {"subjective": "Alternate S café", "objective": "Alternate O",
-             "assessment": "Alternate A", "plan": "Alternate P"},
+             "condition": "Alternate A", "plan": ["Alternate P"]},
             {"subjective": "Second S", "objective": "Second O",
-             "assessment": "Second A", "plan": "Second P"},
+             "condition": "Second A", "plan": ["Second P"]},
         ]
         fixture.write_corpus(corpus_path)
-        (fixture.upstream / "soap_with_metadata.json").unlink()
+        (fixture.root / "med_copilot/data/patient_corpus/reference_patients.json").unlink()
         fixture.candidates = [{"idx": 1, "id": "alternate-patient", "display_text": "Second S"}]
         fixture.rerank_scores = [0.4]
         fixture.results = ["ALTERNATE_SIMILAR_CASE café\nSecond P"]
@@ -2779,9 +2784,9 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertEqual(record["keyword_extraction_raw"], raw)
         self.assertEqual(record["retrieval_keywords"], ["café", "cough", "左腕", "asthma", "药"])
         self.assertEqual(record["retrieval_keywords"], fixture.extracted_keywords)
-        self.assertEqual(record["retrieved_patient_ids"], [{"note_id": "NOTE-A"}, {"note_id": "NOTE-B"}])
+        self.assertEqual(record["retrieved_patient_ids"], [{"id": "NOTE-A"}, {"id": "NOTE-B"}])
         self.assertEqual(record["reranked_patient_ids"], [
-            {"note_id": "NOTE-B", "rerank_score": .9}, {"note_id": "NOTE-A", "rerank_score": .2}])
+            {"id": "NOTE-B", "rerank_score": .9}, {"id": "NOTE-A", "rerank_score": .2}])
         self.assertEqual(record["model_responses"]["keyword_extraction"], [{
             "reported_model": "reported-keyword", "response_id": "keyword-id",
             "token_usage": {"prompt_tokens": 9, "completion_tokens": None, "total_tokens": 13}}])
@@ -2891,11 +2896,11 @@ class RunMedCopilotTests(unittest.TestCase):
 
     def test_real_rankings_keep_nontrivial_rows_disambiguation_scores_ties_and_topfive(self):
         fixture = self.fixture
-        fixture.corpus = [dict(note_id=f"N{row}", subjective="cough", objective="normal",
-                              assessment=f"ASSESSMENT {row}", plan=f"PLAN {row}", subject_id="SAME")
+        fixture.corpus = [dict(id=f"N{row}", subjective="cough", objective="normal",
+                              condition=f"ASSESSMENT {row}", plan=[f"PLAN {row}"], subject_id="SAME")
                           for row in range(8)]
-        fixture.corpus[2]["note_id"] = fixture.corpus[5]["note_id"] = "DUP"
-        del fixture.corpus[6]["note_id"]
+        fixture.corpus[2]["id"] = fixture.corpus[5]["id"] = "DUP"
+        del fixture.corpus[6]["id"]
         fixture.write_corpus()
         state = self.real_so_retrieval()
         constructor, rank_constructor = state.module.HybridRetriever, state.module.CrossEncoderReranker
@@ -2915,11 +2920,11 @@ class RunMedCopilotTests(unittest.TestCase):
             self.assertEqual(runner["main"](), "completed")
         _, _, [record] = self.read_run()
         hybrid, reranked = record["retrieved_patient_ids"], record["reranked_patient_ids"]
-        expected = [{"corpus_row": 6}, {"note_id": "DUP", "corpus_row": 2},
-                    {"note_id": "DUP", "corpus_row": 5}, {"note_id": "N1"}, {"note_id": "N7"},
-                    {"note_id": "N0"}, {"note_id": "N3"}, {"note_id": "N4"}]
+        expected = [{"corpus_row": 6}, {"id": "DUP", "corpus_row": 2},
+                    {"id": "DUP", "corpus_row": 5}, {"id": "N1"}, {"id": "N7"},
+                    {"id": "N0"}, {"id": "N3"}, {"id": "N4"}]
         def identity(item):
-            return {key: value for key, value in item.items() if key in ("note_id", "corpus_row")}
+            return {key: value for key, value in item.items() if key in ("id", "corpus_row")}
         self.assertEqual([identity(item) for item in hybrid], expected)
         self.assertEqual([identity(item) for item in reranked], [expected[index] for index in (1, 2, 7, 6, 5)])
         self.assertEqual(reranked[0]["rerank_score"], .987654321)
@@ -2930,7 +2935,7 @@ class RunMedCopilotTests(unittest.TestCase):
         self.assertIn("PLAN 2", prompt)
         self.assertNotIn("ASSESSMENT 6", prompt)
         for item in hybrid + reranked:
-            self.assertFalse(set(item) - {"note_id", "corpus_row", "embedding_score", "keyword_score", "hybrid_score", "rerank_score"})
+            self.assertFalse(set(item) - {"id", "corpus_row", "embedding_score", "keyword_score", "hybrid_score", "rerank_score"})
         self.assertEqual(state.retrievers[0].search.call_count, 1)
         self.assertEqual(state.rankers[0].rerank.call_count, 1)
         self.assertEqual(state.rankers[0].model.predict.call_count, 1)
@@ -3173,8 +3178,8 @@ class RunMedCopilotTests(unittest.TestCase):
 
     def test_persisted_real_retained_ranking_excludes_larger_faiss_pool(self):
         fixture = self.fixture
-        fixture.corpus = [dict(note_id=f"N{row}", subjective="cough", objective="normal",
-                              assessment=f"A {row}", plan=f"P {row}") for row in range(35)]
+        fixture.corpus = [dict(id=f"N{row}", subjective="cough", objective="normal",
+                              condition=f"A {row}", plan=[f"P {row}"]) for row in range(35)]
         fixture.write_corpus()
         state = self.real_so_retrieval()
         constructor = state.module.HybridRetriever
@@ -3189,12 +3194,12 @@ class RunMedCopilotTests(unittest.TestCase):
         _, _, [record] = self.read_run()
         self.assertEqual(len(record["retrieved_patient_ids"]), 20)
         self.assertEqual(len(record["reranked_patient_ids"]), 5)
-        self.assertEqual([entry["note_id"] for entry in record["retrieved_patient_ids"]],
+        self.assertEqual([entry["id"] for entry in record["retrieved_patient_ids"]],
                          [f"N{row}" for row in range(20)])
-        self.assertEqual([entry["note_id"] for entry in record["reranked_patient_ids"]],
+        self.assertEqual([entry["id"] for entry in record["reranked_patient_ids"]],
                          [f"N{row}" for row in range(5)])
         self.assertEqual(state.retrievers[0].embedder.index.search.call_args.args[1], 35)
-        self.assertEqual(record["selected_reference_patient"], {"note_id": "N0"})
+        self.assertEqual(record["selected_reference_patient"], {"id": "N0"})
         self.assertEqual(len(fixture.keyword_calls), 1)
         self.assertEqual(len(fixture.calls), 2)
 
@@ -3233,8 +3238,8 @@ class RunMedCopilotTests(unittest.TestCase):
                 fixture = self.fixture
                 patients = self.write_marked_patients()
                 fixture.corpus = [
-                    {"note_id": f"REF-{index}", "subjective": "reference cough", "objective": "normal",
-                     "assessment": f"REFERENCE ASSESSMENT {index}", "plan": f"REFERENCE PLAN {index}"}
+                    {"id": f"REF-{index}", "subjective": "reference cough", "objective": "normal",
+                     "condition": f"REFERENCE ASSESSMENT {index}", "plan": [f"REFERENCE PLAN {index}"]}
                     for index in range(3)
                 ]
                 fixture.write_corpus()
@@ -3383,13 +3388,13 @@ class RunMedCopilotTests(unittest.TestCase):
                     self.assertEqual(record["retrieval_keywords"],
                                      [marker, "cough", "药"] if level >= 3 else None)
                     if level >= 5:
-                        self.assertEqual([item["note_id"] for item in record["retrieved_patient_ids"]],
+                        self.assertEqual([item["id"] for item in record["retrieved_patient_ids"]],
                                          [f"REF-{(index + offset) % 3}" for offset in range(3)])
                         self.assertNotIn("rerank_score", record["retrieved_patient_ids"][0])
                     else:
                         self.assertIsNone(record["retrieved_patient_ids"])
                     if level >= 7:
-                        self.assertEqual([item["note_id"] for item in record["reranked_patient_ids"]],
+                        self.assertEqual([item["id"] for item in record["reranked_patient_ids"]],
                                          [f"REF-{(index + offset) % 3}" for offset in (1, 0, 2)])
                         self.assertEqual(record["reranked_patient_ids"][0]["rerank_score"], .987654321)
                     else:
@@ -3411,7 +3416,7 @@ class RunMedCopilotTests(unittest.TestCase):
                             if index != 1:
                                 self.assertNotIn("MARKER_BRAVO", json.dumps(entries))
                     if index != 1:
-                        self.assertEqual(record["selected_reference_patient"], {"note_id": f"REF-{(index + 1) % 3}"})
+                        self.assertEqual(record["selected_reference_patient"], {"id": f"REF-{(index + 1) % 3}"})
                         self.assertIn(f"REFERENCE PLAN {(index + 1) % 3}", record["assessment_plan_prompts"]["user"])
                 self.assertIsNone(state.retrievers[0].keyword_extractor.capture_result)
                 self.assertEqual(len(fixture.keyword_calls), 3 - int(boundary == "before_extract"))
@@ -3428,7 +3433,7 @@ class RunMedCopilotTests(unittest.TestCase):
                     fixture.failure = "rerank_formatting"
                 else:
                     fixture.candidates = [
-                        {"idx": row, **record, "dominant_terms": [{}]}
+                        {"idx": row, **record, "assessment": record["condition"], "dominant_terms": [{}]}
                         for row, record in enumerate(fixture.corpus)
                     ]
                     ranker = frozen_reranker_class(fixture.rerank_scores)()
@@ -3442,10 +3447,10 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
                 self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
                 self.assertEqual(record["retrieved_patient_ids"], [
-                    {"note_id": "NOTE-A"}, {"note_id": "NOTE-B"}])
+                    {"id": "NOTE-A"}, {"id": "NOTE-B"}])
                 self.assertEqual(record["reranked_patient_ids"], [
-                    {"note_id": "NOTE-B", "rerank_score": .9},
-                    {"note_id": "NOTE-A", "rerank_score": .2}])
+                    {"id": "NOTE-B", "rerank_score": .9},
+                    {"id": "NOTE-A", "rerank_score": .2}])
                 self.assertIsNone(record["selected_reference_patient"])
                 self.assertIsNone(record["assessment_plan_prompts"])
                 self.assertIsNone(record["assessment_plan_raw"])
@@ -3469,8 +3474,8 @@ class RunMedCopilotTests(unittest.TestCase):
                 fixture = self.fixture
                 fixture.failure, fixture.error = "retrieval_attribution", error
                 fixture.corpus = [
-                    {"note_id": f"NOTE-{row}", "subjective": "cough", "objective": "normal",
-                     "assessment": f"ASSESSMENT {row}", "plan": f"PLAN {row}"}
+                    {"id": f"NOTE-{row}", "subjective": "cough", "objective": "normal",
+                     "condition": f"ASSESSMENT {row}", "plan": [f"PLAN {row}"]}
                     for row in range(25)
                 ]
                 fixture.write_corpus()
@@ -3497,7 +3502,7 @@ class RunMedCopilotTests(unittest.TestCase):
                 self.assertEqual(record["keyword_extraction_raw"], fixture.keyword_content)
                 self.assertEqual(record["retrieval_keywords"], ["Cough", "denies fever"])
                 self.assertEqual(record["retrieved_patient_ids"], [
-                    {"note_id": f"NOTE-{row}", "embedding_score": .9123456789,
+                    {"id": f"NOTE-{row}", "embedding_score": .9123456789,
                      "keyword_score": .5, "hybrid_score": .70617283945}
                     for row in order[:20]
                 ])
@@ -4900,7 +4905,7 @@ class VariantIntegrationTests(unittest.TestCase):
                 self.write_config()
                 sources = HELPER_NAMESPACE["VARIANT_SOURCES"][variant]
                 if "patient_retrieval" not in sources:
-                    (self.fixture.upstream / "soap_with_metadata.json").unlink()
+                    (self.fixture.root / "med_copilot/data/patient_corpus/reference_patients.json").unlink()
                     shutil.rmtree(self.fixture.artifacts)
                 if "guidelines" not in sources:
                     shutil.rmtree(self.fixture.guidelines)
@@ -4920,7 +4925,7 @@ class VariantIntegrationTests(unittest.TestCase):
         self.config["models"]["local"] = dict(type="chat", model_provider="openai", model="local", api_base="http://localhost:11434/v1")
         self.experiment.update(selected_models=["local"], selected_variants=["llm_only"])
         fixture.environment = {}
-        (fixture.upstream / "soap_with_metadata.json").unlink()
+        (fixture.root / "med_copilot/data/patient_corpus/reference_patients.json").unlink()
         shutil.rmtree(fixture.guidelines)
         self.write_config()
         status, run, [row] = self.execute()
@@ -4956,7 +4961,7 @@ class VariantIntegrationTests(unittest.TestCase):
 
     def test_source_initialization_failure_still_runs_baseline_and_saves_safe_errors(self):
         fixture = self.fixture
-        (fixture.upstream / "soap_with_metadata.json").unlink()
+        (fixture.root / "med_copilot/data/patient_corpus/reference_patients.json").unlink()
         (fixture.guidelines / "output/entities.parquet").unlink()
         status, run, [row] = self.execute()
         self.assertEqual(status, "completed_with_errors")
@@ -5182,7 +5187,7 @@ class PipelineConfigurationIntegrationTests(unittest.TestCase):
         fixture = self.fixture
         corpus = fixture.root / "references café/patients.json"
         corpus.parent.mkdir()
-        (fixture.upstream / "soap_with_metadata.json").rename(corpus)
+        (fixture.root / "med_copilot/data/patient_corpus/reference_patients.json").rename(corpus)
         artifacts = fixture.root / "cache café"
         fixture.artifacts.rename(artifacts)
         fixture.artifacts = artifacts
@@ -5485,8 +5490,8 @@ VARIANTS["override_two"] = VARIANTS["patient_retrieval_guidelines"]
         self.assertNotEqual(first, baseline)
         self.assertEqual(len(record["components"][baseline]["capture"]["retrieved_patient_ids"]), 2)
         self.assertEqual(len(record["components"][first]["capture"]["retrieved_patient_ids"]), 1)
-        self.assertEqual(record["components"][baseline]["capture"]["selected_reference_patient"], {"note_id": "NOTE-B"})
-        self.assertEqual(record["components"][first]["capture"]["selected_reference_patient"], {"note_id": "NOTE-A"})
+        self.assertEqual(record["components"][baseline]["capture"]["selected_reference_patient"], {"id": "NOTE-B"})
+        self.assertEqual(record["components"][first]["capture"]["selected_reference_patient"], {"id": "NOTE-A"})
         for name in self.experiment["selected_variants"]:
             expected_k = 20 if name == "patient_retrieval_guidelines" else 1
             self.assertEqual(run["experiment"]["variant_settings"][name]["patient_retrieval"]["top_k"], expected_k)

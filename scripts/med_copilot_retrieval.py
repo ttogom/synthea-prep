@@ -145,9 +145,10 @@ class HybridRetriever(_UpstreamRetriever):
                for record in records):
             raise ValueError("Reference records must have nonempty S/O")
         for record in records:
-            for field in ("assessment", "plan"):
-                if not isinstance(record.get(field), str):
-                    raise ValueError(f"Reference {field} must be a string")
+            if not isinstance(record.get("condition"), str) or not record["condition"].strip():
+                raise ValueError("Reference condition must be a nonempty string")
+            if not isinstance(record.get("plan"), list):
+                raise ValueError("Reference plan must be a list")
         self.alpha = alpha
         self.embedder = _SOEmbeddingRetriever(self.matching_texts, model_name, encoder)
         self.keyword_extractor = LLMKeywordExtractor(
@@ -180,13 +181,13 @@ class HybridRetriever(_UpstreamRetriever):
             candidates.append({
                 "idx": row,
                 **{field: record[field] for field in
-                   ("subjective", "objective", "assessment", "plan")},
+                   ("subjective", "objective", "condition", "plan")},
                 "case_text": case_text,
                 "display_text": (
                     f'Subjective:\n{record["subjective"]}\n\n'
                     f'Objective:\n{record["objective"]}\n\n'
-                    f'Assessment:\n{record["assessment"]}\n\n'
-                    f'Plan:\n{record["plan"]}\n'
+                    f'Condition:\n{record["condition"]}\n\n'
+                    f'Plan:\n' + "".join(f'- {item}\n' for item in record["plan"])
                 ),
                 "embedding_score": float(score),
                 "keyword_score": float(keyword_score),
@@ -230,16 +231,17 @@ class CrossEncoderReranker(_UpstreamReranker):
             self.on_ranking(ranked)
         results = []
         for number, record in enumerate(ranked, 1):
+            plan_bullets = "".join(f"- {item}\n" for item in record["plan"])
             info = f"""
 Result {number}
 Subjective:
 {record['subjective']}
 Objective:
 {record['objective']}
-Assessment:
-{record['assessment']}
+Condition:
+{record['condition']}
 Plan:
-{record['plan']}
+{plan_bullets}
 Rerank score: {record['rerank_score']:.4f}
 
 Dominant medical concepts (contribution >= {CONTRIBUTION_THRESHOLD}):
