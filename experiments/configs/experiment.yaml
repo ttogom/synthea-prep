@@ -1,11 +1,11 @@
 # All relative paths resolve from the repository root. API keys stay in .env/the environment.
 
 # Dataset and cohort.
-patient_input: experiments/input/test_sample_so.jsonl  # Prepared patient S/O records.
-patient_labels: experiments/input/test_sample_labels.jsonl  # Gold labels joined by exact patient ID.
+patient_input: experiments/input/test_so.jsonl  # Prepared patient S/O records.
+patient_labels: experiments/input/test_labels.jsonl  # Gold labels joined by exact patient ID.
 presenting_evidence_only: true  # Keep patients with presenting evidence in their label.
 exclude_none_recorded_plans: true  # Exclude label plan exactly ["none recorded"].
-max_patients: null  # First N after both filters; null runs every eligible patient.
+max_patients: 10  # First N after both filters; null runs every eligible patient (2,378 in the full test set).
 
 # Evidence variants — every selected final model runs each selected variant.
 selected_variants:
