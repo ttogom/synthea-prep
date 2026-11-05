@@ -44,7 +44,14 @@ Focus on questions about points like:
 - Investigations needed to establish or exclude a diagnosis,
 - How to address or alleviate the patient's **specific symptoms mentioned in the record**,
 - Appropriate medication or dosing,
-- Symptom management and treatment conditional on the diagnostic possibilities.
+- Symptom management and treatment conditional on the diagnostic possibilities,
+- Specific diagnostic tests or procedures recommended for the most likely diagnostic possibilities,
+- First-line and alternative medication choices, including strength or dose, for each likely possibility,
+- Severity or functional classification used to stage a suspected condition,
+- Patient education and lifestyle advice for a suspected condition,
+- Long-term management or care plans for suspected chronic conditions.
+
+Use at least one question to ask about concrete plan actions (tests, medications, classification, education, or management plans) for the most likely possibilities.
 
 Describe possible diagnoses as hypotheses rather than established patient facts.
 
