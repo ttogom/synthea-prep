@@ -1,0 +1,12 @@
+{
+  "acute_bronchitis": "acute bronchitis",
+  "bacterial_sinusitis": "acute bacterial sinusitis",
+  "copd": "chronic obstructive pulmonary disease",
+  "covid19": "covid-19",
+  "cystitis": "acute infective cystitis",
+  "heart_failure": "chronic congestive heart failure",
+  "hypertension": "essential hypertension",
+  "strep_throat": "streptococcal sore throat",
+  "viral_pharyngitis": "acute viral pharyngitis",
+  "viral_sinusitis": "viral sinusitis"
+}

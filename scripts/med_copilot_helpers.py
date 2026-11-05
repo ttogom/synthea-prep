@@ -391,12 +391,12 @@ def reference_patient_identity(corpus_records, row):
     row = int(row)
     if not 0 <= row < len(corpus_records):
         raise ValueError(f"Reference corpus row out of range: {row}")
-    note_id = corpus_records[row].get("note_id")
-    if not isinstance(note_id, str) or not note_id.strip():
+    record_id = corpus_records[row].get("id")
+    if not isinstance(record_id, str) or not record_id.strip():
         return {"corpus_row": row}
-    if sum(record.get("note_id") == note_id for record in corpus_records) > 1:
-        return {"note_id": note_id, "corpus_row": row}
-    return {"note_id": note_id}
+    if sum(record.get("id") == record_id for record in corpus_records) > 1:
+        return {"id": record_id, "corpus_row": row}
+    return {"id": record_id}
 
 
 def ranked_reference_patients(corpus_records, candidates):

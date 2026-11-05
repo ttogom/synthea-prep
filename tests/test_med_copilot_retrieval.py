@@ -133,10 +133,10 @@ class SOMatchingTests(unittest.TestCase):
         self.module = load_retrieval_module()
         self.encoder = FakeEncoder()
         self.records = [
-            {"note_id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
-             "assessment": "cough diagnosis ONLY_IN_A", "plan": "cough treatment ONLY_IN_P"},
-            {"note_id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
-             "assessment": "REFERENCE_DIAGNOSIS", "plan": "REFERENCE_PLAN\nFollow-up"},
+            {"id": "DISTRACTOR", "subjective": "headache", "objective": "normal",
+             "condition": "cough diagnosis ONLY_IN_A", "plan": ["cough treatment ONLY_IN_P"]},
+            {"id": "MATCH", "subjective": "cough café\nDay 2", "objective": "SpO₂ 98%",
+             "condition": "REFERENCE_DIAGNOSIS", "plan": ["REFERENCE_PLAN", "Follow-up"]},
         ]
 
     def retriever(self, records=None, encoder=None, **kwargs):
@@ -153,8 +153,8 @@ class SOMatchingTests(unittest.TestCase):
         return json.loads((self.directory / "matching.json").read_text())
 
     def test_matching_text_uses_only_so_and_preserves_whitespace_unicode_and_empty_sections(self):
-        record = {"subjective": " café\n ", "objective": "", "assessment": "PRIVATE_A",
-                  "plan": "PRIVATE_P", "id": "PRIVATE_ID"}
+        record = {"subjective": " café\n ", "objective": "", "condition": "PRIVATE_C",
+                  "plan": ["PRIVATE_P"], "id": "PRIVATE_ID"}
         original = copy.deepcopy(record)
         self.assertEqual(self.module.matching_text(record), "Subjective:  café\n \nObjective: ")
         self.assertEqual(record, original)
@@ -185,8 +185,9 @@ class SOMatchingTests(unittest.TestCase):
     def test_constructor_rejects_invalid_corpus_and_weight_before_writing_artifacts(self):
         for records, alpha in [([], 0.5), (self.records, -0.1), (self.records, 1.1),
                                ([{**self.records[0], "subjective": 7}], 0.5),
-                               ([{**self.records[0], "assessment": None}], 0.5),
-                               ([{**self.records[0], "plan": None}], 0.5),
+                               ([{**self.records[0], "condition": None}], 0.5),
+                               ([{**self.records[0], "condition": "  "}], 0.5),
+                               ([{**self.records[0], "plan": "not a list"}], 0.5),
                                ([{**self.records[0], "subjective": " ", "objective": ""}], 0.5)]:
             with self.subTest(records=records, alpha=alpha), self.assertRaises(ValueError):
                 self.retriever(records, alpha=alpha)
@@ -203,15 +204,15 @@ class SOMatchingTests(unittest.TestCase):
         self.retriever()
         before = {path.name: path.read_bytes() for path in self.directory.iterdir()}
         changed = copy.deepcopy(self.records)
-        changed[1].update(assessment="NEW_A", plan="NEW_P")
+        changed[1].update(condition="NEW_C", plan=["NEW_P"])
         fresh_encoder = FakeEncoder()
         retriever = self.retriever(changed, encoder=fresh_encoder)
         self.assertEqual(fresh_encoder.calls, [])
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.directory.iterdir()})
         candidate = retriever.search("cough")[0]
         self.assertEqual(candidate["idx"], 1)
-        self.assertEqual(candidate["assessment"], "NEW_A")
-        self.assertEqual(candidate["plan"], "NEW_P")
+        self.assertEqual(candidate["condition"], "NEW_C")
+        self.assertEqual(candidate["plan"], ["NEW_P"])
 
     def test_rebuilds_cache_when_so_row_order_model_or_encoder_revision_changes(self):
         self.retriever()
@@ -310,7 +311,8 @@ class SOMatchingTests(unittest.TestCase):
         self.assertEqual([item["idx"] for item in candidates], [1, 0])
         self.assertEqual([item["keyword_score"] for item in candidates], [1, 0])
         self.assertIn("REFERENCE_DIAGNOSIS", candidates[0]["display_text"])
-        self.assertIn("REFERENCE_PLAN\nFollow-up", candidates[0]["display_text"])
+        self.assertIn("- REFERENCE_PLAN\n", candidates[0]["display_text"])
+        self.assertIn("- Follow-up\n", candidates[0]["display_text"])
         self.assertNotIn("ONLY_IN_A", candidates[1]["case_text"])
         self.assertNotIn("ONLY_IN_P", candidates[1]["case_text"])
         self.assertEqual(self.records, original)
@@ -372,8 +374,10 @@ class SOMatchingTests(unittest.TestCase):
         ])
         self.assertEqual([item["rerank_score"] for item in candidates], [0.9, 0.9])
         self.assertEqual(len(results), 1)
-        for field in ("subjective", "objective", "assessment", "plan"):
+        for field in ("subjective", "objective", "condition"):
             self.assertIn(self.records[1][field], results[0])
+        for item in self.records[1]["plan"]:
+            self.assertIn(item, results[0])
         self.assertIn("Rerank score: 0.9000", results[0])
 
     def test_ap_changes_cannot_change_matching_or_reranking_but_change_generation_example(self):
@@ -383,7 +387,7 @@ class SOMatchingTests(unittest.TestCase):
         before = reranker.rerank(query, candidates)
         changed = copy.deepcopy(self.records)
         for record in changed:
-            record.update(assessment="fever cough NEW_A", plan="headache cough NEW_P")
+            record.update(condition="fever cough NEW_C", plan=["headache cough NEW_P"])
         after_candidates = self.retriever(changed).search(query)
         after = reranker.rerank(query, after_candidates)
         fields = ("idx", "embedding_score", "keyword_score", "hybrid_score", "rerank_score")
@@ -391,7 +395,7 @@ class SOMatchingTests(unittest.TestCase):
                          [{field: item[field] for field in fields} for item in after_candidates])
         self.assertEqual(reranker.model.calls[0], reranker.model.calls[1])
         self.assertNotEqual(before, after)
-        self.assertIn("NEW_A", after[0])
+        self.assertIn("NEW_C", after[0])
         self.assertIn("NEW_P", after[0])
 
     def test_reranker_empty_inputs_bad_predictions_and_model_failure(self):
@@ -411,7 +415,7 @@ class SOMatchingTests(unittest.TestCase):
             reranker.rerank("query", candidates)
 
     def test_hybrid_capture_is_retained_topk_before_attribution_with_unrounded_scores(self):
-        records = [dict(self.records[index % 2], note_id=f"N{index}") for index in range(35)]
+        records = [dict(self.records[index % 2], id=f"N{index}") for index in range(35)]
         retriever = self.retriever(records)
         saved = []
         retriever.on_ranking = lambda ranking: saved.append(copy.deepcopy(ranking))
@@ -436,7 +440,7 @@ class SOMatchingTests(unittest.TestCase):
         self.assertEqual(saved[-1], [])
 
     def test_rerank_capture_precedes_formatting_and_keeps_actual_topfive_stable_ties(self):
-        records = [dict(self.records[index % 2], note_id=f"N{index}") for index in range(8)]
+        records = [dict(self.records[index % 2], id=f"N{index}") for index in range(8)]
         candidates = self.retriever(records).search("cough")
         reranker = self.module.CrossEncoderReranker()
         reranker.model.predict = Mock(return_value=[.1, .987654321, .987654321, .3, .4, .5, .6, .7])
