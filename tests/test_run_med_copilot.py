@@ -66,8 +66,8 @@ UPSTREAM_GRAPH_ENTITY_EXTRACTION = (
 GUIDELINE_SETTINGS = ROOT / "med_copilot/data/guidelines/settings.yaml"
 GUIDELINE_TABLES = ("communities", "community_reports", "text_units", "relationships", "entities")
 PROJECT_PROMPTS = ROOT / "med_copilot/prompts/diagnosis_plan.py"
-INPUT_NAME = "test_sample_so.jsonl"
-LABELS_NAME = "test_sample_labels.jsonl"
+INPUT_NAME = "test_so.jsonl"
+LABELS_NAME = "test_labels.jsonl"
 BRANCH = "feature/issue-9"
 SAFE_BRANCH = "feature-issue-9"
 RESULT_FIELDS = [
@@ -321,6 +321,21 @@ def template_git_dir():
         subprocess.run(["git", "init", "-q", "-b", BRANCH, str(template)], check=True, capture_output=True)
         git(template, "commit", "-q", "--allow-empty", "-m", "fixture")
     return template / ".git"
+
+
+def scoring_cohort_bytes():
+    """A fixed cohort with seven presenting cases, five of them with plans."""
+    patients, labels = [], []
+    for i in range(10):
+        patient_id = f"fixture-patient-{i}"
+        patients.append({"id": patient_id, "subjective": "Reports cough.",
+                         "objective": f"Respiratory rate {16 + i}."})
+        labels.append({"id": patient_id, "condition": f"fixture_condition_{i}",
+                       "has_presenting_evidence": i < 7,
+                       "plan": ["none recorded"] if i in (1, 4) else [f"fixture plan {i}"]})
+    # Reverse the labels to check that the join uses IDs instead of row order.
+    return tuple("".join(json.dumps(row) + "\n" for row in rows).encode("utf-8")
+                 for rows in (patients, reversed(labels)))
 
 
 class PipelineFixture:
@@ -1141,8 +1156,8 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             "config_sha256": hashlib.sha256(fixture.experiment_config.read_bytes()).hexdigest(),
             "model_config": "experiments/configs/condition_plan_models.yaml",
             "selected_models": ["gpt_4o_mini"], "temperature": 1, "max_retries": 3, "max_patients": None,
-            "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_sample_so.jsonl",
-            "patient_labels": "experiments/input/test_sample_labels.jsonl", "presenting_evidence_only": True,
+            "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_so.jsonl",
+            "patient_labels": "experiments/input/test_labels.jsonl", "presenting_evidence_only": True,
             "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
         })
         self.assertEqual(old_path.read_text(), "OBSOLETE_CONFIG_DO_NOT_LOAD")
@@ -2137,7 +2152,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                                      "content": ["Full summary café\n" + "x" * 5000]}),
             "entities": pd.DataFrame({"id": ["1228"], "entity": ["DIAGNOSTIC ASSESSMENT"],
                                       "in_context": [True]}),
-            "sources": pd.DataFrame({"id": ["157"], "text": ["Original excerptline"]}),
+            "sources": pd.DataFrame({"id": ["157"], "text": ["Original excerpt line"]}),
             "empty_table": pd.DataFrame(),
             "additional_table": pd.DataFrame({"value": [1.5, float("nan")]}, index=["a", "b"]),
         }
@@ -2161,7 +2176,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         fixture = self.fixture
         records = [{"id": f"id-{marker.lower()}-é",
                     "subjective": f"MARKER_{marker} reports cough.\nSecond line café",
-                    "objective": f"MARKER_{marker} temperature 37.2 °CSpO₂ 98%"}
+                    "objective": f"MARKER_{marker} temperature 37.2 °C SpO₂ 98%"}
                    for marker in markers]
         fixture.write_patients(records)
 
@@ -2172,7 +2187,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 return json.dumps({"Key Questions": [f"{marker} question?"]})
             if stage == "final":
                 return json.dumps({"predictions": prediction_pairs(
-                    f"{marker} diagnosis café", [f"{marker} planend"])}, ensure_ascii=False)
+                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False)
             return (f"{marker} guideline evidence\nline two",
                     {"sources": pd.DataFrame({"id": [marker], "text": [f"{marker} source\n"]})})
 
@@ -2201,9 +2216,9 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 **self.expected_capture(),
                 "id": record["id"],
                 "status": "completed",
-                "predictions": prediction_pairs(f"{marker} diagnosis café", [f"{marker} planend"]),
+                "predictions": prediction_pairs(f"{marker} diagnosis café", [f"{marker} plan end"]),
                 "assessment_plan_raw": json.dumps({"predictions": prediction_pairs(
-                    f"{marker} diagnosis café", [f"{marker} planend"])}, ensure_ascii=False),
+                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False),
                 "selected_reference_patient": fixture.reference,
                 "guideline_questions": [f"{marker} question?"],
                 "guideline_evidence": evidence,
@@ -2854,10 +2869,10 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(len(fixture.calls), 2)
         self.assert_outputs()
 
-    def test_checked_in_sample_input_uses_id_and_unique_values(self):
+    def test_checked_in_input_uses_id_and_unique_values(self):
         records = HELPER_NAMESPACE["load_patient_records"](
             ROOT / "experiments/input" / INPUT_NAME)
-        self.assertEqual(len(records), 10)
+        self.assertGreater(len(records), 10)
         self.assertEqual(len({record["id"] for record in records}), len(records))
         self.assertTrue(all(list(record) == ["id", "subjective", "objective"] for record in records))
         self.assertFalse((ROOT / "data_run_med_copilot").exists())
@@ -3017,6 +3032,26 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(capture["guideline_question_screen"]["retry_terms"], ["heart failure", "hypertension"])
         self.assertEqual(capture["guideline_question_screen"]["retry_reply"], retry)
         self.assertEqual(capture["guideline_questions"], ["Manage these findings and these findings?"])
+
+    def test_question_retry_failure_is_saved_as_question_generation_error(self):
+        fixture = self.fixture
+
+        def reply(stage, _prompt):
+            self.assertEqual(stage, "questions")
+            if len(fixture.calls) == 1:
+                return '{"Key Questions": ["Is this heart failure given the edema?"]}'
+            raise RuntimeError("mock question retry failure")
+
+        fixture.reply = reply
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed_with_errors")
+        [first_call, retry_call] = fixture.calls
+        self.assertEqual(first_call, retry_call)
+        self.assertEqual(fixture.graph_calls, [])
+        [entry] = self.saved_errors()
+        self.assert_error(entry, fixture.patient_id, "guideline_question_generation",
+                          "RuntimeError", "mock question retry failure")
 
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture
@@ -3913,9 +3948,8 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         return {"id": patient_id, "condition": condition, "has_presenting_evidence": evidence,
                 "plan": ["GOLD_ONLY drug", "GOLD_ONLY follow-up"] if plan is None else plan}
 
-    def test_default_sample_paths_run_matched_files_with_seven_or_all_ten_patients(self):
-        source_input = (ROOT / "experiments/input" / INPUT_NAME).read_bytes()
-        source_labels = (ROOT / "experiments/input" / LABELS_NAME).read_bytes()
+    def test_default_paths_run_matched_files_with_seven_or_all_ten_patients(self):
+        source_input, source_labels = scoring_cohort_bytes()
         patients = [json.loads(line) for line in source_input.decode("utf-8").split("\n")
                     if line.strip()]
         labels = {row["id"]: row for row in
@@ -3947,7 +3981,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
                 self.assertEqual(run["evaluation"]["labels_sha256"], hashlib.sha256(source_labels).hexdigest())
                 self.assertEqual(run["evaluation"]["selected_patient_count"], expected_count)
                 self.assertEqual(run["evaluation"]["presenting_evidence_only"], evidence_only)
-                self.assertIn("__test_sample_so__", run_dir.name)
+                self.assertIn(f"__{Path(INPUT_NAME).stem}__", run_dir.name)
                 expected_calls = []
                 for record in records:
                     label = labels[record["id"]]
@@ -4462,7 +4496,9 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.fixture.real_scoring = True
         self.fixture.write_labels([self.label(self.fixture.patient_id)])
         self.experiment = {"selected_models": ["gpt_4o_mini", "llama"], "temperature": 1,
-                           "max_retries": 3, "max_patients": None}
+                           "max_retries": 3, "max_patients": None,
+                           "patient_input": f"experiments/input/{INPUT_NAME}",
+                           "patient_labels": f"experiments/input/{LABELS_NAME}"}
         self.config = {"models": {
             "gpt_4o_mini": {"type": "chat", "model_provider": "openai", "model": "gpt-4o-mini",
                             "api_key_env": "OPENAI_API_KEY"},
@@ -4771,8 +4807,8 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
             "config_sha256": hashlib.sha256(self.fixture.experiment_config.read_bytes()).hexdigest(),
             "model_config": "experiments/configs/condition_plan_models.yaml",
             "selected_models": ["gpt_4o_mini", "llama"], "temperature": 0.25, "max_retries": 6, "max_patients": None,
-            "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_sample_so.jsonl",
-            "patient_labels": "experiments/input/test_sample_labels.jsonl", "presenting_evidence_only": True,
+            "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_so.jsonl",
+            "patient_labels": "experiments/input/test_labels.jsonl", "presenting_evidence_only": True,
             "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
         })
         self.assertEqual(run["assessment_plan_models"]["config_sha256"],
@@ -5348,8 +5384,7 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
 
     def test_config_paths_filters_limit_and_confirmation_match_saved_effective_cohort(self):
         fixture = self.fixture
-        source_patients = (ROOT / "experiments/input" / INPUT_NAME).read_bytes()
-        source_labels = (ROOT / "experiments/input" / LABELS_NAME).read_bytes()
+        source_patients, source_labels = scoring_cohort_bytes()
         alternate_input, alternate_labels = fixture.root / "patients.jsonl", fixture.root / "labels.jsonl"
         alternate_input.write_bytes(source_patients)
         alternate_labels.write_bytes(source_labels)

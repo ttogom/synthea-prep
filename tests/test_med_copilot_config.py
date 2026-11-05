@@ -763,7 +763,7 @@ class PipelineSettingsTests(unittest.TestCase):
         expected = {
             "guidelines": "med_copilot/data/guidelines",
             "experiment_output": "experiments/output",
-            "patient_corpus": "med_copilot/upstream/soap_with_metadata.json",
+            "patient_corpus": "med_copilot/data/patient_corpus/reference_patients.json",
             "patient_retrieval_artifacts_dir": "med_copilot/data/patient_retrieval_so",
             "guideline_question_model": "gpt-4o-mini",
             "patient_embedding_model": "emilyalsentzer/Bio_ClinicalBERT",
