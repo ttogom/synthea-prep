@@ -50,6 +50,7 @@ MODELS = ROOT / "scripts" / "med_copilot_models.py"
 CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
+QUESTION_SCREEN = ROOT / "scripts/med_copilot_question_screen.py"
 PIPELINE_DEFAULTS = ast.literal_eval(next(node.value for node in ast.parse(CONFIG.read_text()).body
     if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "PIPELINE_DEFAULTS" for t in node.targets)))
 EXPERIMENT_CONFIG = ROOT / "experiments/configs/experiment.yaml"
@@ -364,6 +365,7 @@ class PipelineFixture:
         (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
+        (self.script.parent / QUESTION_SCREEN.name).write_bytes(QUESTION_SCREEN.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
         self.model_config = root / "experiments/configs/condition_plan_models.yaml"
         self.model_config.parent.mkdir()
@@ -2135,7 +2137,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                                      "content": ["Full summary café\n" + "x" * 5000]}),
             "entities": pd.DataFrame({"id": ["1228"], "entity": ["DIAGNOSTIC ASSESSMENT"],
                                       "in_context": [True]}),
-            "sources": pd.DataFrame({"id": ["157"], "text": ["Original excerpt line"]}),
+            "sources": pd.DataFrame({"id": ["157"], "text": ["Original excerptline"]}),
             "empty_table": pd.DataFrame(),
             "additional_table": pd.DataFrame({"value": [1.5, float("nan")]}, index=["a", "b"]),
         }
@@ -2159,7 +2161,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         fixture = self.fixture
         records = [{"id": f"id-{marker.lower()}-é",
                     "subjective": f"MARKER_{marker} reports cough.\nSecond line café",
-                    "objective": f"MARKER_{marker} temperature 37.2 °C SpO₂ 98%"}
+                    "objective": f"MARKER_{marker} temperature 37.2 °CSpO₂ 98%"}
                    for marker in markers]
         fixture.write_patients(records)
 
@@ -2170,7 +2172,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 return json.dumps({"Key Questions": [f"{marker} question?"]})
             if stage == "final":
                 return json.dumps({"predictions": prediction_pairs(
-                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False)
+                    f"{marker} diagnosis café", [f"{marker} planend"])}, ensure_ascii=False)
             return (f"{marker} guideline evidence\nline two",
                     {"sources": pd.DataFrame({"id": [marker], "text": [f"{marker} source\n"]})})
 
@@ -2199,9 +2201,9 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 **self.expected_capture(),
                 "id": record["id"],
                 "status": "completed",
-                "predictions": prediction_pairs(f"{marker} diagnosis café", [f"{marker} plan end"]),
+                "predictions": prediction_pairs(f"{marker} diagnosis café", [f"{marker} planend"]),
                 "assessment_plan_raw": json.dumps({"predictions": prediction_pairs(
-                    f"{marker} diagnosis café", [f"{marker} plan end"])}, ensure_ascii=False),
+                    f"{marker} diagnosis café", [f"{marker} planend"])}, ensure_ascii=False),
                 "selected_reference_patient": fixture.reference,
                 "guideline_questions": [f"{marker} question?"],
                 "guideline_evidence": evidence,
@@ -2911,9 +2913,14 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         self.assertIn("(Subjective and Objective only)", rendered)
         self.assertNotIn("assessment", rendered.lower())
         self.assertIn(self.fixture.conditions, rendered)
-        for requirement in ["at most 4", "Diagnostic criteria", "distinguish plausible diagnoses",
-                            "Investigations", "treatment conditional", "hypotheses"]:
+        for requirement in ["at most 4", "Do not name, suggest, or rank any diagnosis",
+                            "recorded symptoms, signs, and measurements", "distinguish between them",
+                            "first-line and alternative medication", "severity or functional classification"]:
             self.assertIn(requirement, rendered)
+        # The question step must not guess a diagnosis; GraphRAG does that from the findings.
+        template = PROMPTS["KEY_QUESTIONS_TEMPLATE"].lower()
+        for guess in ["most likely", "suspected", "hypothes", "plausible diagnoses", "nyha"]:
+            self.assertNotIn(guess, template)
         example, _ = json.JSONDecoder().raw_decode(rendered[rendered.index("{"):])
         self.assertEqual(set(example), {"Key Questions"})
         self.assertEqual(len(example["Key Questions"]), 4)
@@ -2960,6 +2967,56 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(run["experiment"]["selected_models"], ["gpt_4o_mini"])
         self.assertEqual(record["guideline_questions"], json.loads(fixture.questions)["Key Questions"])
         self.assertEqual(record["assessment_plan_raw"], fixture.final_output)
+
+    def run_with_question_replies(self, first, retry):
+        """Run once with scripted question replies; return calls and the raw guidelines capture."""
+        fixture = self.fixture
+        question_replies = iter([first, retry])
+
+        def reply(stage, prompt):
+            if stage == "graphrag":
+                return fixture.guideline_text, fixture.context
+            if stage != "questions":
+                return fixture.final_output
+            return next(question_replies)
+        fixture.reply = reply
+        runner = self.load_runner()
+        with fixture.runtime():
+            self.assertEqual(runner["main"](), "completed")
+        [run_dir] = self.run_dirs()
+        record = json.loads((run_dir / "results.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        [component] = [c for c in record["components"].values() if c["component"] == "guidelines"]
+        return [call for call in fixture.calls if call["response_format"] == {"type": "json_object"}], component["capture"]
+
+    def test_clean_questions_are_sent_unchanged_without_retry(self):
+        calls, capture = self.run_with_question_replies(self.fixture.questions, None)
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(capture["guideline_question_screen"])
+        self.assertEqual(self.fixture.graph_calls[0][0]["query"], self.fixture.questions)
+
+    def test_unrecorded_diagnosis_triggers_one_identical_retry(self):
+        first = '{"Key Questions": ["Is this heart failure given the edema?"]}'
+        retry = '{"Key Questions": ["Which causes fit edema and orthopnea?"]}'
+        calls, capture = self.run_with_question_replies(first, retry)
+        self.assertEqual(len(calls), 2)
+        # The retry is the identical request: the model learns nothing about the screen.
+        self.assertEqual(calls[1], calls[0])
+        self.assertEqual(self.fixture.graph_calls[0][0]["query"], retry)
+        self.assertEqual(capture["guideline_question_screen"], {
+            "first_reply": first, "first_terms": ["heart failure"], "retry_reply": retry, "retry_terms": []})
+        self.assertEqual(capture["guideline_questions"], ["Which causes fit edema and orthopnea?"])
+        self.assertEqual(len(capture["model_responses"]["guideline_questions"]), 2)
+
+    def test_terms_left_after_retry_are_replaced_before_graphrag(self):
+        first = '{"Key Questions": ["Manage hypertension?"]}'
+        retry = '{"Key Questions": ["Manage Hypertension and heart failure symptoms?"]}'
+        calls, capture = self.run_with_question_replies(first, retry)
+        self.assertEqual(len(calls), 2)
+        cleaned = '{"Key Questions": ["Manage these findings and these findings?"]}'
+        self.assertEqual(self.fixture.graph_calls[0][0]["query"], cleaned)
+        self.assertEqual(capture["guideline_question_screen"]["retry_terms"], ["heart failure", "hypertension"])
+        self.assertEqual(capture["guideline_question_screen"]["retry_reply"], retry)
+        self.assertEqual(capture["guideline_questions"], ["Manage these findings and these findings?"])
 
     def test_full_pipeline_uses_project_prompts_from_an_unrelated_cwd(self):
         fixture = self.fixture

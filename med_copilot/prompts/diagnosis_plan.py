@@ -39,21 +39,15 @@ You will be given a patient's conditions in SOAP format (Subjective and Objectiv
 
 Your task is to generate at most 4 questions that will help a retrieval-augmented generation (RAG) system find clear and actionable answers for diagnosing the patient and developing a treatment plan. Focus on the patient's most important symptoms and findings.
 
-Focus on questions about points like:
-- Diagnostic criteria and findings that distinguish plausible diagnoses,
-- Investigations needed to establish or exclude a diagnosis,
-- How to address or alleviate the patient's **specific symptoms mentioned in the record**,
-- Appropriate medication or dosing,
-- Symptom management and treatment conditional on the diagnostic possibilities,
-- Specific diagnostic tests or procedures recommended for the most likely diagnostic possibilities,
-- First-line and alternative medication choices, including strength or dose, for each likely possibility,
-- Severity or functional classification used to stage a suspected condition,
-- Patient education and lifestyle advice for a suspected condition,
-- Long-term management or care plans for suspected chronic conditions.
+Do not name, suggest, or rank any diagnosis that is not already recorded in the patient's record. Do not name a test, medication, or scale that is specific to one unrecorded diagnosis. Build every question on the patient's recorded symptoms, signs, and measurements, so that the retrieved guidelines, not the questions, identify the possible causes.
 
-Use at least one question to ask about concrete plan actions (tests, medications, classification, education, or management plans) for the most likely possibilities.
+Describe each finding as it is recorded, not by the name of a condition it might suggest. For example, write "joint pain and morning stiffness", not "rheumatoid arthritis", and "yellowing of the skin", not "hepatitis", and "TSH 12 mIU/L", not "hypothyroidism". Keep recorded measurements, such as vital signs and lab values, with their values. Give priority to findings that are new or abnormal at the current visit, such as abnormal vital signs, over long-standing recorded problems.
 
-Describe possible diagnoses as hypotheses rather than established patient facts.
+Write two kinds of questions:
+- 1-2 questions asking which causes guidelines associate with this combination of recorded findings, and which criteria, findings, or investigations distinguish between them. Do not list the candidate causes yourself.
+- 2-3 questions asking what guidelines recommend for a patient presenting with these findings: diagnostic tests or procedures, first-line and alternative medication with strength or dose, severity or functional classification, patient education or lifestyle advice, or long-term management plans. Phrase these as "For a patient presenting with <findings>, what ...", so that the findings, not a condition name, are what the recommendation is for.
+
+Name a recorded condition only when it changes what is recommended (for example, kidney disease affecting medication dosing).
 
 For each question, try to keep the details to make the questions more clear, explicitly mention the symptom(s)/condition(s) reported by the patient, instead of using generic terms like "the specific symptoms/conditions".
 

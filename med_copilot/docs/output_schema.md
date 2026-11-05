@@ -68,7 +68,8 @@ other fields remain `null` or empty provider lists until available.
 | Capture field | Value |
 | --- | --- |
 | `selected_reference_patient` | Minimal identity of the selected reference, or `null`. |
-| `guideline_questions` | Parsed `Key Questions` list, or `null`; the exact raw question reply remains the GraphRAG query. |
+| `guideline_questions` | Parsed `Key Questions` list from the screened reply, or `null`; that screened raw reply is the GraphRAG query. |
+| `guideline_question_screen` | `null` when the first question reply names no study diagnosis absent from the S/O. Otherwise `{first_reply, first_terms, retry_reply, retry_terms}`: the flagged reply and names, then the single retry and any names it still contains, which are replaced with "these findings" before GraphRAG. |
 | `guideline_evidence` | Raw GraphRAG answer, including a non-string JSON value if returned; `null` also represents an unavailable capture. |
 | `graphrag_context` | Returned context tables serialized as `{columns, index, data}`, or `null`. |
 | `keyword_extraction_raw` | Exact keyword API content captured before validation, including malformed JSON and whitespace. |

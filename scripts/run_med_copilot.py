@@ -42,6 +42,7 @@ try:
         KEY_QUESTIONS_TEMPLATE,
         VARIANT_TEMPLATES,
     )
+    from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
     from scripts.med_copilot_helpers import (
         ExperimentRun,
         RunMetadataError,
@@ -121,16 +122,39 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
                     credential_names=experiment.required_credentials) as capture:
                 with pipeline_stage("guideline_question_generation"):
                     key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(conditions=s_o)
+                    messages = [
+                        {"role": "system", "content": "You are a clinical expert."},
+                        {"role": "user", "content": key_questions_instance},
+                    ]
                     key_response = client.chat.completions.create(
                         model=settings["question_model"], response_format={"type": "json_object"},
-                        messages=[
-                            {"role": "system", "content": "You are a clinical expert."},
-                            {"role": "user", "content": key_questions_instance},
-                        ],
+                        messages=messages,
                     )
-                    capture["model_responses"]["guideline_questions"].append(model_response_metadata(key_response))
+                    capture["model_responses"]["guideline_questions"].append(
+                        model_response_metadata(key_response)
+                    )
                     key_questions = key_response.choices[0].message.content
-                    # Preserve the raw JSON as the GraphRAG query; parse only for capture.
+
+                    # Screen against the patient's S/O. Retry once with the same request.
+                    capture["guideline_question_screen"] = None
+                    found = find_diagnosis_terms(key_questions, s_o)
+                    if found:
+                        screen = {"first_reply": key_questions, "first_terms": found}
+                        retry_response = client.chat.completions.create(
+                            model=settings["question_model"], response_format={"type": "json_object"},
+                            messages=messages,
+                        )
+                        capture["model_responses"]["guideline_questions"].append(
+                            model_response_metadata(retry_response)
+                        )
+                        key_questions = retry_response.choices[0].message.content
+                        found = find_diagnosis_terms(key_questions, s_o)
+                        screen.update(retry_reply=key_questions, retry_terms=found)
+                        if found:
+                            key_questions = remove_diagnosis_terms(key_questions, found)
+                        capture["guideline_question_screen"] = screen
+
+                    # GraphRAG receives the screened raw JSON; parse only for capture.
                     capture["guideline_questions"] = parse_guideline_questions(key_questions)
                 print("\n========== KEY QUESTIONS ==========\n")
                 print(key_questions)
