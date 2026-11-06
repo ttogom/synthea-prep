@@ -4659,10 +4659,14 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual([record["id"] for record in records], ["0", "1"])
         fixture.confirm_input.assert_called_once()
 
-    def test_patient_limits_select_first_eligible_patients_and_record_exact_cohort(self):
+    def test_patient_limits_sample_eligible_patients_and_record_exact_cohort(self):
         fixture_root = self.fixture.root
         patients = [{"id": name, "subjective": f"LIMIT_PATIENT_{name}_TEXT", "objective": "O"}
                     for name in ("EXCLUDED", "SECOND", "ANOTHER", "FINAL")]
+        sampled_ids = {
+            True: {1: ["FINAL"], 2: ["SECOND", "FINAL"]},
+            False: {1: ["EXCLUDED"], 2: ["EXCLUDED", "FINAL"]},
+        }
         for evidence_only in (True, False):
             for limit in (None, 1, 2, 99):
                 with self.subTest(evidence_only=evidence_only, max_patients=limit):
@@ -4678,7 +4682,7 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
                     self.experiment["max_patients"] = limit
                     self.write_config()
                     eligible = patients[1:] if evidence_only else patients
-                    expected_ids = [patient["id"] for patient in eligible[:limit]]
+                    expected_ids = sampled_ids[evidence_only].get(limit, [patient["id"] for patient in eligible])
                     excluded_ids = [patient["id"] for patient in patients if patient["id"] not in expected_ids]
                     status, run, records = self.execute(["--presenting-evidence-only", str(evidence_only).lower()])
                     self.assertEqual(status, "completed")
@@ -4689,10 +4693,15 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
                     self.assertEqual(run["input"]["sha256"], hashlib.sha256(fixture.input_path.read_bytes()).hexdigest())
                     evaluation = run["evaluation"]
                     self.assertEqual(evaluation["max_patients"], limit)
+                    self.assertEqual(evaluation["patient_sampling_seed"], 42)
                     self.assertEqual(evaluation["input_patient_count"], 4)
                     self.assertEqual(evaluation["selected_patient_count"], len(expected_ids))
                     self.assertEqual(evaluation["selected_patient_ids"], expected_ids)
                     self.assertEqual(evaluation["excluded_patient_ids"], excluded_ids)
+                    self.assertEqual(evaluation["exclusion_reasons"], {
+                        patient_id: ["missing_presenting_evidence" if evidence_only and patient_id == "EXCLUDED"
+                                     else "max_patients"] for patient_id in excluded_ids
+                    })
                     self.assertEqual(len(fixture.calls), 3 * len(expected_ids))
                     self.assertEqual(len(fixture.keyword_calls), len(expected_ids))
                     self.assertEqual(len(fixture.graph_calls), len(expected_ids))
@@ -4760,9 +4769,9 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.experiment["max_patients"] = 2
         self.write_config()
         fixture = self.fixture
-        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
-                                for name in ("FIRST", "SECOND", "OUTSIDE_LIMIT")])
-        fixture.write_labels([self.label(name) for name in ("FIRST", "SECOND", "OUTSIDE_LIMIT")])
+        names = ("FIRST", "OUTSIDE_LIMIT", "LAST")
+        fixture.write_patients([{"id": name, "subjective": name, "objective": "O"} for name in names])
+        fixture.write_labels([self.label(name) for name in names])
         fixture.failure, fixture.error = "final", KeyboardInterrupt()
         runner = self.load_runner()
         with fixture.runtime(), self.assertRaises(KeyboardInterrupt):
@@ -4770,9 +4779,9 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         run, records = self.read_native()
         self.assertEqual(run["status"], "failed_incomplete")
         self.assertEqual(run["experiment"]["max_patients"], 2)
-        self.assertEqual(run["evaluation"]["selected_patient_ids"], ["FIRST", "SECOND"])
+        self.assertEqual(run["evaluation"]["selected_patient_ids"], ["FIRST", "LAST"])
         self.assertEqual(run["evaluation"]["excluded_patient_ids"], ["OUTSIDE_LIMIT"])
-        self.assertEqual([row["id"] for row in records], ["FIRST", "SECOND"])
+        self.assertEqual([row["id"] for row in records], ["FIRST", "LAST"])
         self.assertEqual([row["status"] for row in records], ["failed_incomplete", "not_processed"])
 
     def test_entrypoint_cancellation_exits_successfully_without_output(self):

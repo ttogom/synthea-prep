@@ -677,15 +677,18 @@ class VariantScoringTests(unittest.TestCase):
     scorer = PatientScorerTests.scorer
     result = PatientScorerTests.result
 
-    def test_exact_sentinel_filter_precedes_limit_and_records_exclusions(self):
-        rows = [dict(id=name, subjective="S", objective="O") for name in ("no-evidence", "no-plan", "keep", "limited")]
-        self.patients = rows
+    def test_seeded_sample_runs_after_both_filters_and_records_exclusions(self):
+        self.patients = [dict(id=name, subjective="S", objective="O")
+                         for name in ("no-evidence", "no-plan", "first", "limited", "last")]
         self.write_labels([dict(id=row["id"], condition="gold", plan=["none recorded"] if row["id"] == "no-plan" else ["plan"],
-                                has_presenting_evidence=row["id"] != "no-evidence") for row in rows])
-        scorer = self.scorer(max_patients=1, exclude_none_recorded_plans=True)
-        self.assertEqual([row["id"] for row in scorer.patients], ["keep"])
+                                has_presenting_evidence=row["id"] != "no-evidence") for row in self.patients])
+        options = dict(max_patients=2, exclude_none_recorded_plans=True)
+        scorer = self.scorer(**options)
+        self.assertEqual([row["id"] for row in scorer.patients], ["first", "last"])
+        self.assertEqual(self.scorer(**options).patients, scorer.patients)
         metadata = scorer.metadata(self.directory)
-        self.assertEqual([metadata[key] for key in ("input_patient_count", "after_presenting_evidence_count", "eligible_patient_count", "selected_patient_count")], [4, 3, 2, 1])
+        self.assertEqual(metadata["patient_sampling_seed"], 42)
+        self.assertEqual([metadata[key] for key in ("input_patient_count", "after_presenting_evidence_count", "eligible_patient_count", "selected_patient_count")], [5, 4, 3, 2])
         self.assertEqual(metadata["exclusion_reasons"], {"no-evidence": ["missing_presenting_evidence"], "no-plan": ["no_recorded_plan"], "limited": ["max_patients"]})
         self.assertEqual(metadata["excluded_plan_value"], ["none recorded"])
         self.assertTrue(metadata["exclude_none_recorded_plans"])

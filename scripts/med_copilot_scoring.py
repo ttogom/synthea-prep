@@ -7,6 +7,7 @@ import json
 import math
 from numbers import Real
 from pathlib import Path
+from random import Random
 
 from med_copilot.upstream.evaluate_metrics import Evaluator
 
@@ -14,6 +15,7 @@ from med_copilot.upstream.evaluate_metrics import Evaluator
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 METRIC_PACKAGES = ("sacrebleu", "nltk", "rouge-score", "bert-score", "transformers", "torch")
 UPSTREAM_EVALUATOR = Path(__file__).resolve().parents[1] / "med_copilot/upstream/evaluate_metrics.py"
+PATIENT_SAMPLING_SEED = 42
 
 
 def _boolean_argument(value):
@@ -57,7 +59,7 @@ class PatientScorer:
     Label files may contain additional patient IDs so a shared label file can
     serve several input subsets. Every label row is validated, and every input
     ID must have exactly one label before the presenting-evidence filter runs.
-    Apply max_patients to the filtered cohort in input order, after validation.
+    Sample from the filtered cohort when max_patients limits it, keeping input order.
     """
 
     def __init__(self, labels_path, patients, presenting_evidence_only=True, *, max_patients=None,
@@ -134,12 +136,17 @@ class PatientScorer:
             else:
                 eligible.append(patient)
         self.eligible_patient_count = len(eligible)
-        self.patients = eligible[:max_patients]
-        for patient in eligible[len(self.patients):]:
-            self.exclusion_reasons[patient["id"]] = ["max_patients"]
+        self.patients = eligible
+        if max_patients is not None and max_patients < len(eligible):
+            indices = Random(PATIENT_SAMPLING_SEED).sample(range(len(eligible)), max_patients)
+            self.patients = [eligible[index] for index in sorted(indices)]
         if not self.patients:
             raise ValueError("No patients selected for evaluation")
         self._selected_ids = {patient["id"] for patient in self.patients}
+        for patient in eligible:
+            patient_id = patient["id"]
+            if patient_id not in self._selected_ids:
+                self.exclusion_reasons[patient_id] = ["max_patients"]
         self._input_ids = input_ids
         self._labels = labels
 
@@ -158,6 +165,7 @@ class PatientScorer:
             "evaluator_sha256": hashlib.sha256(UPSTREAM_EVALUATOR.read_bytes()).hexdigest(),
             "presenting_evidence_only": self.presenting_evidence_only,
             "max_patients": self.max_patients,
+            "patient_sampling_seed": PATIENT_SAMPLING_SEED,
             "exclude_none_recorded_plans": self.exclude_none_recorded_plans,
             "excluded_plan_value": ["none recorded"],
             "filter_order": ["presenting_evidence_only", "exclude_none_recorded_plans", "max_patients"],

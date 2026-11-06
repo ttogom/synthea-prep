@@ -5,7 +5,7 @@ patient_input: experiments/input/test_so.jsonl  # Prepared patient S/O records.
 patient_labels: experiments/input/test_labels.jsonl  # Gold labels joined by exact patient ID.
 presenting_evidence_only: true  # Keep patients with presenting evidence in their label.
 exclude_none_recorded_plans: true  # Exclude label plan exactly ["none recorded"].
-max_patients: 10  # First N after both filters; null runs every eligible patient (2,378 in the full test set).
+max_patients: 10  # Ramdomly sample N after both filters with seed 42; null runs every eligible patient (2,378 in the full test set).
 
 # Evidence variants — every selected final model runs each selected variant.
 selected_variants:

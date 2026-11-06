@@ -283,9 +283,10 @@ credentials take precedence over the repository-root `.env`.
 Input records and labels are validated before cohort selection. The presenting-
 evidence filter runs first, then optional exact label-Plan exclusion
 `["none recorded"]`, then `max_patients`. `null` selects all eligible patients;
-positive integers select the first N in input order. Evaluation metadata records
+positive integers sample up to N without replacement using seed 42. Selected
+patients run in input order. Evaluation metadata records `patient_sampling_seed`,
 the label/helper hashes, installed scoring versions/defaults, filter order,
-intermediate counts, selected/excluded IDs and reasons. The shipped sample has
+intermediate counts, selected/excluded IDs and reasons. The sample dataset has
 10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-
 plan filter; `max_patients: null` retains all five. Additional output/resource paths
 and evidence tuning remain configured/saved without expanding confirmation.
@@ -356,7 +357,8 @@ Gold labels are joined to the complete input by exact ID before cohort selection
 YAML `presenting_evidence_only` defaults to `true`, optionally overridden by the
 existing `--presenting-evidence-only true|false` flag. YAML
 `exclude_none_recorded_plans` excludes label `plan` exactly `["none recorded"]`
-when enabled, then `max_patients` selects the first eligible IDs in input order. Only selected IDs are registered in the run. Excluded patients
+when enabled, then `max_patients` applies the seeded sample. Only selected IDs
+are registered in the run. Excluded patients
 have no result row, including when an interruption marks remaining selected
 patients `not_processed`. `run.json.evaluation` records the option, input and
 selected counts, selected/excluded IDs, label and evaluator fingerprints,

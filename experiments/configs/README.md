@@ -10,7 +10,7 @@ launch directory. There are no model/config CLI overrides.
 | `selected_models` | Nonempty, unique registry aliases, in execution order. |
 | `temperature` | Shared final-model temperature, finite number from 0 to 2. |
 | `max_retries` | Shared upstream final-model retry setting, integer at least 1. |
-| `max_patients` | First N eligible patients in input order; positive integer or `null` for all. |
+| `max_patients` | Sample up to N eligible patients without replacement using seed 42; positive integer or `null` for all. Selected patients run in input order. |
 | `selected_variants` | Nonempty, unique registered variants; every final model runs each one. |
 | `variant_settings` | Optional mapping of registered variant IDs to declared parameter values; omitted parameters use registered defaults. |
 | `patient_input` | Prepared patient S/O JSONL path. |
