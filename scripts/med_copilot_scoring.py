@@ -6,10 +6,15 @@ from importlib import metadata as package_metadata
 import json
 import math
 from numbers import Real
+import os
 from pathlib import Path
 from random import Random
 
 from med_copilot.upstream.evaluate_metrics import Evaluator
+from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges, diagnosis_entry, plan_entry
+from scripts.med_copilot_run_file import (
+    RUN_FILE, RunFile, RunMetadataError, error_scope, pipeline_stage, record_error,
+)
 
 
 METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
@@ -149,6 +154,12 @@ class PatientScorer:
                 self.exclusion_reasons[patient_id] = ["max_patients"]
         self._input_ids = input_ids
         self._labels = labels
+        self._patients = {patient["id"]: patient for patient in self.patients}
+        self.judges = None
+
+    def attach_judges(self, judges):
+        """Also judge diagnosis/Plan correctness with a CorrectnessJudges panel."""
+        self.judges = judges
 
     def metadata(self, root):
         """Describe the label snapshot, cohort, and configured upstream defaults."""
@@ -180,6 +191,7 @@ class PatientScorer:
             ],
             "label_count": len(self._labels),
             "metric_packages": versions,
+            **({"correctness": self.judges.metadata(root)} if self.judges is not None else {}),
             "settings": {
                 "aggregation": "per_patient_per_rank_per_field_singleton",
                 "prediction_count": 3,
@@ -215,19 +227,25 @@ class PatientScorer:
             for variant in result["variants"].values():
                 self.score_result({"id": result["id"], "assessment_plans": variant["assessment_plans"]})
         elif "assessment_plans" in result:
-            for output in result["assessment_plans"].values():
+            for model_id, output in result["assessment_plans"].items():
                 if output["status"] == "completed":
-                    self._score_predictions(result["id"], output)
+                    self._score_predictions(result["id"], output, model_id)
         else:
             self._score_predictions(result["id"], result)
         return result
 
-    def _score_predictions(self, patient_id, result):
+    def _score_predictions(self, patient_id, result, model_id=None):
         label = self._labels[patient_id]
         result["evaluation"] = [
             {"rank": rank, **{field: _empty_entry("pending") for field in ("condition", "plan")}}
             for rank in range(1, 4)
         ]
+        if self.judges is not None:
+            # Text metrics fill every rank first; judge panels then run per rank.
+            judged = [self._correctness_entries(label, result.get("predictions"), index)
+                      for index in range(3)]
+            for evaluation, (diagnosis, plan) in zip(result["evaluation"], judged):
+                evaluation.update(diagnosis_correctness=diagnosis, plan_correctness=plan)
         references = {
             "condition": label["condition"].replace("_", " "),
             "plan": ", ".join(label["plan"]),
@@ -283,4 +301,73 @@ class PatientScorer:
                 except BaseException as exc:
                     evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
                     raise
+        if self.judges is not None:
+            patient = self._patients[patient_id]
+            for evaluation in result["evaluation"]:
+                self.judges.judge_diagnosis(evaluation["diagnosis_correctness"], model_id)
+                self.judges.judge_plan(evaluation["plan_correctness"], model_id,
+                                       label["condition"].replace("_", " "), patient)
         return result
+
+    @staticmethod
+    def _correctness_entries(label, predictions, index):
+        """Pending judge entries for one rank; malformed generations are unavailable."""
+        rank = index + 1
+        condition = plan = problem = None
+        if predictions is not None:
+            prediction = predictions[index] if isinstance(predictions, list) and len(predictions) == 3 else None
+            if not isinstance(prediction, dict) or set(prediction) - {"condition", "plan"}:
+                problem = "invalid_generation"
+            else:
+                condition, plan = prediction.get("condition"), prediction.get("plan")
+        condition_problem = problem or (None if condition is None or isinstance(condition, str)
+                                        else "invalid_generation")
+        plan_problem = problem or (None if plan is None or (
+            isinstance(plan, list) and len(plan) <= 3 and all(isinstance(item, str) for item in plan))
+            else "invalid_generation")
+        return (diagnosis_entry(rank, label["condition"].replace("_", " "),
+                                condition if condition_problem is None else None, condition_problem),
+                plan_entry(rank, label["plan"], plan if plan_problem is None else None, plan_problem))
+
+
+def _write_results(run_dir, records):
+    """Atomically replace results.jsonl so an interruption keeps the previous file."""
+    temporary = run_dir / ".results.jsonl.tmp"
+    try:
+        temporary.write_text("".join(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+                                     for record in records), encoding="utf-8")
+        os.replace(temporary, run_dir / "results.jsonl")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def resume_evaluation(run_dir, scorer, models, *, root):
+    """Re-score a saved run, reusing every completed judge call in judge_responses.jsonl.
+
+    `scorer` must select the run's recorded cohort. `models` provides judge(),
+    model_ids, and redact(). results.jsonl is replaced after each patient, so an
+    interruption keeps finished patients; their judge calls are never repeated.
+    Ordinary scoring failures are saved in run.json errors under the scoring stage.
+    """
+    run_dir = Path(run_dir).resolve()
+    metadata = json.loads((run_dir / RUN_FILE).read_text(encoding="utf-8"))
+    recorded = (metadata.get("evaluation") or {}).get("selected_patient_ids")
+    if [patient["id"] for patient in scorer.patients] != recorded:
+        raise ValueError("The scorer's cohort does not match the run's selected_patient_ids")
+    run_file = RunFile(run_dir, metadata)
+    run_file.redact = models.redact
+    judges = CorrectnessJudges(models.judge, models.model_ids, run_dir / JUDGE_FILE)
+    scorer.attach_judges(judges)
+    text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
+    records = [json.loads(line) for line in text.split("\n") if line.strip()]
+    for record in records:
+        with error_scope(run_file, patient_id=record["id"]), pipeline_stage("scoring"):
+            try:
+                scorer.score_result(record)
+            except RunMetadataError:
+                raise
+            except Exception as exc:
+                record_error(exc)
+        _write_results(run_dir, records)
+    run_file.update(evaluation=scorer.metadata(root))
+    return judges

@@ -958,30 +958,30 @@ class PatientOutputHelperTests(unittest.TestCase):
                     self.assertNotIn(legacy, result)
 
     def test_selected_reference_patient_follows_rerank_scores_not_candidate_order(self):
-        corpus = [{"note_id": f"N{row}"} for row in range(4)]
+        corpus = [{"id": f"N{row}"} for row in range(4)]
         candidates = [{"idx": 3, "rerank_score": 0.1}, {"idx": 0, "rerank_score": 0.7},
                       {"idx": 2, "rerank_score": 0.7}, {"idx": 1, "rerank_score": -2.0}]
         # Ties keep retrieval order, matching the upstream stable sort.
         self.assertEqual(H["selected_reference_patient"](corpus, candidates, ["formatted"]),
-                         {"note_id": "N0"})
+                         {"id": "N0"})
 
     def test_selected_reference_patient_identifier_rules(self):
         candidates = [{"idx": 1, "rerank_score": 1.0}]
         for corpus, expected in [
-            ([{"note_id": "A"}, {"note_id": "B"}], {"note_id": "B"}),
+            ([{"id": "A"}, {"id": "B"}], {"id": "B"}),
             ([{}, {}], {"corpus_row": 1}),
-            ([{"note_id": "A"}, {"note_id": ""}], {"corpus_row": 1}),
-            ([{"note_id": "A"}, {"note_id": " "}], {"corpus_row": 1}),
-            ([{"note_id": "A"}, {"note_id": 12}], {"corpus_row": 1}),
-            ([{"note_id": "A"}, {"note_id": None}], {"corpus_row": 1}),
-            ([{"note_id": "DUP"}, {"note_id": "DUP"}], {"note_id": "DUP", "corpus_row": 1}),
+            ([{"id": "A"}, {"id": ""}], {"corpus_row": 1}),
+            ([{"id": "A"}, {"id": " "}], {"corpus_row": 1}),
+            ([{"id": "A"}, {"id": 12}], {"corpus_row": 1}),
+            ([{"id": "A"}, {"id": None}], {"corpus_row": 1}),
+            ([{"id": "DUP"}, {"id": "DUP"}], {"id": "DUP", "corpus_row": 1}),
         ]:
             with self.subTest(corpus=corpus):
                 self.assertEqual(H["selected_reference_patient"](corpus, candidates, ["formatted"]), expected)
 
     def test_selected_reference_patient_is_null_without_reranked_results(self):
-        self.assertIsNone(H["selected_reference_patient"]([{"note_id": "A"}], [], []))
-        self.assertIsNone(H["selected_reference_patient"]([{"note_id": "A"}], [{"idx": 0}], []))
+        self.assertIsNone(H["selected_reference_patient"]([{"id": "A"}], [], []))
+        self.assertIsNone(H["selected_reference_patient"]([{"id": "A"}], [{"idx": 0}], []))
 
     def test_selected_reference_patient_accepts_numpy_like_indexes(self):
         class Index(int):
@@ -1693,10 +1693,10 @@ class CaptureHelperTests(unittest.TestCase):
                          {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None})
 
     def test_reference_identity_and_rank_snapshots_preserve_rows_order_and_full_scores(self):
-        corpus = [{"note_id": "DUP", "subject_id": "same"}, {"note_id": "unique"},
-                  {"note_id": "DUP"}, {"note_id": "  "}, {"note_id": 5}, {}]
-        expected = [{"note_id": "DUP", "corpus_row": 2}, {"corpus_row": 5},
-                    {"note_id": "unique"}, {"corpus_row": 3}, {"corpus_row": 4}]
+        corpus = [{"id": "DUP", "subject_id": "same"}, {"id": "unique"},
+                  {"id": "DUP"}, {"id": "  "}, {"id": 5}, {}]
+        expected = [{"id": "DUP", "corpus_row": 2}, {"corpus_row": 5},
+                    {"id": "unique"}, {"corpus_row": 3}, {"corpus_row": 4}]
         for row, identity in zip((2, 5, 1, 3, 4), expected):
             self.assertEqual(H["reference_patient_identity"](corpus, row), identity)
         for row in (-1, len(corpus), "invalid", None):
@@ -1780,7 +1780,7 @@ class PreparePatientOutputCaptureTests(unittest.TestCase):
         self.retriever = SimpleNamespace(keyword_extractor=self.extractor, ranked_candidates=["old-hybrid"],
                                          on_ranking=Mock(), search=Mock())
         self.reranker = SimpleNamespace(ranked_candidates=["old-reranked"], on_ranking=Mock(), rerank=Mock())
-        self.corpus = [{"note_id": "DUP"}, {"note_id": "unique café"}, {"note_id": "DUP"}, {}]
+        self.corpus = [{"id": "DUP"}, {"id": "unique café"}, {"id": "DUP"}, {}]
 
     def test_preparation_binds_result_resets_rankings_and_leaves_outputs_and_models_untouched(self):
         self.record["keyword_extraction_raw"] = "already captured"
@@ -1811,11 +1811,11 @@ class PreparePatientOutputCaptureTests(unittest.TestCase):
         self.assertIsNone(self.record["retrieved_patient_ids"])
         self.assertIsNone(self.retriever.on_ranking(hybrid))
         expected_hybrid = [
-            {"note_id": "DUP", "corpus_row": 2, "embedding_score": .9123456789,
+            {"id": "DUP", "corpus_row": 2, "embedding_score": .9123456789,
              "keyword_score": .5, "hybrid_score": .70617283945},
-            {"corpus_row": 3, "hybrid_score": .4}, {"note_id": "unique café", "hybrid_score": .3}]
+            {"corpus_row": 3, "hybrid_score": .4}, {"id": "unique café", "hybrid_score": .3}]
         expected_reranked = [
-            {"note_id": "unique café", "hybrid_score": .3, "rerank_score": .987654321},
+            {"id": "unique café", "hybrid_score": .3, "rerank_score": .987654321},
             {**expected_hybrid[0], "rerank_score": .987654321}]
         self.assertEqual(self.record["retrieved_patient_ids"], expected_hybrid)
         self.assertEqual(self.record["reranked_patient_ids"], expected_reranked)
@@ -1880,7 +1880,7 @@ class PreparePatientOutputCaptureTests(unittest.TestCase):
         records, snapshots, previous_callbacks = [], [], None
         for index, note_id in enumerate(("first", "second", "第三")):
             record = H["new_patient_result"](note_id)
-            corpus = [{"note_id": note_id}]
+            corpus = [{"id": note_id}]
             self.retriever.ranked_candidates = ["old-hybrid"]
             self.reranker.ranked_candidates = ["old-reranked"]
             calls_before = client.chat.completions.create.call_count
@@ -1912,9 +1912,9 @@ class PreparePatientOutputCaptureTests(unittest.TestCase):
                 self.assertEqual(record["keyword_extraction_raw"], raw)
                 self.assertEqual(record["retrieval_keywords"], [note_id])
                 self.assertEqual(record["retrieved_patient_ids"], [
-                    {"note_id": note_id, "hybrid_score": index + .123456789}])
+                    {"id": note_id, "hybrid_score": index + .123456789}])
                 self.assertEqual(record["reranked_patient_ids"], [
-                    {"note_id": note_id, "rerank_score": index + .987654321}])
+                    {"id": note_id, "rerank_score": index + .987654321}])
                 self.assertEqual(record["model_responses"]["keyword_extraction"], [{
                     "reported_model": f"reported-{note_id}", "response_id": f"response-{note_id}",
                     "token_usage": None}])
@@ -2009,11 +2009,11 @@ class SchemaFourHelperTests(unittest.TestCase):
         formatter = Mock(return_value={"type": "RuntimeError", "message": "safe"})
         error = RuntimeError("sensitive")
         with H["capture_component"](component, error_metadata=formatter) as capture:
-            capture["retrieved_patient_ids"] = [{"note_id": "partial"}]
+            capture["retrieved_patient_ids"] = [{"id": "partial"}]
             raise error
         formatter.assert_called_once_with(error)
         self.assertEqual(component["error"], {"type": "RuntimeError", "message": "safe"})
-        self.assertEqual(component["capture"]["retrieved_patient_ids"], [{"note_id": "partial"}])
+        self.assertEqual(component["capture"]["retrieved_patient_ids"], [{"id": "partial"}])
         self.assertEqual(component["status"], "failed_incomplete")
 
     def test_custom_credentials_are_redacted_longest_first_without_saved_values(self):
@@ -2054,7 +2054,7 @@ class SchemaFourHelperTests(unittest.TestCase):
         retriever = SimpleNamespace(keyword_extractor=extractor, ranked_candidates=old_rankings,
                                     on_ranking=old_callback)
         reranker = SimpleNamespace()
-        corpus = [{"note_id": "REF"}]
+        corpus = [{"id": "REF"}]
         with H["capture_component"](outer, corpus_records=corpus, retriever=retriever, reranker=reranker):
             outer_callback = retriever.on_ranking
             self.assertIs(extractor.capture_result, outer["capture"])
@@ -2072,9 +2072,9 @@ class SchemaFourHelperTests(unittest.TestCase):
         self.assertIs(retriever.on_ranking, old_callback)
         self.assertFalse(hasattr(reranker, "on_ranking"))
         self.assertFalse(hasattr(reranker, "ranked_candidates"))
-        self.assertEqual(outer["capture"]["retrieved_patient_ids"], [{"note_id": "REF", "hybrid_score": 0.2}])
-        self.assertEqual(inner["capture"]["retrieved_patient_ids"], [{"note_id": "REF", "hybrid_score": 0.7}])
-        self.assertEqual(outer["capture"]["reranked_patient_ids"], [{"note_id": "REF", "rerank_score": 0.3}])
+        self.assertEqual(outer["capture"]["retrieved_patient_ids"], [{"id": "REF", "hybrid_score": 0.2}])
+        self.assertEqual(inner["capture"]["retrieved_patient_ids"], [{"id": "REF", "hybrid_score": 0.7}])
+        self.assertEqual(outer["capture"]["reranked_patient_ids"], [{"id": "REF", "rerank_score": 0.3}])
         self.assertIsNone(inner["capture"]["reranked_patient_ids"])
 
     def test_hook_attributes_are_removed_after_failure_or_interruption(self):
@@ -2208,7 +2208,7 @@ class SchemaFourExperimentRunTests(TemporaryRootTestCase):
         current = self.result_four()
         component = current["components"]["patient_retrieval"]
         component["status"] = "failed_incomplete"
-        component["capture"]["retrieved_patient_ids"] = [{"note_id": "PARTIAL"}]
+        component["capture"]["retrieved_patient_ids"] = [{"id": "PARTIAL"}]
         current["variants"]["llm_only"]["assessment_plans"]["mini"].update(
             status="completed", assessment_plan_raw="Exact response", predictions=[{"condition": "A", "plan": []}])
         run.stop(self.finished, current)

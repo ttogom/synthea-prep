@@ -36,6 +36,7 @@ try:
     from scripts.med_copilot_observability import capture_graphrag_responses
     from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
     from scripts.med_copilot_models import AssessmentPlanModels
+    from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges
     from scripts.collate_med_copilot_results import generate_report, load_report_data, format_top_rank_summary
     from graphrag.cli.query import run_local_search
     from med_copilot.prompts.diagnosis_plan import (
@@ -260,6 +261,9 @@ def main(argv=None, run_file=None):
 
     current = None
     try:
+        # The selected models judge each other's predictions; replies persist per call.
+        scorer.attach_judges(CorrectnessJudges(assessment_models.judge, assessment_models.model_ids,
+                                               run.run_dir / JUDGE_FILE))
         run.update(experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
                    assessment_plan_models=assessment_models.metadata(ROOT),
                    **experiment.variant_metadata(ROOT))

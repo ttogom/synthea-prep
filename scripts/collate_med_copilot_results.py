@@ -48,6 +48,29 @@ SCORE_REASONS = {
     "not_processed": "Generation not completed; scoring unavailable",
     "invalid_metrics": "Saved scores are incomplete or invalid",
 }
+# Judge-panel correctness, saved beside the text metrics for each rank.
+CORRECTNESS_FIELDS = {"condition": "diagnosis_correctness", "plan": "plan_correctness"}
+CORRECTNESS_LABELS = {"condition": "diagnosis", "plan": "plan"}
+# The rank-weighted mean averages score / rank over ranks 1-3, so it cannot
+# exceed (1 + 1/2 + 1/3) / 3 = 0.6111 even when every prediction scores 1.
+# It is reported as is, not normalized.
+WEIGHTED_MEAN_MAXIMUM = (1 + 1 / 2 + 1 / 3) / 3
+CORRECTNESS_REASONS = {
+    "scored": "Judged",
+    "empty_generated_plan": "Empty generated plan; scored 0",
+    "no_recorded_plan": "No reference plan recorded; not judged",
+    "record_artifact_plan": "Reference plan is a record artifact; not judged",
+    "missing_reference": "Reference unavailable; not judged",
+    "missing_generation": "Prediction unavailable; not judged",
+    "invalid_generation": "Prediction invalid; not judged",
+    "panel_unavailable": "Three-judge panel unavailable",
+    "judge_failed": "A judge failed or replied invalidly",
+    "interrupted": "Judging interrupted",
+    "pending": "Judging not attempted",
+    "not_judged": "Judging not recorded",
+    "not_processed": "Generation not completed; judging unavailable",
+    "invalid_judgement": "Saved judgement is incomplete or invalid",
+}
 
 
 def _unique_object(pairs):
@@ -116,6 +139,25 @@ def _score(entry, generated):
     if error_type:
         reason += f" ({error_type})"
     return {"status": status, "metrics": values, "reason": reason}
+
+
+def _correctness(entry, generated):
+    """Normalize one saved judge entry to {status, score, weighted_score, reason}."""
+    if not isinstance(entry, dict):
+        status = "not_judged" if generated else "not_processed"
+        return {"status": status, "score": None, "weighted_score": None,
+                "reason": CORRECTNESS_REASONS[status]}
+    status = entry.get("status") if isinstance(entry.get("status"), str) else "invalid_judgement"
+    score, weighted = entry.get("score"), entry.get("weighted_score")
+    if status == "scored" and not (_finite_number(score) and _finite_number(weighted)
+                                   and 0 <= score <= 1 and 0 <= weighted <= score):
+        status = "invalid_judgement"
+    reason_key = entry.get("reason") if status in ("scored", "unavailable", "error") else status
+    reason = CORRECTNESS_REASONS.get(reason_key if isinstance(reason_key, str) else status,
+                                     "Judging unavailable")
+    if status != "scored":
+        score = weighted = None
+    return {"status": status, "score": score, "weighted_score": weighted, "reason": reason}
 
 
 def _reported_model(responses):
@@ -192,7 +234,9 @@ def _output(slot, model_id, model_name, variant):
         evaluation = by_rank.get(rank, {})
         pairs.append({"rank": rank, "condition": condition, "plan": plan,
                       "scores": {field: _score(evaluation.get(field), status == "completed")
-                                 for field in ("condition", "plan")}})
+                                 for field in ("condition", "plan")},
+                      "correctness": {field: _correctness(evaluation.get(key), status == "completed")
+                                      for field, key in CORRECTNESS_FIELDS.items()}})
     responses = slot.get("model_responses")
     if isinstance(responses, dict):
         responses = responses.get("assessment_plan")
@@ -223,6 +267,28 @@ def _summarize(patients):
                     if entry["status"] == "scored":
                         group["values"].append(entry["metrics"])
                         scores[(*key, patient["id"])] = entry["metrics"]
+    correctness = {}
+    for patient in patients:
+        for output in patient["outputs"]:
+            for prediction in output["predictions"]:
+                for field, entry in prediction["correctness"].items():
+                    key = (output["model_id"], output["variant"], prediction["rank"], field)
+                    group = correctness.setdefault(key, {
+                        "model_id": key[0], "variant": key[1], "rank": key[2],
+                        "field": CORRECTNESS_LABELS[field], "total": 0, "counts": Counter(),
+                        "scores": [], "weighted_scores": []})
+                    group["total"] += 1
+                    group["counts"][entry["status"]] += 1
+                    if entry["status"] == "scored":
+                        group["scores"].append(entry["score"])
+                        group["weighted_scores"].append(entry["weighted_score"])
+    correctness_summary = []
+    for group in correctness.values():
+        judged, weighted = group.pop("scores"), group.pop("weighted_scores")
+        correctness_summary.append({**group, "counts": dict(group["counts"]), "judged": len(judged),
+                                    "mean_score": math.fsum(judged) / len(judged) if judged else None,
+                                    "mean_weighted_score": (math.fsum(weighted) / len(weighted)
+                                                            if weighted else None)})
     summary = []
     comparisons = []
     for key, group in groups.items():
@@ -242,7 +308,7 @@ def _summarize(patients):
                             "differences": {metric: math.fsum(
                                 left[metric] / len(pairs) - right[metric] / len(pairs)
                                 for left, right in pairs) if pairs else None for metric in METRICS}})
-    return summary, comparisons
+    return summary, comparisons, correctness_summary
 
 
 def load_report_data(run_dir, *, root=ROOT):
@@ -371,7 +437,7 @@ def load_report_data(run_dir, *, root=ROOT):
             name = _legacy_model(row) or legacy_default
             patient["outputs"].append(_output(row, name, name, variant))
     patients = list(patients.values())
-    summary, comparisons = _summarize(patients)
+    summary, comparisons, correctness_summary = _summarize(patients)
     notices = []
     if any(output["variant"] == "not_recorded" for patient in patients for output in patient["outputs"]):
         notices.append("Evidence variants were not recorded for some outputs. They are shown as “not recorded”; "
@@ -380,7 +446,8 @@ def load_report_data(run_dir, *, root=ROOT):
         notices.append("Reference labels have no saved fingerprint; their original contents could not be verified.")
     if not patients:
         notices.append("No patient results were saved or selected. There are no scores to summarize.")
-    return {"patients": patients, "summary": summary, "comparisons": comparisons, "notices": notices,
+    return {"patients": patients, "summary": summary, "comparisons": comparisons,
+            "correctness_summary": correctness_summary, "notices": notices,
             "selected_models": model_ids, "selected_variants": selected_variants,
             "variant_labels": variant_labels}
 
@@ -410,6 +477,16 @@ def _metric_header():
     return ''.join(f'<th scope="col">{_e(metric)}</th>' for metric in DISPLAY_METRICS)
 
 
+def _judge_header():
+    return '<th scope="col">Judge score</th><th scope="col">Weighted (score ÷ rank)</th>'
+
+
+def _judge_cells(entry):
+    reason = f'<span class="score-reason">{_e(entry["reason"])}</span>'
+    return (f'<td class="judge" data-judge-status="{_e(entry["status"])}">{_number(entry["score"])}{reason}</td>'
+            f'<td class="judge">{_number(entry["weighted_score"])}</td>')
+
+
 def _patient_html(patient, index, variant_labels):
     outputs = []
     for output in patient["outputs"]:
@@ -425,6 +502,7 @@ def _patient_html(patient, index, variant_labels):
                 rows.append(f'<tr data-field="{field}">{rank}<th class="prediction-field" scope="row">'
                             f'<span class="field-kind">{field.title()}</span>{prediction}'
                             f'<span class="score-reason">{_e(entry["reason"])}</span></th>'
+                            + _judge_cells(pair["correctness"][field])
                             + ''.join(f'<td>{_number(entry["metrics"][metric])}</td>' for metric in DISPLAY_METRICS)
                             + '</tr>')
             pairs.append(f'<tbody class="prediction" data-rank="{pair["rank"]}">{"".join(rows)}</tbody>')
@@ -435,8 +513,8 @@ def _patient_html(patient, index, variant_labels):
                        f'<span class="variant-id">{_e(output["variant"])}</span></span>'
                        f'<span class="badge {status}">{_e(note)}</span></summary>'
                        f'<div class="model-body">{reported}<div class="table-scroll"><table class="score-table">'
-                       '<caption class="sr-only">All three ranked condition and plan predictions with all six scores</caption>'
-                       f'<thead><tr><th scope="col">Rank</th><th scope="col">Prediction / scoring</th>{_metric_header()}</tr></thead>'
+                       '<caption class="sr-only">All three ranked condition and plan predictions with judge scores and all six text metrics</caption>'
+                       f'<thead><tr><th scope="col">Rank</th><th scope="col">Prediction / scoring</th>{_judge_header()}{_metric_header()}</tr></thead>'
                        f'{"".join(pairs)}</table></div></div></details>')
     search = (patient["id"] + ' ' + patient["reference_condition"] + ' '
               + patient["reference_condition"].replace('_', ' ')).lower()
@@ -470,12 +548,62 @@ def _best_variant(variants):
     return max(scored, key=lambda variant: mean(variants[variant]["condition"])) if scored else None
 
 
+def _judge_groups(data):
+    """Scored judge values by model, variant, and field: rank-1 scores and all weighted scores."""
+    groups = {model: {variant: {field: {"rank1": [], "weighted": []} for field in CORRECTNESS_FIELDS}
+                      for variant in data.get("selected_variants", [])}
+              for model in data.get("selected_models", [])}
+    for patient in data["patients"]:
+        for output in patient["outputs"]:
+            fields = groups.setdefault(output["model_id"], {}).setdefault(
+                output["variant"], {field: {"rank1": [], "weighted": []} for field in CORRECTNESS_FIELDS})
+            for prediction in output["predictions"]:
+                for field, entry in prediction.get("correctness", {}).items():
+                    if entry["status"] == "scored":
+                        fields[field]["weighted"].append(entry["weighted_score"])
+                        if prediction["rank"] == 1:
+                            fields[field]["rank1"].append(entry["score"])
+    return groups
+
+
+def format_judge_summary(data):
+    """Summarize judge correctness: rank-1 mean and the rank-weighted mean over ranks 1-3.
+
+    The rank-weighted mean averages score / rank over every judged rank, so its
+    maximum is about 0.611 (WEIGHTED_MEAN_MAXIMUM), not 1; it is not normalized.
+    Diagnosis and Plan stay separate; there is no combined score. Unjudged
+    predictions are excluded, never counted as zero.
+    """
+    lines = ["Judge correctness (median of three judges; higher is better).",
+             "rank-1: unweighted mean score of rank-1 predictions (0-1).",
+             "rank-weighted mean: average of score / rank over every judged rank 1-3; "
+             f"not normalized, so its maximum is {WEIGHTED_MEAN_MAXIMUM:.4f} (all three ranks scoring 1).",
+             "Diagnosis and Plan are kept separate; no combined score is calculated."]
+    for model, variants in _judge_groups(data).items():
+        lines.append(f"\nModel: {model}")
+        for variant, fields in variants.items():
+            values = []
+            for field, scores in fields.items():
+                name = CORRECTNESS_LABELS[field]
+                rank1, weighted = scores["rank1"], scores["weighted"]
+                values.append(f"{name}: rank-1 {mean(rank1):.4f} (n={len(rank1)})" if rank1
+                              else f"{name}: rank-1 N/A (n=0)")
+                values[-1] += (f", rank-weighted mean {mean(weighted):.4f} (n={len(weighted)})" if weighted
+                               else ", rank-weighted mean N/A (n=0)")
+            lines.append(f"  {variant}: " + "; ".join(values))
+    return "\n".join(lines)
+
+
 def format_top_rank_summary(data):
-    """Summarize top-1 BERTScore only; choose best variant by condition mean.
+    """Summarize top-1 BERTScore, then judge correctness; choose best variant by condition mean.
 
     Missing/error/skipped scores are excluded, never replaced by zero. Ties
     retain report/config order. Plan scores are independent, without a composite.
     """
+    return _format_text_summary(data) + "\n\n" + format_judge_summary(data)
+
+
+def _format_text_summary(data):
     groups = _top_rank_groups(data)
     lines = ["Top-ranked condition/Plan BERTScore_F1 (higher is better).",
              "Best variant: highest mean CONDITION BERTScore_F1; ties retain configured order.",
@@ -520,7 +648,19 @@ def _statistics_groups(data):
                     if score["status"] == "scored":
                         for metric in METRICS:
                             entry["values"][metric].append(score["metrics"][metric])
+                for field, judged in prediction.get("correctness", {}).items():
+                    entry = fields.setdefault(field, {"counts": Counter(), "values": {metric: [] for metric in METRICS}})
+                    judge = entry.setdefault("judge", {"counts": Counter(), "score": [], "weighted_score": []})
+                    judge["counts"][judged["status"]] += 1
+                    if judged["status"] == "scored":
+                        judge["score"].append(judged["score"])
+                        judge["weighted_score"].append(judged["weighted_score"])
     return groups
+
+
+def _statistics_cells(scores):
+    values = (mean(scores), pstdev(scores), min(scores), max(scores)) if scores else (None,) * 4
+    return ''.join(f'<td>{_number(value)}</td>' for value in values) + f'<td>{len(scores)}</td>'
 
 
 def _variant_statistics_html(ranks, model, variant):
@@ -534,19 +674,21 @@ def _variant_statistics_html(ranks, model, variant):
             unavailable = [f'{count} {SCORE_REASONS.get(status, "unavailable").lower()}'
                            for status, count in counts.items() if status != "scored" and count]
             coverage = f'{scored}/{total} scored' + ('; ' + '; '.join(unavailable) if unavailable else '')
+            judge = entry.get("judge", {"counts": {}, "score": [], "weighted_score": []})
+            coverage += f'; judge {len(judge["score"])}/{sum(judge["counts"].values())} judged'
             for index, metric in enumerate(DISPLAY_METRICS):
                 scores = entry.get("values", {}).get(metric, [])
-                values = (mean(scores), pstdev(scores), min(scores), max(scores)) if scores else (None,) * 4
-                rank_cell = f'<th scope="rowgroup" rowspan="12" class="rank-cell">{rank}</th>' if field == "condition" and index == 0 else ''
-                field_cell = (f'<th scope="rowgroup" rowspan="6" class="stat-field">{field.title()}'
+                rank_cell = f'<th scope="rowgroup" rowspan="16" class="rank-cell">{rank}</th>' if field == "condition" and index == 0 else ''
+                field_cell = (f'<th scope="rowgroup" rowspan="8" class="stat-field">{field.title()}'
                               f'<span class="score-reason">{_e(coverage)}</span></th>') if index == 0 else ''
                 rows.append(f'<tr data-field="{field}" data-metric="{_e(metric)}">{rank_cell}{field_cell}'
-                            f'<th scope="row">{_e(metric)}</th>'
-                            + ''.join(f'<td>{_number(value)}</td>' for value in values)
-                            + f'<td>{len(scores)}</td></tr>')
+                            f'<th scope="row">{_e(metric)}</th>{_statistics_cells(scores)}</tr>')
+            for key, name in (("score", "Judge score"), ("weighted_score", "Weighted judge score")):
+                rows.append(f'<tr data-field="{field}" data-metric="{key}"><th scope="row">{name}</th>'
+                            f'{_statistics_cells(judge[key])}</tr>')
         groups.append(f'<tbody data-rank="{rank}">{"".join(rows)}</tbody>')
     return ('<div class="table-scroll"><table class="variant-statistics-table">'
-            f'<caption class="sr-only">All ranks and six-metric statistics for {_e(model)} / {_e(variant)}</caption>'
+            f'<caption class="sr-only">All ranks, six-metric and judge statistics for {_e(model)} / {_e(variant)}</caption>'
             '<thead><tr><th scope="col">Rank</th><th scope="col">Field / coverage</th><th scope="col">Metric</th>'
             '<th scope="col">Mean</th><th scope="col">Population SD</th><th scope="col">Min</th>'
             '<th scope="col">Max</th><th scope="col">Scored patients</th></tr></thead>'
@@ -555,6 +697,7 @@ def _variant_statistics_html(ranks, model, variant):
 
 def _top_rank_html(data, labels):
     statistics = _statistics_groups(data)
+    judged = _judge_groups(data)
     cards = []
     for model, variants in _top_rank_groups(data).items():
         best = _best_variant(variants)
@@ -571,7 +714,9 @@ def _top_rank_html(data, labels):
         for variant in ordered:
             fields = variants[variant]
             cells = []
-            for scores in fields.values():
+            judge_fields = judged.get(model, {}).get(variant, {})
+            for scores in [*fields.values(), *(judge_fields.get(field, {}).get("rank1", [])
+                                               for field in CORRECTNESS_FIELDS)]:
                 cells.append(f'<td><span class="top-rank-value">{_number(mean(scores) if scores else None)}</span>'
                              f'<span class="top-rank-count">n={len(scores)}</span></td>')
             winning = variant == best
@@ -583,15 +728,16 @@ def _top_rank_html(data, labels):
                         f'<tr data-variant="{_e(variant)}" data-best="{str(winning).lower()}">'
                         f'<th scope="row"><span class="top-rank-variant-name">{_e(labels.get(variant, variant))}{marker}</span>'
                         f'<span class="top-rank-variant-id">{_e(variant)}</span></th>{"".join(cells)}</tr>'
-                        '<tr class="variant-details-row"><td colspan="3">'
+                        '<tr class="variant-details-row"><td colspan="5">'
                         f'<details class="variant-statistics" data-variant="{_e(variant)}">'
-                        f'<summary>All three ranks · all six metrics <span class="sr-only">for {_e(labels.get(variant, variant))}</span></summary>'
+                        f'<summary>All three ranks · six text metrics and judge scores <span class="sr-only">for {_e(labels.get(variant, variant))}</span></summary>'
                         f'{table}</details></td></tr></tbody>')
         table = ('<div class="table-scroll"><table class="top-rank-table" data-sort-field="condition" data-sort-direction="descending">'
                  f'<caption class="sr-only">Top-ranked BERTScore by evidence variant for {_e(model)}</caption>'
                  '<thead><tr><th scope="col">Evidence variant</th><th scope="col" aria-sort="descending">'
                  '<button type="button" class="score-sort" data-field="condition">Condition <span class="sort-indicator" aria-hidden="true">↓</span></button></th>'
-                 '<th scope="col" aria-sort="none"><button type="button" class="score-sort" data-field="plan">Plan <span class="sort-indicator" aria-hidden="true">↕</span></button></th></tr></thead>'
+                 '<th scope="col" aria-sort="none"><button type="button" class="score-sort" data-field="plan">Plan <span class="sort-indicator" aria-hidden="true">↕</span></button></th>'
+                 '<th scope="col">Diagnosis judge</th><th scope="col">Plan judge</th></tr></thead>'
                  f'{"".join(rows)}</table></div>') if rows else '<p class="unavailable">No evidence variants available.</p>'
         cards.append(f'<article class="top-rank-card" data-model="{_e(model)}">'
                      f'<h3>{_e(model)}</h3>{best_label}{table}</article>')
@@ -671,16 +817,16 @@ _PAGE = r'''<!doctype html>
 <title>MED-COPILOT · Results summary</title><style>@@STYLE@@</style></head>
 <body><header><div class="brand"><span class="brand-mark" aria-hidden="true">M</span> MED-COPILOT <span class="brand-rule"></span> EVALUATION</div>
 <div class="hero"><div><p class="eyebrow">Predictions &amp; reference comparison</p><h1>Results summary<span>.</span></h1>
-<p class="intro">Review model predictions, their corresponding plans, and six evaluation metrics for every patient.</p></div>
+<p class="intro">Review model predictions, their corresponding plans, six text metrics, and judge-panel correctness scores for every patient.</p></div>
 <div class="health @@HEALTH_CLASS@@"><strong>@@HEALTH@@</strong><p>@@HEALTH_DETAIL@@</p></div></div>
 <div class="stats"><div><span>Patients</span><strong>@@PATIENTS@@</strong></div><div><span>Models</span><strong>@@MODELS@@</strong></div>
 </div></header>
 <main><noscript><p class="notice">JavaScript is disabled. All patients and expandable details remain available. Sorting and filtering require JavaScript.</p></noscript>
 @@NOTICES@@
 <section aria-labelledby="top-rank-heading"><div class="section-heading"><h2 id="top-rank-heading">Best evidence variant by model</h2></div>
-<p class="section-note">Selected by the highest mean condition BERTScore_F1 for the first-ranked prediction. Higher is better. Plan scores are shown separately.</p>
+<p class="section-note">Selected by the highest mean condition BERTScore_F1 for the first-ranked prediction. Higher is better. Plan scores are shown separately. Diagnosis and Plan judge columns are rank-1 means of the three-judge median (0–1).</p>
 <div class="top-rank-cards">@@TOP_RANK_SUMMARY@@</div>
-<p class="metric-note">Click Condition or Plan to sort rank-1 means. Missing scores stay last. Counts (n) may differ; ties follow configured order. Expand any variant for all six metrics at ranks 1–3, including mean, population SD, range, and scored patient counts.</p></section>
+<p class="metric-note">Click Condition or Plan to sort rank-1 means. Missing scores stay last. Counts (n) may differ; ties follow configured order. Expand any variant for all six metrics and the unweighted and rank-weighted (score ÷ rank) judge scores at ranks 1–3, including mean, population SD, range, and scored patient counts. A weighted score is at most 1 ÷ rank (1, 0.5, 0.333); the console summary's rank-weighted mean averages those over ranks 1–3 without normalizing, so its maximum is about 0.611.</p></section>
 <section aria-labelledby="patient-heading"><div class="section-heading"><div><h2 id="patient-heading">Patient predictions</h2></div>
 <button id="expand-all" type="button">Expand shown patients</button></div>
 <div class="filters"><label>Model<select id="model-filter"><option value="">All models</option>@@MODEL_OPTIONS@@</select></label>
@@ -694,7 +840,7 @@ _PAGE = r'''<!doctype html>
 <button id="show-less" type="button" hidden>Show first 10 patients</button></div></section>
 <div id="collapse-controls" class="collapse-controls" role="group" aria-label="Collapse patient details" hidden>
 <button id="collapse-current" type="button">Collapse current patient</button><button id="collapse-all" type="button">Collapse all patients</button></div>
-<footer>Saved predictions and scores only. No generation or scoring is performed by this report. Scores measure text similarity, not clinical correctness. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</footer></main>
+<footer>Saved predictions and scores only. No generation or scoring is performed by this report. The six text metrics measure similarity, not clinical correctness. Judge scores are the median of three other models' ratings (0–1); diagnosis and Plan are never combined. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</footer></main>
 <script id="report-data" type="application/json">@@DATA@@</script><script>@@SCRIPT@@</script></body></html>'''
 
 

@@ -146,6 +146,18 @@ class AssessmentPlanModels:
             output["status"] == "completed" for output in result["assessment_plans"].values()
         ) else "failed_incomplete")
 
+    def judge(self, model_id, messages):
+        """Send one correctness-judge request to a loaded model and return the response.
+
+        Judges run at temperature 0 and request a JSON object unless the model
+        is configured for prompt-only output. Errors propagate to the caller.
+        """
+        options = {} if self._settings[model_id]["output_mode"] == "prompt" else {
+            "response_format": {"type": "json_object"}}
+        return self._models[model_id].completion(
+            messages=deepcopy(messages), stream=False, drop_params=False, temperature=0, **options,
+        )
+
     def redact(self, text):
         """Replace selected and shared keys in text, such as an error traceback."""
         return redact_secrets(text, self._secrets + [os.environ.get(name)
