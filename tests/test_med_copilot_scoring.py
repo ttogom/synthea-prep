@@ -7,8 +7,10 @@ from importlib import metadata as package_metadata
 from io import StringIO
 import json
 from pathlib import Path
+import runpy
 import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +35,8 @@ with patch.object(nltk, "download", return_value=True):
         parse_scoring_args,
     )
     from med_copilot.upstream.evaluate_metrics import Evaluator
+    from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges
+    from scripts.med_copilot_scoring import resume_evaluation
 
 
 class PatientScorerTests(unittest.TestCase):
@@ -785,6 +789,351 @@ class VariantScoringTests(unittest.TestCase):
         self.assertEqual(record["variants"]["new_first"]["assessment_plans"]["one"]["evaluation"][2]["plan"]["status"], "scored")
         self.assertEqual(record["variants"]["new_interrupted"]["assessment_plans"]["one"]["evaluation"][0]["condition"]["status"], "interrupted")
         self.assertIsNone(record["variants"]["new_later"]["assessment_plans"]["one"]["evaluation"])
+
+
+JUDGE_MODELS = ("mini", "llama", "gemma", "healthcare")
+
+
+def judge_response(content):
+    return SimpleNamespace(id="judge", model="judge-model", usage=None, choices=[SimpleNamespace(
+        finish_reason="stop", message=SimpleNamespace(content=content, refusal=None))])
+
+
+class FakeJudgeModels:
+    """Full credit unless a reply override matches; records judge, prompt pairs."""
+
+    model_ids = JUDGE_MODELS
+
+    def __init__(self, reply=None):
+        self.reply = reply
+        self.requests = []
+
+    def judge(self, model_id, messages):
+        prompt = messages[-1]["content"]
+        self.requests.append((model_id, prompt))
+        content = self.reply(model_id, prompt) if self.reply else None
+        if isinstance(content, BaseException):
+            raise content
+        if content is None:
+            if prompt.startswith("Grade the generated diagnosis"):
+                content = '{"score": 1}'
+            else:
+                reference = prompt.split("Reference plan: ", 1)[1].split("\nUse these as the actions", 1)[0]
+                content = json.dumps({"credits": [1] * len(reference.split("\n")), "deduction": 0,
+                                      "strength_mismatch_items": []})
+        return judge_response(content)
+
+    def redact(self, text):
+        return text
+
+
+class CorrectnessScoringTests(unittest.TestCase):
+    setUp = PatientScorerTests.setUp
+    write_labels = PatientScorerTests.write_labels
+    scorer = PatientScorerTests.scorer
+    result = PatientScorerTests.result
+
+    def judged(self, record, models=None):
+        models = models or FakeJudgeModels()
+        scorer = self.scorer()
+        scorer.attach_judges(CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE))
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(record)
+        return scorer, models
+
+    def multi_model(self, **kwargs):
+        return {"id": "patient-a", "variants": {"llm_only": {"assessment_plans": {
+            model: self.result(**kwargs) for model in JUDGE_MODELS}}}}
+
+    def test_every_rank_keeps_text_metrics_and_adds_separate_diagnosis_and_plan_scores(self):
+        record = self.multi_model(condition="Acute bronchitis", plan=["Rest", "Fluids"])
+        _, models = self.judged(record)
+        for output in record["variants"]["llm_only"]["assessment_plans"].values():
+            for rank, entry in enumerate(output["evaluation"], 1):
+                self.assertEqual(set(entry), {"rank", "condition", "plan", "diagnosis_correctness", "plan_correctness"})
+                self.assertEqual(entry["condition"]["metrics"], self.metrics)
+                self.assertEqual(entry["plan"]["metrics"], self.metrics)
+                for kind in ("diagnosis_correctness", "plan_correctness"):
+                    self.assertEqual(entry[kind]["status"], "scored")
+                    self.assertEqual(entry[kind]["score"], 1.0)
+                    self.assertAlmostEqual(entry[kind]["weighted_score"], 1 / rank)
+                self.assertEqual(entry["plan_correctness"]["reference_actions"], ["Rest", " Drink fluids "])
+                self.assertEqual(entry["plan_correctness"]["generated_actions"], ["Rest", "Fluids"])
+        self.assertNotIn("combined", json.dumps(record))
+
+    def test_each_generator_is_judged_by_the_other_three_models(self):
+        record = {"id": "patient-a", "variants": {"llm_only": {"assessment_plans": {
+            model: self.result(condition=f"DX by {model}") for model in JUDGE_MODELS}}}}
+        _, models = self.judged(record)
+        for generator in JUDGE_MODELS:
+            judges = {model for model, prompt in models.requests if f"DX by {generator}" in prompt}
+            self.assertEqual(judges, set(JUDGE_MODELS) - {generator})
+
+    def test_unavailable_plan_labels_are_never_judged_but_diagnoses_are(self):
+        for plan, reason in ((["none recorded"], "no_recorded_plan"),
+                             (["COPD clinical management plan (record artifact)"], "record_artifact_plan"),
+                             ([], "missing_reference")):
+            with self.subTest(plan=plan):
+                (self.directory / JUDGE_FILE).unlink(missing_ok=True)
+                self.labels[0]["plan"] = plan
+                self.write_labels(self.labels)
+                record = self.multi_model()
+                _, models = self.judged(record)
+                entry = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
+                self.assertEqual((entry["plan_correctness"]["status"], entry["plan_correctness"]["reason"]),
+                                 ("unavailable", reason))
+                self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
+                self.assertFalse(any(prompt.startswith("Grade the generated plan") for _, prompt in models.requests))
+
+    def test_invalid_or_missing_generations_are_unavailable_per_rank(self):
+        predictions = [{"condition": None, "plan": None}, {"condition": 3, "plan": "Rest"}, ["bad"]]
+        record = self.multi_model(predictions=predictions)
+        self.judged(record)
+        entries = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"]
+        self.assertEqual([(e["diagnosis_correctness"]["reason"], e["plan_correctness"]["reason"]) for e in entries],
+                         [("missing_generation", "missing_generation"), ("invalid_generation", "invalid_generation"),
+                          ("invalid_generation", "invalid_generation")])
+        record = self.multi_model(predictions=None)
+        self.judged(record)
+        entry = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][2]
+        self.assertEqual(entry["plan_correctness"]["reason"], "missing_generation")
+
+    def test_without_judges_evaluation_keeps_its_previous_shape(self):
+        record = self.multi_model()
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            self.scorer().score_result(record)
+        entry = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
+        self.assertEqual(set(entry), {"rank", "condition", "plan"})
+        self.assertNotIn("correctness", self.scorer().metadata(self.directory))
+
+    def test_metadata_records_the_judge_method_when_attached(self):
+        scorer, _ = self.judged(self.multi_model())
+        correctness = scorer.metadata(ROOT)["correctness"]
+        self.assertEqual(correctness["selected_models"], list(JUDGE_MODELS))
+        self.assertEqual(correctness["rank_weighting"]["formula"], "1 / rank")
+
+    def test_judge_interruption_marks_the_panel_and_leaves_later_ranks_pending(self):
+        def reply(model, prompt):
+            return KeyboardInterrupt() if prompt.startswith("Grade the generated plan") else None
+        record = self.multi_model()
+        with self.assertRaises(KeyboardInterrupt):
+            self.judged(record, FakeJudgeModels(reply))
+        entries = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"]
+        self.assertEqual(entries[0]["diagnosis_correctness"]["status"], "scored")
+        self.assertEqual(entries[0]["plan_correctness"]["status"], "interrupted")
+        self.assertEqual(entries[1]["diagnosis_correctness"]["status"], "pending")
+        self.assertEqual(entries[2]["condition"]["status"], "scored")
+
+
+class ResumeEvaluationTests(unittest.TestCase):
+    setUp = PatientScorerTests.setUp
+    write_labels = PatientScorerTests.write_labels
+    scorer = PatientScorerTests.scorer
+    result = PatientScorerTests.result
+
+    def write_run(self):
+        self.run_dir = self.directory / "run"
+        self.run_dir.mkdir()
+        scorer = self.scorer()
+        metadata = {"run_name": "run", "status": "completed", "errors": [],
+                    "evaluation": {"selected_patient_ids": [patient["id"] for patient in scorer.patients]}}
+        (self.run_dir / "run.json").write_text(json.dumps(metadata), encoding="utf-8")
+        record = {"id": "patient-a", "status": "completed", "variants": {"llm_only": {"assessment_plans": {
+            model: self.result(condition=f"DX {model}") for model in JUDGE_MODELS}}}}
+        (self.run_dir / "results.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    def resume(self, models):
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            return resume_evaluation(self.run_dir, self.scorer(), models, root=self.directory)
+
+    def saved(self):
+        record = json.loads((self.run_dir / "results.jsonl").read_text(encoding="utf-8"))
+        return record, json.loads((self.run_dir / "run.json").read_text(encoding="utf-8"))
+
+    def test_resume_scores_saved_predictions_and_records_the_method(self):
+        self.write_run()
+        judges = self.resume(FakeJudgeModels())
+        record, run = self.saved()
+        entry = record["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][1]
+        self.assertEqual((entry["diagnosis_correctness"]["score"], entry["diagnosis_correctness"]["weighted_score"]),
+                         (1.0, 0.5))
+        self.assertEqual(run["evaluation"]["correctness"]["selected_models"], list(JUDGE_MODELS))
+        self.assertEqual(run["status"], "completed")
+        # Each judge answers each distinct request once: 4 generators' diagnoses x 3 judges,
+        # plus one shared plan text (the plan prompt omits the diagnosis) x 4 judges.
+        self.assertEqual(judges.calls, 4 * 3 + 4)
+        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 2 * 3)
+
+    def test_interrupted_evaluation_resumes_without_repeating_completed_calls(self):
+        self.write_run()
+        calls = []
+        def reply(model, prompt):
+            calls.append(model)
+            return KeyboardInterrupt() if len(calls) == 10 else None
+        with self.assertRaises(KeyboardInterrupt):
+            self.resume(FakeJudgeModels(reply))
+        before, _ = self.saved()
+        self.assertNotIn("evaluation", before["variants"]["llm_only"]["assessment_plans"]["mini"])
+        resumed = FakeJudgeModels()
+        judges = self.resume(resumed)
+        # 16 distinct requests: 9 completed before the interruption, 7 remain.
+        self.assertEqual(judges.calls, 16 - 9)
+        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 2 * 3)
+        self.assertEqual(len(resumed.requests), 7)
+        third = self.resume(FakeJudgeModels())
+        self.assertEqual(third.calls, 0)
+
+    def test_scoring_failures_are_saved_under_the_scoring_stage(self):
+        self.write_run()
+        def reply(model, prompt):
+            return RuntimeError("judge offline") if model == "llama" else None
+        self.resume(FakeJudgeModels(reply))
+        record, run = self.saved()
+        self.assertTrue(run["errors"])
+        self.assertEqual({(error["patient_id"], error["stage"], error["exception_type"]) for error in run["errors"]},
+                         {("patient-a", "scoring", "JudgeCallError")})
+        self.assertTrue(all("RuntimeError: judge offline" in error["message"] for error in run["errors"]))
+        # Resuming retries the failed calls but adds no duplicate error entries.
+        self.resume(FakeJudgeModels(reply))
+        self.assertEqual(self.saved()[1]["errors"], run["errors"])
+        entry = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
+        self.assertEqual(entry["diagnosis_correctness"]["reason"], "judge_failed")
+        healthy = record["variants"]["llm_only"]["assessment_plans"]["llama"]["evaluation"][0]
+        self.assertEqual(healthy["diagnosis_correctness"]["status"], "scored")
+
+    def test_resume_refuses_a_different_cohort(self):
+        self.write_run()
+        metadata = json.loads((self.run_dir / "run.json").read_text())
+        metadata["evaluation"]["selected_patient_ids"] = ["someone-else"]
+        (self.run_dir / "run.json").write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(ValueError, "cohort"):
+            self.resume(FakeJudgeModels())
+
+
+RESUME_SCRIPT = ROOT / "scripts/resume_med_copilot_evaluation.py"
+
+
+class ResumeCommandTests(unittest.TestCase):
+    """Command-level checks of scripts/resume_med_copilot_evaluation.py with fake judge models."""
+    setUp = PatientScorerTests.setUp
+    write_labels = PatientScorerTests.write_labels
+    result = PatientScorerTests.result
+
+    def build_run(self):
+        self.input_path = self.directory / "input.jsonl"
+        self.input_path.write_text("".join(json.dumps(p) + "\n" for p in self.patients), encoding="utf-8")
+        self.run_dir = self.directory / "experiments/output/run"
+        self.run_dir.mkdir(parents=True)
+        sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        self.metadata = {
+            "run_name": "run", "status": "completed", "errors": [], "schema_version": 4,
+            "input": {"file": "input.jsonl", "sha256": sha(self.input_path)},
+            "experiment": {"selected_variants": ["llm_only"], "temperature": 1, "max_retries": 3},
+            "assessment_plan_models": {"config_file": "models.yaml", "selected_models": list(JUDGE_MODELS),
+                                       "models": {}},
+            "evaluation": {"labels_path": "labels.jsonl", "labels_sha256": sha(self.labels_path),
+                           "presenting_evidence_only": False, "max_patients": None,
+                           "exclude_none_recorded_plans": False,
+                           "selected_patient_ids": ["patient-b", "patient-a"]},
+        }
+        (self.run_dir / "run.json").write_text(json.dumps(self.metadata), encoding="utf-8")
+        rows = [{"id": patient_id, "status": "completed", "variants": {"llm_only": {"assessment_plans": {
+            model: self.result(patient_id, condition=f"DX {model}") for model in JUDGE_MODELS}}}}
+            for patient_id in ("patient-b", "patient-a")]
+        (self.run_dir / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    def command(self, *argv, reply=None, models=None):
+        """Run the command's main(); return (exit status, stdout, stderr, fake models)."""
+        models = models or FakeJudgeModels(reply)
+        namespace = runpy.run_path(str(RESUME_SCRIPT), run_name="resume_command")
+        stdout, stderr = StringIO(), StringIO()
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics), \
+                redirect_stderr(stderr), patch("sys.stdout", stdout):
+            status = namespace["main"](list(argv) or [str(self.run_dir)], root=self.directory,
+                                       models_factory=lambda *args, **kwargs: models)
+        return status, stdout.getvalue(), stderr.getvalue(), models
+
+    def saved(self):
+        rows = [json.loads(line) for line in (self.run_dir / "results.jsonl").read_text().splitlines()]
+        return rows, json.loads((self.run_dir / "run.json").read_text())
+
+    def test_success_scores_every_patient_writes_the_report_and_exits_zero(self):
+        self.build_run()
+        status, stdout, stderr, models = self.command()
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertIn("Judge calls made: ", stdout)
+        self.assertTrue((self.run_dir / "results_summary.html").is_file())
+        rows, run = self.saved()
+        entry = rows[1]["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][0]
+        self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
+        # patient-b's label is ["none recorded"], so its Plans are never judged.
+        none_recorded = rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
+        self.assertEqual(none_recorded["plan_correctness"]["reason"], "no_recorded_plan")
+        self.assertIn("correctness", run["evaluation"])
+        self.assertEqual(self.command()[0], 0)
+        self.assertEqual(self.command()[3].requests, [])  # Fully resumed: nothing is requested again.
+
+    def test_invalid_run_directories_exit_one_without_scoring(self):
+        self.build_run()
+        status, _, stderr, models = self.command(str(self.directory / "missing-run"))
+        self.assertEqual(status, 1)
+        self.assertIn("Cannot resume evaluation", stderr)
+        self.assertEqual(models.requests, [])
+        del self.metadata["evaluation"]["labels_sha256"]
+        (self.run_dir / "run.json").write_text(json.dumps(self.metadata))
+        status, _, stderr, _ = self.command()
+        self.assertEqual(status, 1)
+        self.assertIn("missing run.json field 'labels_sha256'", stderr)
+
+    def test_changed_labels_or_input_are_refused(self):
+        self.build_run()
+        self.labels[0]["condition"] = "changed"
+        self.write_labels(self.labels)
+        status, _, stderr, models = self.command()
+        self.assertEqual(status, 1)
+        self.assertIn("Labels changed since the run", stderr)
+        self.assertEqual(models.requests, [])
+
+    def test_interruption_exits_130_and_the_next_run_resumes_without_repeats(self):
+        self.build_run()
+        calls = []
+        def reply(model, prompt):
+            calls.append(model)
+            return KeyboardInterrupt() if len(calls) == 20 else None
+        status, _, stderr, _ = self.command(reply=reply)
+        self.assertEqual(status, 130)
+        self.assertIn("rerun this command to resume", stderr)
+        cached = len((self.run_dir / "judge_responses.jsonl").read_text().splitlines())
+        self.assertEqual(cached, 19)
+        status, _, _, models = self.command()
+        self.assertEqual(status, 0)
+        requested = {(model, prompt) for model, prompt in models.requests}
+        self.assertEqual(len(requested), len(models.requests))
+        self.assertEqual(cached + len(models.requests),
+                         len((self.run_dir / "judge_responses.jsonl").read_text().splitlines()))
+
+    def test_failed_judges_exit_one_record_errors_once_and_succeed_after_retry(self):
+        self.build_run()
+        def reply(model, prompt):
+            return "not json" if model == "llama" and prompt.startswith("Grade the generated diagnosis") else None
+        status, _, stderr, _ = self.command(reply=reply)
+        self.assertEqual(status, 1)
+        self.assertIn("judge panels failed", stderr)
+        _, run = self.saved()
+        errors = run["errors"]
+        self.assertTrue(errors)
+        self.assertEqual({(e["stage"], e["exception_type"]) for e in errors}, {("scoring", "JudgeResponseError")})
+        self.assertEqual({e["patient_id"] for e in errors}, {"patient-a", "patient-b"})
+        self.assertEqual(self.command(reply=reply)[0], 1)
+        self.assertEqual(self.saved()[1]["errors"], errors)  # retried, but not recorded twice
+        self.assertEqual(self.command()[0], 0)
+        self.assertEqual(self.saved()[1]["errors"], errors)
+
+    def test_script_entry_point_exits_with_the_status(self):
+        with patch.object(sys, "argv", [str(RESUME_SCRIPT), str(self.directory / "missing-run")]), \
+                redirect_stderr(StringIO()), self.assertRaises(SystemExit) as caught:
+            runpy.run_path(str(RESUME_SCRIPT), run_name="__main__")
+        self.assertEqual(caught.exception.code, 1)
 
 
 if __name__ == "__main__":

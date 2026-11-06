@@ -157,14 +157,16 @@ def pipeline_stage(stage):
         _STAGE.reset(token)
 
 
-def record_error(exc, *, run=None, stage=None):
+def record_error(exc, *, run=None, stage=None, unique=False):
     """Save one failure to run.json immediately and return its entry.
 
     Call this once, where the failure is handled. The run, patient, and stage
     default to where the exception was raised, then to the active error_scope.
     The message comes from the exception, and the traceback keeps chained
-    causes. Without a run, the entry is returned unsaved. If run.json cannot be
-    written, both failures go to stderr and RunMetadataError is raised.
+    causes. Without a run, the entry is returned unsaved. With unique=True, an
+    entry already saved with the same patient, stage, type, and message is kept
+    instead (for failures that a resumed evaluation can meet again). If run.json
+    cannot be written, both failures go to stderr and RunMetadataError is raised.
     """
     scope = _ERROR_SCOPE.get() or {}
     origin = exc.__dict__.pop(_ERROR_ORIGIN, {}) if hasattr(exc, "__dict__") else {}
@@ -178,6 +180,11 @@ def record_error(exc, *, run=None, stage=None):
         "message": redact(str(exc)),
         "traceback": redact("".join(traceback.format_exception(exc))),
     }
+    identity = ("patient_id", "stage", "exception_type", "message")
+    if unique and run is not None:
+        for saved in getattr(run, "metadata", {}).get("errors", []):
+            if all(saved.get(field) == entry[field] for field in identity):
+                return saved
     if run is not None:
         try:
             run.add_error(entry)

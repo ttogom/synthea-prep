@@ -50,6 +50,11 @@ MODELS = ROOT / "scripts" / "med_copilot_models.py"
 CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
+JUDGES_MODULE = ROOT / "scripts/med_copilot_judges.py"
+JUDGE_PROMPT_PREFIXES = ("Grade the generated diagnosis", "Grade the generated plan")
+# Text metrics per field plus the judge-panel entries per rank.
+EVALUATION_KEYS = {"rank", "condition", "plan", "diagnosis_correctness", "plan_correctness"}
+JUDGE_PROMPTS = ROOT / "med_copilot/prompts/correctness_judges.py"
 QUESTION_SCREEN = ROOT / "scripts/med_copilot_question_screen.py"
 PIPELINE_DEFAULTS = ast.literal_eval(next(node.value for node in ast.parse(CONFIG.read_text()).body
     if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "PIPELINE_DEFAULTS" for t in node.targets)))
@@ -380,6 +385,7 @@ class PipelineFixture:
         (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
+        (self.script.parent / JUDGES_MODULE.name).write_bytes(JUDGES_MODULE.read_bytes())
         (self.script.parent / QUESTION_SCREEN.name).write_bytes(QUESTION_SCREEN.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
         self.model_config = root / "experiments/configs/condition_plan_models.yaml"
@@ -408,6 +414,10 @@ class PipelineFixture:
         self.prompt_module = root / "med_copilot/prompts/diagnosis_plan.py"
         self.prompt_module.parent.mkdir(parents=True)
         self.prompt_module.write_text(PROJECT_PROMPTS.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.prompt_module.parent / JUDGE_PROMPTS.name).write_bytes(JUDGE_PROMPTS.read_bytes())
+        rubric = root / "med_copilot/docs/treatment_plan_evaluation.md"
+        rubric.parent.mkdir(parents=True, exist_ok=True)
+        rubric.write_bytes((ROOT / "med_copilot/docs/treatment_plan_evaluation.md").read_bytes())
         self.prompts = PROMPTS.copy()
         self.corpus = [
             {"id": "NOTE-A", "subjective": "Corpus S", "objective": "Corpus O",
@@ -451,6 +461,9 @@ class PipelineFixture:
         }
         self.events = []
         self.calls = []
+        # Correctness-judge requests are kept apart from generation calls.
+        self.judge_calls = []
+        self.judge_reply = None
         self.keyword_calls = []
         self.keyword_response = None
         self.completion_responses = {}
@@ -482,6 +495,21 @@ class PipelineFixture:
             ref.parent.mkdir(parents=True, exist_ok=True)
             ref.write_text(self.commit + "\n")
             (root / ".git/HEAD").write_text(f"ref: refs/heads/{branch}\n")
+
+    def judge(self, kwargs):
+        """Answer one judge request: full credit unless judge_reply(kwargs) overrides it."""
+        self.judge_calls.append(kwargs)
+        prompt = kwargs["messages"][-1]["content"]
+        content = self.judge_reply(kwargs) if self.judge_reply is not None else None
+        if content is None:
+            if prompt.startswith(JUDGE_PROMPT_PREFIXES[0]):
+                content = '{"score": 1}'
+            else:
+                count = len(re.search(r"Reference plan: (.*?)\nUse these as the actions", prompt, re.S)
+                            .group(1).split("\n"))
+                content = json.dumps({"credits": [1] * count, "deduction": 0, "strength_mismatch_items": []})
+        return SimpleNamespace(choices=[SimpleNamespace(
+            finish_reason="stop", message=SimpleNamespace(content=content, refusal=None))])
 
     def write_guideline_settings(self, directory):
         (directory / "prompts").mkdir(parents=True, exist_ok=True)
@@ -531,6 +559,8 @@ class PipelineFixture:
             return object()
 
         def completion(_stage=None, **kwargs):
+            if kwargs["messages"][-1]["content"].startswith(JUDGE_PROMPT_PREFIXES):
+                return fixture.judge(kwargs)
             fixture.calls.append(kwargs)
             fixture.completion_cwds.append(Path.cwd())
             stage = _stage or ("questions" if kwargs.get("response_format") == {"type": "json_object"} else "final")
@@ -656,6 +686,9 @@ class PipelineFixture:
             def score_result(self, result):
                 pass
 
+            def attach_judges(self, judges):
+                pass
+
         def evaluate_metrics(references, candidates, lang="en"):
             fixture.scoring_calls.append((list(references), list(candidates), lang))
             if fixture.scoring_reply is not None:
@@ -734,7 +767,8 @@ class PipelineFixture:
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
                              "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
-                             "scripts.med_copilot_run_file", "scripts"]:
+                             "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
+                             "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
                     sys.modules.pop("scripts.med_copilot_scoring", None)
@@ -808,7 +842,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             dirs = self.run_dirs()
             self.assertEqual(len(dirs), 1, dirs)
             run_dir = dirs[0]
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | ({"results_summary.html"} if (run_dir / "results_summary.html").exists() else set()))
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (run_dir / name).exists()})
         run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
         self.assertTrue(text == "" or text.endswith("\n"))
@@ -4007,7 +4041,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual([entry["rank"] for entry in record["evaluation"]], [1, 2, 3])
         entries = record["evaluation"] if rank is None else [record["evaluation"][rank - 1]]
         for entry in entries:
-            self.assertEqual(set(entry), {"rank", "condition", "plan"})
+            self.assertEqual(set(entry), EVALUATION_KEYS)
             score = entry[field]
             self.assertEqual(set(score), {"status", "metrics", "error"})
             self.assertEqual(score["status"], status)
@@ -4074,7 +4108,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(evaluation["settings"]["aggregation"], "per_patient_per_rank_per_field_singleton")
         self.assertEqual(fixture.input_path.read_bytes(), input_bytes)
         self.assertEqual(fixture.labels_path.read_bytes(), label_bytes)
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | ({"results_summary.html"} if (run_dir / "results_summary.html").exists() else set()))
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (run_dir / name).exists()})
 
     def test_default_filter_joins_shuffled_superset_labels_by_id_and_keeps_input_order(self):
         fixture = self.fixture
@@ -4148,7 +4182,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(record["predictions"], pairs)
         self.assertEqual(len(fixture.scoring_calls), 6)
         for rank, (pair, entry) in enumerate(zip(pairs, record["evaluation"]), 1):
-            self.assertEqual(set(entry), {"rank", "condition", "plan"})
+            self.assertEqual(set(entry), EVALUATION_KEYS)
             self.assertEqual(entry["rank"], rank)
             self.assertEqual(entry["condition"]["metrics"], values[pair["condition"]])
             self.assertEqual(entry["plan"]["metrics"], values[pair["plan"][0]])
@@ -4529,7 +4563,7 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         [directory] = self.run_dirs()
         run = json.loads((directory / "run.json").read_text())
         records = [json.loads(line) for line in (directory / "results.jsonl").read_text().split("\n") if line]
-        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | ({"results_summary.html"} if (directory / "results_summary.html").exists() else set()))
+        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (directory / name).exists()})
         for record in records:
             self.assertEqual(list(record), V4_RESULT_FIELDS if "components" in record else V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
             self.assertNotIn("assessment_plan", schema3_view(record)["model_responses"])
@@ -5567,6 +5601,38 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
             self.assertEqual(list(variant["assessment_plans"]), self.experiment["selected_models"])
         self.assertEqual(fixture.stdout.getvalue().count("Best variant: llm_only"), 4)
         self.assertIn("Planned final requests: 16", fixture.stdout.getvalue())
+
+    def test_shipped_four_models_judge_each_other_and_save_resumable_judgements(self):
+        fixture = self.fixture
+        self.config = yaml.safe_load(MODEL_CONFIG.read_text())
+        self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
+        fixture.write_patients([dict(id="eligible", subjective="S", objective="O")])
+        fixture.write_labels([self.label("eligible")])
+        self.write_config()
+        status, run, [row] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertEqual(len(fixture.calls), 17)  # Judge requests never count as generation calls.
+        correctness = run["evaluation"]["correctness"]
+        self.assertEqual(correctness["selected_models"], self.experiment["selected_models"])
+        self.assertEqual(correctness["rank_weighting"]["weights"], {"1": 1.0, "2": 0.5, "3": 1 / 3})
+        for request in fixture.judge_calls:
+            self.assertEqual((request["temperature"], request["response_format"]), (0, {"type": "json_object"}))
+            prompt = request["messages"][-1]["content"]
+            for hidden in (*self.experiment["selected_models"], *self.experiment["selected_variants"]):
+                self.assertNotIn(hidden, prompt)
+        for variant in row["variants"].values():
+            for generator, slot in variant["assessment_plans"].items():
+                for rank, entry in enumerate(slot["evaluation"], 1):
+                    for kind in ("diagnosis_correctness", "plan_correctness"):
+                        judged = entry[kind]
+                        self.assertEqual((judged["status"], judged["score"]), ("scored", 1.0))
+                        self.assertAlmostEqual(judged["weighted_score"], 1 / rank)
+                        self.assertEqual({judge["judge_model"] for judge in judged["judges"]},
+                                         set(self.experiment["selected_models"]) - {generator})
+        [run_dir] = self.run_dirs()
+        saved = [json.loads(line) for line in (run_dir / "judge_responses.jsonl").read_text().splitlines()]
+        self.assertEqual(len(saved), len(fixture.judge_calls))
+        self.assertEqual(len({entry["key"] for entry in saved}), len(saved))
 
     def test_prompt_variants_remove_only_evidence_sections_and_preserve_combined_verbatim(self):
         original = PROMPTS["EVALUATE_TEMPLATE_KEYINFO"]

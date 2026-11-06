@@ -37,6 +37,7 @@ python tests/test_med_copilot_run_file.py
 python tests/test_med_copilot_helpers.py
 python tests/test_med_copilot_retrieval.py
 python tests/test_med_copilot_observability.py
+python tests/test_med_copilot_judges.py
 python tests/test_med_copilot_scoring.py
 python tests/test_med_copilot_models.py
 python tests/test_collate_med_copilot_results.py
@@ -44,7 +45,11 @@ python tests/test_run_med_copilot.py
 python scripts/run_med_copilot.py
 # Include patients without presenting evidence as well:
 python scripts/run_med_copilot.py --presenting-evidence-only false
+# Finish an interrupted evaluation without repeating completed judge calls:
+python scripts/resume_med_copilot_evaluation.py experiments/output/<run directory>
 ```
+
+Besides the six text metrics, each prediction gets diagnosis and Plan correctness scores from a three-judge panel: the selected models other than its generator. Both scores are reported unweighted and weighted by 1 / rank, never combined. With the shipped four-model selection, every final model also judges the other three, so one patient makes up to 288 additional judge requests. Identical requests are sent once. See the judge-panel section of [med_copilot/docs/output_schema.md](med_copilot/docs/output_schema.md).
 
 The runner automatically loads `.env` from the repository root before initializing model clients, even when launched from another directory. [`.env.example`](.env.example) lists the supported credential-variable names. Set `OPENAI_API_KEY` there; `GRAPHRAG_API_KEY=${OPENAI_API_KEY}` reuses it for guidelines, or you can supply a separate key. Add other provider keys only when selecting models that need them. Existing exported environment variables take precedence over `.env`. The local `.env` file is gitignored; keep actual tokens out of the model YAML.
 

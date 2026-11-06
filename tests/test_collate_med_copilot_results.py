@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.collate_med_copilot_results import (
-    METRICS, format_top_rank_summary, generate_report, load_report_data, main, render_report,
+    METRICS, format_judge_summary, format_top_rank_summary, generate_report, load_report_data, main,
+    render_report,
 )
 
 
@@ -45,6 +46,14 @@ def output(value=0.5):
         "model_responses": [{"reported_model": "reported/model-version", "response_id": "PRIVATE_RESPONSE_ID",
                              "token_usage": {"total_tokens": 123}}],
     }
+
+
+def judged(score_value, rank, status="scored", reason=None):
+    """A saved judge entry as the scorer writes it (median score and score / rank)."""
+    return {"status": status, "reason": reason, "rank_weight": 1 / rank,
+            "score": score_value if status == "scored" else None,
+            "weighted_score": score_value / rank if status == "scored" else None,
+            "judges": [{"judge_model": "other", "status": "scored", "raw_response": "{}"}], "error": None}
 
 
 class HtmlNode:
@@ -434,7 +443,8 @@ class ReportTests(unittest.TestCase):
                 self.assertNotIn('open', details.attrs)
                 statistics = details.find_one('table', **{'class':'variant-statistics-table'})
                 self.assertEqual([body.attrs['data-rank'] for body in statistics.find_all('tbody')], ['1','2','3'])
-                self.assertEqual(len([row for row in statistics.find_all('tr') if 'data-metric' in row.attrs]), 36)
+                # Six text metrics plus unweighted and weighted judge scores per field.
+                self.assertEqual(len([row for row in statistics.find_all('tr') if 'data-metric' in row.attrs]), 48)
         self.assertNotIn('pre', [tag for tag,_ in Document(render_report(self.load())).tags])
 
     def test_each_variant_statistics_preserve_all_rank_population_spread_and_plan_scores(self):
@@ -527,8 +537,9 @@ class ReportTests(unittest.TestCase):
                 self.assertEqual(body.attrs['data-rank'],str(rank))
                 for field in ('condition','plan'):
                     rows=[row for row in body.find_all('tr') if row.attrs['data-field']==field]
-                    self.assertEqual(len(rows),6)
-                    for row in rows:
+                    self.assertEqual(len(rows),8)
+                    self.assertEqual([row.attrs['data-metric'] for row in rows[6:]],['score','weighted_score'])
+                    for row in rows[:6]:
                         expected=0.8 if field=='condition' else 0.4
                         self.assertEqual(row.find_all('td')[0].text,f'{expected:.4f}')
                         self.assertEqual(row.find_all('td')[-1].text,'1')
@@ -1003,10 +1014,10 @@ assert.equal(order(tables[1]),'1,3,0,4,2'); // Other models retain their own sor
             self.assertEqual([group.attrs['data-rank'] for group in groups],['1','2','3'])
             for group in groups:
                 rows=group.find_all('tr')
-                self.assertEqual(len(rows),12)
+                self.assertEqual(len(rows),16)
                 for field in ('condition','plan'):
                     self.assertEqual([row.attrs['data-metric'] for row in rows if row.attrs['data-field']==field],
-                        ['BERTScore_F1','ROUGE-L','BLEU','METEOR','ROUGE-1','ROUGE-2'])
+                        ['BERTScore_F1','ROUGE-L','BLEU','METEOR','ROUGE-1','ROUGE-2','score','weighted_score'])
 
     def test_patient_model_variants_are_compact_collapsible_with_all_predictions(self):
         document=Document(render_report(self.load())).root
@@ -1023,7 +1034,8 @@ assert.equal(order(tables[1]),'1,3,0,4,2'); // Other models retain their own sor
             self.assertEqual([row.attrs['data-field'] for row in group.find_all('tr')],['condition','plan'])
             self.assertIn(f'Condition {rank}',group.text)
             for action in (1,2,3): self.assertIn(f'Action {rank}.{action}',group.text)
-            self.assertEqual(len(group.find_all('td')),12)
+            # Two judge cells (score, weighted) and six metrics per field row.
+            self.assertEqual(len(group.find_all('td')),16)
 
     def test_patient_score_tables_put_bert_first_then_rouge_l_without_misaligning_values(self):
         values={'BLEU':0.11,'METEOR':0.22,'ROUGE-1':0.33,'ROUGE-2':0.44,'ROUGE-L':0.55,'BERTScore_F1':0.66}
@@ -1038,7 +1050,9 @@ assert.equal(order(tables[1]),'1,3,0,4,2'); // Other models retain their own sor
             self.assertEqual([cell.text for cell in table.find_one('thead').find_all('th')][-6:],
                              ['BERTScore_F1','ROUGE-L','BLEU','METEOR','ROUGE-1','ROUGE-2'])
         row=tables[1].find_one('tbody').find_all('tr')[0]
-        self.assertEqual([cell.text for cell in row.find_all('td')],['0.6600','0.5500','0.1100','0.2200','0.3300','0.4400'])
+        cells=[cell.text for cell in row.find_all('td')]
+        self.assertEqual(cells[:2],['N/AJudging not recorded','N/A'])
+        self.assertEqual(cells[2:],['0.6600','0.5500','0.1100','0.2200','0.3300','0.4400'])
 
     def test_patient_rows_preserve_full_ids_in_compact_headings_with_more_controls(self):
         html = render_report(self.load())
@@ -1243,6 +1257,90 @@ elements['patient-search'].fire('input'); assert.equal(visible().length,10);
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Results summary written", result.stdout)
         self.assertTrue((self.run / "results_summary.html").exists())
+
+
+class CorrectnessReportTests(unittest.TestCase):
+    setUp = ReportTests.setUp
+    write = ReportTests.write
+    load = ReportTests.load
+    native_v3 = ReportTests.native_v3
+
+    def judged_run(self):
+        self.native_v3()
+        for variant, value in (("llm_only", 0.5), ("guidelines", 1.0)):
+            for slot in self.rows[0]["variants"][variant]["assessment_plans"].values():
+                for entry in slot["evaluation"]:
+                    rank = entry["rank"]
+                    entry["diagnosis_correctness"] = judged(value, rank)
+                    entry["plan_correctness"] = (judged(None, rank, "unavailable", "record_artifact_plan")
+                                                 if rank == 3 else judged(value / 2, rank))
+        self.write()
+        return self.load()
+
+    def test_each_prediction_reports_unweighted_and_weighted_judge_scores_beside_text_metrics(self):
+        data = self.judged_run()
+        output = next(o for o in data["patients"][0]["outputs"] if o["variant"] == "guidelines")
+        second = output["predictions"][1]
+        self.assertEqual(second["correctness"]["condition"]["score"], 1.0)
+        self.assertEqual(second["correctness"]["condition"]["weighted_score"], 0.5)
+        self.assertEqual(second["correctness"]["plan"]["score"], 0.5)
+        self.assertEqual(second["scores"]["condition"]["metrics"]["BLEU"], 0.8)
+        third = output["predictions"][2]["correctness"]["plan"]
+        self.assertEqual((third["status"], third["score"], third["reason"]),
+                         ("unavailable", None, "Reference plan is a record artifact; not judged"))
+
+    def test_correctness_summary_keeps_diagnosis_and_plan_separate_per_rank(self):
+        summary = {(row["model_id"], row["variant"], row["rank"], row["field"]): row
+                   for row in self.judged_run()["correctness_summary"]}
+        row = summary[("mini", "guidelines", 2, "diagnosis")]
+        self.assertEqual((row["judged"], row["mean_score"], row["mean_weighted_score"]), (1, 1.0, 0.5))
+        plan = summary[("mini", "guidelines", 3, "plan")]
+        self.assertEqual((plan["judged"], plan["mean_score"], plan["counts"]), (0, None, {"unavailable": 1}))
+        self.assertEqual({row["field"] for row in summary.values()}, {"diagnosis", "plan"})
+
+    def test_console_summary_reports_rank_one_and_weighted_means_without_a_combined_score(self):
+        data = self.judged_run()
+        text = format_judge_summary(data)
+        # Perfect diagnoses: (1 + 0.5 + 0.3333) / 3 = 0.6111, the unnormalized maximum.
+        self.assertIn("guidelines: diagnosis: rank-1 1.0000 (n=1), rank-weighted mean 0.6111 (n=3); "
+                      "plan: rank-1 0.5000 (n=1), rank-weighted mean 0.3750 (n=2)", text)
+        self.assertIn("not normalized, so its maximum is 0.6111 (all three ranks scoring 1)", text)
+        self.assertIn("no combined score", text)
+        self.assertIn(text, format_top_rank_summary(data))
+
+    def test_html_shows_judge_cells_card_columns_and_statistics_rows(self):
+        html = render_report(self.judged_run())
+        document = Document(html).root
+        table = document.find_one('table', **{'class': 'score-table'})
+        headers = [cell.text for cell in table.find_one('thead').find_all('th')]
+        self.assertEqual(headers[2:4], ['Judge score', 'Weighted (score ÷ rank)'])
+        cells = [cell.text for cell in table.find_all('tbody')[1].find_all('tr')[0].find_all('td')]
+        self.assertEqual(cells[:2], ['0.5000Judged', '0.2500'])
+        card = document.find_one('table', **{'class': 'top-rank-table'})
+        self.assertEqual([cell.text for cell in card.find_one('thead').find_all('th')][-2:],
+                         ['Diagnosis judge', 'Plan judge'])
+        self.assertIn('data-metric="weighted_score"', html)
+        self.assertIn("never combined", html)
+        self.assertIn("its maximum is about 0.611", html)
+
+    def test_older_runs_without_judgements_show_not_recorded_instead_of_zero(self):
+        self.native_v3()
+        self.write()
+        data = self.load()
+        entry = data["patients"][0]["outputs"][0]["predictions"][0]["correctness"]["condition"]
+        self.assertEqual((entry["status"], entry["score"]), ("not_judged", None))
+        self.assertIn("diagnosis: rank-1 N/A (n=0), rank-weighted mean N/A (n=0)", format_judge_summary(data))
+
+    def test_invalid_saved_judgements_are_flagged_not_reported(self):
+        self.native_v3()
+        slot = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]
+        slot["evaluation"][0]["diagnosis_correctness"] = {**judged(1.0, 1), "score": 1.5}
+        slot["evaluation"][1]["diagnosis_correctness"] = {**judged(1.0, 2), "weighted_score": None}
+        self.write()
+        predictions = next(o for o in self.load()["patients"][0]["outputs"]
+                           if o["variant"] == "llm_only" and o["model_id"] == "mini")["predictions"]
+        self.assertEqual([p["correctness"]["condition"]["status"] for p in predictions[:2]],
+                         ["invalid_judgement", "invalid_judgement"])
 
 
 if __name__ == "__main__":

@@ -140,7 +140,7 @@ final model has this shape (capture details and evaluation values abbreviated):
       "error": null,
       "settings": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5},
       "outputs": {"example": "Exact selected reference example"},
-      "capture": {"selected_reference_patient": {"note_id": "reference-id"}}
+      "capture": {"selected_reference_patient": {"id": "reference-id"}}
     }
   },
   "variants": {
@@ -369,7 +369,8 @@ Each prediction is scored separately against the same patient labels:
 `condition` with underscores replaced by spaces, and `variants[variant_id].assessment_plans[model_id].evaluation[i].plan`
 compares the generated and reference Plan arrays after joining each with
 `", "`. The generated Plan itself stays an array. Each evaluation entry records
-`rank: i + 1`. There is no rank weighting, averaging, maximum, or combined score.
+`rank: i + 1`. The six text metrics have no rank weighting, averaging, maximum,
+or combined score; the judge-panel scores below add a separate 1 / rank weight.
 No additional text cleaning, sorting, deduplication, or comma splitting is
 applied. Labels never enter retrieval or generation prompts. Historical runs
 retain their historical schema; scoring does not fall back to legacy top-level
@@ -433,12 +434,133 @@ precedence over missing-generation; the exact Plan sentinel takes precedence ove
 either.
 
 Every invocation compares singleton lists, separately for condition and Plan at
-each rank. Rank order is preserved for future analysis without weighting.
+each rank. Text-metric rank order is preserved without weighting.
 BLEU uses corpus statistics for that singleton; METEOR and ROUGE/BERTScore F1
 retain the upstream reductions. These are not cohort-level scores, and averaging
 per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
 probability. Encoder truncation, upstream import-time NLTK download attempts,
 and per-call BERTScore model initialization remain upstream behavior.
+
+### Judge-panel correctness
+
+The runner also judges every completed prediction for clinical correctness. Each
+evaluation entry gains two keys beside `condition` and `plan`; the six text
+metrics are unchanged:
+
+```json
+{
+  "rank": 2,
+  "condition": {"status": "scored", "metrics": {"...": 0.0}, "error": null},
+  "plan": {"status": "scored", "metrics": {"...": 0.0}, "error": null},
+  "diagnosis_correctness": {
+    "status": "scored", "reason": null, "score": 0.5, "weighted_score": 0.25,
+    "rank_weight": 0.5, "reference": "acute viral pharyngitis",
+    "generated": "acute pharyngitis",
+    "judges": [
+      {"judge_model": "ollama_healthcare", "status": "scored", "score": 0.5,
+       "request_key": "<sha256>", "raw_response": "{\"score\": 0.5}",
+       "model_response": {"reported_model": "...", "response_id": "...", "token_usage": null},
+       "error": null}
+    ],
+    "error": null
+  },
+  "plan_correctness": {
+    "status": "scored", "reason": null, "score": 0.5, "weighted_score": 0.25,
+    "rank_weight": 0.5,
+    "reference_actions": ["Throat culture (procedure)"],
+    "generated_actions": ["Throat culture", "Antibacterial therapy"],
+    "median_credits": [1.0], "median_deduction": 0.5,
+    "judges": [
+      {"judge_model": "ollama_llama3", "status": "scored", "credits": [1.0],
+       "deduction": 0.5, "strength_mismatch_items": [],
+       "request_key": "<sha256>", "raw_response": "...", "model_response": {"...": null},
+       "error": null}
+    ],
+    "error": null
+  }
+}
+```
+
+The `judges` arrays hold three records (shortened to one above), one per judge.
+
+- **Panel.** The judges are the three `selected_models` other than the model
+  that generated the prediction. A run that does not select exactly four models,
+  or a generator outside them, marks every entry `unavailable` with reason
+  `panel_unavailable` and makes no judge calls. Each judge answers
+  independently, at temperature 0, in JSON object mode (no response format when
+  the model's `output_mode` is `prompt`). Prompts never name the generating
+  model, evidence variant, or rank.
+- **Diagnosis.** Each judge sees only the labeled condition and the generated
+  diagnosis (`med_copilot/prompts/correctness_judges.py`) and returns
+  `{"score": 0 | 0.5 | 1}`: 1 for a clinically equivalent diagnosis or valid
+  synonym, 0.5 for a related but meaningfully broader/narrower diagnosis or one
+  missing an important qualifier, 0 otherwise. `score` is the median of three.
+- **Plan.** Implements `med_copilot/docs/treatment_plan_evaluation.md` with its
+  judge prompt verbatim. Reference and generated actions are passed as separate
+  numbered items, never joined. `median_credits` is the median credit per
+  reference action and `median_deduction` the median total deduction;
+  `score = max(0, (sum(median_credits) - median_deduction) / len(reference_actions))`.
+  An explicitly empty generated Plan scores 0 with reason `empty_generated_plan`
+  and no judge calls.
+- **Rank weight.** `weighted_score = score / rank` (weights 1, 0.5, 1/3).
+  Diagnosis and Plan scores, weighted or not, are never combined.
+
+`status` is one of `scored`, `unavailable`, `error`, `interrupted`, or `pending`;
+`score` and `weighted_score` are `null` unless `scored`. `reason` explains the
+status:
+
+- `unavailable`: `no_recorded_plan` (label exactly `["none recorded"]`),
+  `record_artifact_plan` (any reference action containing `(record artifact)`
+  in any case or spacing, such as `( Record  Artifact )`),
+  `missing_reference` (empty or blank reference Plan), `missing_generation`,
+  `invalid_generation` (malformed prediction pair or field), or
+  `panel_unavailable`. Reference reasons take precedence over generation reasons.
+- `error`: `judge_failed` — a judge call raised, or its reply was refused or
+  not valid JSON for the rubric. Each judge record keeps its own `status`
+  (`scored`, `invalid_response`, or `error`), the raw reply, and
+  `error: {type, message}`. Each such failure is also saved in
+  `run.json.errors` with stage `scoring` and the patient's ID, as
+  `JudgeCallError` (the call raised; the original exception is the chained
+  cause) or `JudgeResponseError` (refused or malformed reply). The message
+  names the task, judge model, and request key. An entry with the same patient,
+  stage, type, and message is saved only once, so resuming adds no duplicates.
+  No median is taken from fewer than three valid judgements.
+- `interrupted`: judging stopped mid-panel; the judge records obtained so far are
+  kept. Later ranks remain `pending`.
+
+Judging only runs for model slots whose generation `completed`. Records from
+runs without judging have no correctness keys, and the report shows them as not
+recorded rather than zero.
+
+**Auditing and resumption.** Every completed judge call is appended (and
+`fsync`ed) to `judge_responses.jsonl` in the run directory before its reply is
+used, with the request key, task, judge model, full messages, raw content,
+refusal, provider metadata, `valid`, and the parse `error`. Only `valid: true`
+replies are reused: identical requests to the same judge are then asked once.
+Malformed or refused replies stay in the file for auditing, but they are
+requested again, as are calls that raised (which have no reply to save). `python scripts/resume_med_copilot_evaluation.py
+RUN_DIRECTORY` rebuilds the run's cohort and models from `run.json` (refusing
+changed input or labels), re-scores every saved prediction, replaces
+`results.jsonl` atomically after each patient, and regenerates the report.
+Valid judge calls are never repeated, and generation is never re-run. It exits
+0 when every judge panel finished, 1 when the run directory or inputs cannot be
+used or some panels still failed (rerun to retry them), and 130 when interrupted.
+
+`run.json.evaluation.correctness` records the method, judge selection rule,
+`selected_models`, judge temperature and response format, hidden fields, the
+diagnosis scale and prompt template (with SHA-256), the Plan rubric file and
+SHA-256, credit values, deduction, formula, unavailable-reference rules, Plan
+prompt template (with SHA-256), and `rank_weighting`
+(`{"formula": "1 / rank", "weights": {"1": 1.0, "2": 0.5, "3": 0.3333333333333333}, "combined_score": null}`).
+
+The report adds `Judge score` and `Weighted (score ÷ rank)` columns for every
+prediction, rank-1 diagnosis and Plan judge means on each model card, and
+unweighted and weighted judge statistics for every rank. The console summary
+adds, per model and variant, the unweighted rank-1 mean and the **rank-weighted
+mean**: the average of `score / rank` over every judged rank 1–3. That aggregate
+is not normalized, so even perfect predictions give at most
+`(1 + 1/2 + 1/3) / 3 ≈ 0.611`. A single weighted score is at most `1 / rank`.
+Missing judgements are excluded, never counted as zero.
 
 Inside the patient-retrieval component capture, both ranked lists are `null` until their order is known and `[]` if their stage
 completes with an empty ranking. An empty hybrid ranking skips reranking, so
@@ -449,9 +571,9 @@ IDs. Their scores come from structured candidates, before display rounding.
 Minimal identity follows the same convention for the selected reference and
 both lists:
 
-- `{"note_id": "..."}` for a unique, nonblank string ID, preserved verbatim.
-- `{"corpus_row": N}` when no usable `note_id` exists.
-- `{"note_id": "...", "corpus_row": N}` when the ID is duplicated.
+- `{"id": "..."}` for a unique, nonblank string ID, preserved verbatim.
+- `{"corpus_row": N}` when no usable `id` exists.
+- `{"id": "...", "corpus_row": N}` when the ID is duplicated.
 
 `corpus_row` is a zero-based position in the loaded reference JSON array, not a
 DataFrame label or a `subject_id`. Multiple records can belong to one subject.
