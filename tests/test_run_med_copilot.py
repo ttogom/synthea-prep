@@ -51,8 +51,10 @@ CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
 JUDGES_MODULE = ROOT / "scripts/med_copilot_judges.py"
-JUDGE_PROMPT_PREFIXES = ("Grade the generated diagnosis", "Grade the generated plan")
-# Text metrics per field plus the judge-panel entries per rank.
+# Plan judge prompts (per reference action, then unsupported extras); diagnoses use BioLORD.
+JUDGE_PROMPT_PREFIXES = ("Grade whether the generated plan covers", "Count the distinct generated actions")
+BIOLORD_MODEL = "FremyCompany/BioLORD-2023"
+# Text metrics per field plus the preliminary correctness entries per rank.
 EVALUATION_KEYS = {"rank", "condition", "plan", "diagnosis_correctness", "plan_correctness"}
 JUDGE_PROMPTS = ROOT / "med_copilot/prompts/correctness_judges.py"
 QUESTION_SCREEN = ROOT / "scripts/med_copilot_question_screen.py"
@@ -464,6 +466,9 @@ class PipelineFixture:
         # Correctness-judge requests are kept apart from generation calls.
         self.judge_calls = []
         self.judge_reply = None
+        # BioLORD-2023 loads (kwargs) and texts embedded; every text gets the same fake vector.
+        self.biolord_loads = []
+        self.biolord_texts = []
         self.keyword_calls = []
         self.keyword_response = None
         self.completion_responses = {}
@@ -502,12 +507,8 @@ class PipelineFixture:
         prompt = kwargs["messages"][-1]["content"]
         content = self.judge_reply(kwargs) if self.judge_reply is not None else None
         if content is None:
-            if prompt.startswith(JUDGE_PROMPT_PREFIXES[0]):
-                content = '{"score": 1}'
-            else:
-                count = len(re.search(r"Reference plan: (.*?)\nUse these as the actions", prompt, re.S)
-                            .group(1).split("\n"))
-                content = json.dumps({"credits": [1] * count, "deduction": 0, "strength_mismatch_items": []})
+            content = ('{"credit": 1}' if prompt.startswith(JUDGE_PROMPT_PREFIXES[0])
+                       else '{"unsupported_extra_count": 0}')
         return SimpleNamespace(choices=[SimpleNamespace(
             finish_reason="stop", message=SimpleNamespace(content=content, refusal=None))])
 
@@ -553,7 +554,13 @@ class PipelineFixture:
     def _modules(self):
         fixture = self
 
-        def preload(model_name):
+        def preload(model_name, **kwargs):
+            if model_name == BIOLORD_MODEL:  # Diagnosis similarity, loaded lazily by the scorer.
+                fixture.biolord_loads.append(kwargs)
+                def encode(texts, convert_to_numpy=True):
+                    fixture.biolord_texts.extend(texts)
+                    return [[1.0, 0.0] for _ in texts]
+                return SimpleNamespace(encode=encode)
             fixture.events.append(("preload", model_name))
             fixture.fail_at("preload")
             return object()
@@ -5594,7 +5601,8 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(len(fixture.keyword_calls), 1)
         self.assertEqual(len(fixture.graph_calls), 1)
         self.assertEqual(len(fixture.scoring_calls), 96)
-        self.assertEqual(len(fixture.model_configs), 4)
+        # Four generating models plus the separately loaded preliminary Plan judge.
+        self.assertEqual(len(fixture.model_configs), 5)
         for field, value in self.experiment.items():
             self.assertEqual(run["experiment"][field], value if field != "variant_settings" else runner_config_metadata(self.fixture)[field])
         for variant in row["variants"].values():
@@ -5602,7 +5610,25 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(fixture.stdout.getvalue().count("Best variant: llm_only"), 4)
         self.assertIn("Planned final requests: 16", fixture.stdout.getvalue())
 
-    def test_shipped_four_models_judge_each_other_and_save_resumable_judgements(self):
+    def test_unloadable_plan_judge_marks_plans_unavailable_and_still_scores_diagnoses(self):
+        fixture = self.fixture
+        self.config = yaml.safe_load(MODEL_CONFIG.read_text())
+        del self.config["models"]["ollama_qwen2_5_14b"]
+        self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
+        fixture.write_patients([dict(id="eligible", subjective="S", objective="O")])
+        fixture.write_labels([self.label("eligible")])
+        self.write_config()
+        status, run, [row] = self.execute()
+        self.assertEqual(status, "completed")
+        self.assertIn("Plan judge ollama_qwen2_5_14b unavailable", fixture.stderr.getvalue())
+        self.assertEqual(fixture.judge_calls, [])
+        self.assertFalse(run["evaluation"]["correctness"]["plan"]["judge_available"])
+        entry = row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]["evaluation"][0]
+        self.assertEqual((entry["plan_correctness"]["status"], entry["plan_correctness"]["reason"]),
+                         ("unavailable", "judge_unavailable"))
+        self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
+
+    def test_shipped_selection_scores_biolord_diagnoses_and_judges_plans_with_one_local_model(self):
         fixture = self.fixture
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
@@ -5613,8 +5639,22 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(status, "completed")
         self.assertEqual(len(fixture.calls), 17)  # Judge requests never count as generation calls.
         correctness = run["evaluation"]["correctness"]
-        self.assertEqual(correctness["selected_models"], self.experiment["selected_models"])
+        self.assertEqual(correctness["status"], "preliminary single-model midterm metric")
         self.assertEqual(correctness["rank_weighting"]["weights"], {"1": 1.0, "2": 0.5, "3": 1 / 3})
+        judge_alias = correctness["plan"]["judge_model"]
+        # The Plan judge is a registry model loaded on its own, not a generating model.
+        self.assertEqual(judge_alias, "ollama_qwen2_5_14b")
+        self.assertNotIn(judge_alias, self.experiment["selected_models"])
+        self.assertIn(judge_alias, self.config["models"])
+        self.assertEqual(correctness["selected_models"], [judge_alias])
+        self.assertEqual(correctness["plan"]["generator_models"], self.experiment["selected_models"])
+        self.assertEqual(correctness["plan"]["self_judging"], "the judge is not a generating model")
+        self.assertEqual(correctness["plan"]["validation_status"], "passed_balanced_sample")
+        self.assertEqual(correctness["plan"]["judge_model_config"]["selected_models"], [judge_alias])
+        self.assertTrue(correctness["plan"]["judge_available"])
+        self.assertEqual(fixture.biolord_loads, [{"revision": correctness["diagnosis"]["model_revision"]}])
+        judge_model = "openai/" + self.config["models"][judge_alias]["model"]
+        self.assertEqual({request["model"] for request in fixture.judge_calls}, {judge_model})
         for request in fixture.judge_calls:
             self.assertEqual((request["temperature"], request["response_format"]), (0, {"type": "json_object"}))
             prompt = request["messages"][-1]["content"]
@@ -5627,8 +5667,9 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
                         judged = entry[kind]
                         self.assertEqual((judged["status"], judged["score"]), ("scored", 1.0))
                         self.assertAlmostEqual(judged["weighted_score"], 1 / rank)
-                        self.assertEqual({judge["judge_model"] for judge in judged["judges"]},
-                                         set(self.experiment["selected_models"]) - {generator})
+                    self.assertEqual(entry["diagnosis_correctness"]["method"], "biolord_2023_cosine")
+                    self.assertEqual({judge["judge_model"] for judge in entry["plan_correctness"]["judges"]},
+                                     {judge_alias})
         [run_dir] = self.run_dirs()
         saved = [json.loads(line) for line in (run_dir / "judge_responses.jsonl").read_text().splitlines()]
         self.assertEqual(len(saved), len(fixture.judge_calls))

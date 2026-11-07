@@ -1,12 +1,19 @@
-"""Three-model judge panels for diagnosis and treatment-plan correctness.
+"""Preliminary single-model midterm correctness metrics for diagnoses and treatment plans.
 
-Each generated prediction is judged by the three selected models other than its
-generator. Judges see only the reference, the generated text, and (for Plans)
-the patient's S/O; the generator, evidence variant, and rank stay hidden. Every
-completed judge call is appended to judge_responses.jsonl in the run directory
-before it is used. Valid judgements are reused, so a resumed evaluation never
-repeats them; malformed or refused replies stay in the file for auditing but are
-requested again.
+PRELIMINARY: this is the provisional midterm metric, to be revised after group
+review. The diagnosis score is a BioLORD-2023 clinical concept similarity score: the
+embedding cosine between the labeled condition and the generated diagnosis, clipped
+to 0-1 (no LLM judge). It is not an accuracy or a probability. Plan correctness
+applies the treatment-plan rubric with one local judge model (PLAN_JUDGE_MODEL):
+one scalar 0/0.5/1 call per reference action plus one call counting unsupported
+extra actions (0.5 deducted each). The judge sees only the labeled condition, the
+patient's S/O, and the reference and generated actions; the generator, evidence
+variant, and rank stay hidden.
+
+Every completed judge call is appended to judge_responses.jsonl in the run
+directory before it is used. Valid judgements are reused, so a resumed
+evaluation never repeats them; malformed or refused replies stay in the file for
+auditing but are requested again.
 """
 
 from contextlib import contextmanager
@@ -16,27 +23,48 @@ import math
 import os
 from pathlib import Path
 import re
-from statistics import median
 
-from med_copilot.prompts.correctness_judges import DIAGNOSIS_JUDGE_TEMPLATE, PLAN_JUDGE_TEMPLATE
+from med_copilot.prompts.correctness_judges import PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE
 from scripts.med_copilot_helpers import model_response_metadata, repo_path
 from scripts.med_copilot_run_file import pacific_now, record_error
 
 
+METRIC_STATUS = "preliminary single-model midterm metric"
 JUDGE_FILE = "judge_responses.jsonl"
-PANEL_SIZE = 3
+# The one local Plan judge for the preliminary metric: an alias in condition_plan_models.yaml.
+# It is loaded separately when it is not one of the selected generating models.
+PLAN_JUDGE_MODEL = "ollama_qwen2_5_14b"
+# A judge that fails the balanced validation sample (correct vs off-target vs placeholder
+# Plans) is marked EXPERIMENTAL_UNVALIDATED: its scores are saved per prediction for review,
+# excluded from every reported aggregate, and never presented as accuracy.
+EXPERIMENTAL_UNVALIDATED = "experimental_unvalidated"
+PLAN_VALIDATION_STATUS = "passed_balanced_sample"
+PLAN_VALIDATION_EVIDENCE = (
+    "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, "
+    "chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), "
+    "2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, "
+    "placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. "
+    "ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. "
+    "ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. "
+    "Small sample; placeholder credit was sometimes given and offset by the extras deduction.")
 JUDGE_TEMPERATURE = 0
+BIOLORD_MODEL = "FremyCompany/BioLORD-2023"
+BIOLORD_REVISION = "167aab527b238a50ca65224e6319215d2ff4fc9f"
+# Deterministic expansion applied to both texts before BioLORD encoding: each
+# abbreviation is replaced only as a whole word, in any case. BioLORD otherwise
+# scores these abbreviations far below their expansions (e.g. HTN 0.32).
+DIAGNOSIS_ABBREVIATIONS = {
+    "HTN": "hypertension",
+    "CHF": "congestive heart failure",
+    "COPD": "chronic obstructive pulmonary disease",
+}
+_ABBREVIATION = re.compile(r"\b(" + "|".join(DIAGNOSIS_ABBREVIATIONS) + r")\b", re.IGNORECASE)
 CREDIT_VALUES = (0, 0.5, 1)
 DEDUCTION_PER_UNSUPPORTED_EXTRA = 0.5
 RECORD_ARTIFACT_MARKER = "(record artifact)"
 # Any case and spacing, e.g. "( Record  Artifact )".
 RECORD_ARTIFACT = re.compile(r"\(\s*record\s+artifact\s*\)", re.IGNORECASE)
 PLAN_RUBRIC = Path(__file__).resolve().parents[1] / "med_copilot/docs/treatment_plan_evaluation.md"
-DIAGNOSIS_SCALE = {
-    "1": "clinically equivalent diagnosis, including valid synonyms",
-    "0.5": "clinically related but meaningfully broader, narrower, or missing an important qualifier",
-    "0": "incorrect or a different condition",
-}
 
 
 def rank_weight(rank):
@@ -59,17 +87,20 @@ def _numbered(actions):
     return "\n".join(f"{number}. {action}" for number, action in enumerate(actions, 1))
 
 
-def diagnosis_messages(reference_condition, generated_diagnosis):
-    prompt = DIAGNOSIS_JUDGE_TEMPLATE.format(reference_condition=reference_condition,
-                                             generated_diagnosis=generated_diagnosis)
+def plan_action_messages(condition, subjective, objective, reference_action, generated_actions):
+    """One reference action against the numbered generated actions."""
+    prompt = PLAN_ACTION_JUDGE_TEMPLATE.format(
+        condition=condition, subjective=subjective, objective=objective,
+        reference_action=reference_action, generated_plan=_numbered(generated_actions))
     return [{"role": "user", "content": prompt}]
 
 
-def plan_messages(condition, subjective, objective, reference_actions, generated_actions):
-    """Number each action so judges score items, not one joined string."""
-    prompt = PLAN_JUDGE_TEMPLATE.format(
+def plan_extras_messages(condition, subjective, objective, reference_actions, generated_actions):
+    """Count unsupported extras among the numbered generated actions."""
+    prompt = PLAN_EXTRAS_JUDGE_TEMPLATE.format(
         condition=condition, subjective=subjective, objective=objective,
-        reference_plan=_numbered(reference_actions), generated_plan=_numbered(generated_actions))
+        reference_plan=_numbered(reference_actions), generated_plan=_numbered(generated_actions),
+        generated_count=len(generated_actions))
     return [{"role": "user", "content": prompt}]
 
 
@@ -86,6 +117,10 @@ class JudgeResponseError(ValueError):
 
 class JudgeCallError(RuntimeError):
     """A judge request raised before any reply was obtained."""
+
+
+class SimilarityError(RuntimeError):
+    """The BioLORD-2023 similarity could not be computed."""
 
 
 def _unique_object(pairs):
@@ -119,39 +154,73 @@ def _credit(value, name):
     return float(value)
 
 
-def parse_diagnosis_judgement(content):
-    """Return the judge's 0/0.5/1 score; extra keys are kept only in the raw reply."""
+def parse_action_judgement(content):
+    """Return the judge's 0/0.5/1 credit for one reference action; extra keys stay in the raw reply."""
     judgement = _judgement(content)
-    if "score" not in judgement:
-        raise JudgeResponseError("Diagnosis judgement requires score")
-    return {"score": _credit(judgement["score"], "score")}
+    if "credit" not in judgement:
+        raise JudgeResponseError("Action judgement requires credit")
+    return {"credit": _credit(judgement["credit"], "credit")}
 
 
-def parse_plan_judgement(content, reference_count):
-    """Validate one credit per reference action, a 0.5-step deduction, and mismatch items."""
+def parse_extras_judgement(content, generated_count):
+    """Return the whole-number count of unsupported extras, from 0 to the generated action count."""
     judgement = _judgement(content)
-    missing = [key for key in ("credits", "deduction", "strength_mismatch_items") if key not in judgement]
-    if missing:
-        raise JudgeResponseError("Plan judgement requires " + ", ".join(missing))
-    credits = judgement["credits"]
-    if not isinstance(credits, list) or len(credits) != reference_count:
-        raise JudgeResponseError(f"credits must list exactly {reference_count} reference actions")
-    credits = [_credit(value, "Each credit") for value in credits]
-    deduction = judgement["deduction"]
-    if (isinstance(deduction, bool) or not isinstance(deduction, (int, float))
-            or not math.isfinite(deduction) or deduction < 0
-            or (deduction / DEDUCTION_PER_UNSUPPORTED_EXTRA) % 1):
-        raise JudgeResponseError("deduction must be a nonnegative multiple of 0.5")
-    items = judgement["strength_mismatch_items"]
-    if (not isinstance(items, list) or len(set(items)) != len(items)
-            or any(type(item) is not int or not 1 <= item <= reference_count for item in items)):
-        raise JudgeResponseError("strength_mismatch_items must be distinct 1-based reference item numbers")
-    return {"credits": credits, "deduction": float(deduction), "strength_mismatch_items": items}
+    if "unsupported_extra_count" not in judgement:
+        raise JudgeResponseError("Extras judgement requires unsupported_extra_count")
+    count = judgement["unsupported_extra_count"]
+    if type(count) is not int or not 0 <= count <= generated_count:
+        raise JudgeResponseError(f"unsupported_extra_count must be a whole number from 0 to {generated_count}")
+    return {"unsupported_extra_count": count}
 
 
-def plan_score(median_credits, median_deduction):
-    """max(0, (sum of median item credits - median deduction) / number of reference actions)."""
-    return max(0.0, (math.fsum(median_credits) - median_deduction) / len(median_credits))
+def plan_score(credits, deduction):
+    """max(0, (sum of item credits - deduction) / number of reference actions)."""
+    return max(0.0, (math.fsum(credits) - deduction) / len(credits))
+
+
+def normalize_diagnosis(text):
+    """Expand HTN, CHF, and COPD (whole words, any case), then trim and collapse whitespace."""
+    expanded = _ABBREVIATION.sub(lambda match: DIAGNOSIS_ABBREVIATIONS[match.group(1).upper()], text)
+    return " ".join(expanded.split())
+
+
+def diagnosis_score(cosine):
+    """Clinical concept similarity score: BioLORD cosine clipped to [0, 1]; negative counts as 0."""
+    return min(1.0, max(0.0, cosine))
+
+
+class BioLordSimilarity:
+    """Cosine similarity of BioLORD-2023 sentence embeddings; the model loads on first use.
+
+    encode(texts) may be supplied (tests); otherwise the pinned BioLORD-2023
+    revision is loaded with sentence-transformers. Embeddings are cached by text.
+    """
+
+    def __init__(self, encode=None):
+        self._encode = encode
+        self._vectors = {}
+
+    def _encoder(self):
+        if self._encode is None:
+            from sentence_transformers import SentenceTransformer
+            model = SentenceTransformer(BIOLORD_MODEL, revision=BIOLORD_REVISION)
+            self._encode = lambda texts: model.encode(texts, convert_to_numpy=True)
+        return self._encode
+
+    def cosine(self, reference, generated):
+        missing = [text for text in dict.fromkeys((reference, generated)) if text not in self._vectors]
+        if missing:
+            vectors = self._encoder()(missing)
+            if len(vectors) != len(missing):
+                raise SimilarityError("BioLORD returned the wrong number of embeddings")
+            for text, vector in zip(missing, vectors):
+                self._vectors[text] = [float(value) for value in vector]
+        first, second = self._vectors[reference], self._vectors[generated]
+        norms = math.sqrt(math.fsum(x * x for x in first)) * math.sqrt(math.fsum(y * y for y in second))
+        cosine = math.fsum(x * y for x, y in zip(first, second)) / norms if norms else math.nan
+        if len(first) != len(second) or not math.isfinite(cosine):
+            raise SimilarityError("BioLORD embeddings are empty, mismatched, or nonfinite")
+        return cosine
 
 
 class JudgeCache:
@@ -194,66 +263,102 @@ class JudgeCache:
 
 
 class CorrectnessJudges:
-    """Score diagnoses and Plans with the selected models other than each generator.
+    """Preliminary single-model midterm metric: BioLORD diagnoses, one local Plan judge.
 
     complete(model_id, messages) sends one judge request and returns the
-    provider response. Valid judgements are reused by request. Failed calls and
-    malformed or refused replies are saved in run.json errors (once per patient,
-    request, and message) and requested again when evaluation resumes.
+    provider response; only plan_judge is ever asked. Valid judgements are
+    reused by request. Failed calls, malformed or refused replies, and
+    similarity failures are saved in run.json errors (once per patient,
+    request, and message); judge requests are asked again when evaluation resumes.
     """
 
-    def __init__(self, complete, model_ids, cache_path):
+    def __init__(self, complete, model_ids, cache_path, *, similarity=None, plan_judge=None,
+                 generator_models=None, judge_model_config=None):
         self.complete = complete
         self.model_ids = tuple(model_ids)
+        self.plan_judge = plan_judge or PLAN_JUDGE_MODEL
+        self.generator_models = None if generator_models is None else tuple(generator_models)
+        self.judge_model_config = judge_model_config
+        self.similarity = similarity if similarity is not None else BioLordSimilarity()
         self.cache = JudgeCache(cache_path)
         self.calls = 0
         self.cache_hits = 0
 
-    def panel(self, generator):
-        judges = [model for model in self.model_ids if model != generator]
-        return judges if generator in self.model_ids and len(judges) == PANEL_SIZE else None
-
     def metadata(self, root):
         return {
-            "method": "independent three-model judge panel; median of the three judgements",
-            "judge_selection": "selected_models other than the generating model; exactly three required",
+            "status": METRIC_STATUS,
+            "method": ("preliminary single-model midterm metric: BioLORD-2023 clinical concept similarity "
+                       "score for diagnoses (not an accuracy or probability); one local judge model for Plans"),
             "selected_models": list(self.model_ids),
-            "judge_temperature": JUDGE_TEMPERATURE,
-            "response_format": "json_object unless the model's output_mode is prompt",
             "hidden_from_judges": ["generating_model", "evidence_variant", "rank"],
-            "responses_file": JUDGE_FILE,
-            "resumption": ("valid judgements are reused by request key; failed calls and malformed or "
-                           "refused replies are kept in responses_file but requested again"),
             "diagnosis": {
-                "scale": DIAGNOSIS_SCALE,
-                "aggregation": "median of three judge scores",
-                "shown_to_judges": ["reference_condition", "generated_diagnosis"],
-                "prompt_template": DIAGNOSIS_JUDGE_TEMPLATE,
-                "prompt_template_sha256": hashlib.sha256(DIAGNOSIS_JUDGE_TEMPLATE.encode()).hexdigest(),
+                "method": ("BioLORD-2023 clinical concept similarity score: embedding cosine clipped to 0-1 "
+                           "(no LLM judge); not an accuracy or probability"),
+                "model": BIOLORD_MODEL,
+                "model_revision": BIOLORD_REVISION,
+                "compared": ["labeled condition (underscores replaced by spaces)", "generated diagnosis"],
+                "normalization": {
+                    "rule": ("before encoding, both texts expand each abbreviation as a whole word in any "
+                             "case, then trim and collapse whitespace; originals are kept as reference/"
+                             "generated and the encoded texts as normalized_reference/normalized_generated"),
+                    "abbreviations": dict(DIAGNOSIS_ABBREVIATIONS),
+                },
+                "score": "cosine similarity clipped to [0, 1]; the raw cosine is kept as cosine_similarity",
             },
             "plan": {
+                "validation_status": PLAN_VALIDATION_STATUS,
+                "validation_evidence": PLAN_VALIDATION_EVIDENCE,
+                "reporting": ("excluded from reported aggregate results; per-prediction scores are kept "
+                              "for review and are not an accuracy measure"
+                              if PLAN_VALIDATION_STATUS == EXPERIMENTAL_UNVALIDATED else "reported"),
+                "judge_model": self.plan_judge,
+                "judge_model_config": self.judge_model_config,
+                "judge_count": 1,
+                "judge_available": self.plan_judge in self.model_ids,
+                "generator_models": None if self.generator_models is None else list(self.generator_models),
+                "self_judging": (None if self.generator_models is None else
+                                 "the judge also generated Plans and judges its own outputs"
+                                 if self.plan_judge in self.generator_models else
+                                 "the judge is not a generating model"),
+                "judge_temperature": JUDGE_TEMPERATURE,
+                "response_format": "json_object unless the model's output_mode is prompt",
+                "responses_file": JUDGE_FILE,
+                "resumption": ("valid judgements are reused by request key; failed calls and malformed or "
+                               "refused replies are kept in responses_file but requested again"),
                 "rubric_file": repo_path(PLAN_RUBRIC, root),
                 "rubric_sha256": hashlib.sha256(PLAN_RUBRIC.read_bytes()).hexdigest(),
                 "credit_values": list(CREDIT_VALUES),
                 "deduction_per_unsupported_extra": DEDUCTION_PER_UNSUPPORTED_EXTRA,
-                "aggregation": "median credit per reference action and median total deduction",
-                "formula": "max(0, (sum of median item credits - median deduction) / number of reference actions)",
-                "actions": "reference and generated actions stay separate, numbered in order",
-                "shown_to_judges": ["labeled_condition", "subjective", "objective",
+                "implementation": ("one scalar 0/0.5/1 call per reference action plus one call counting "
+                                   "unsupported extra actions; deduction = 0.5 x that count"),
+                "implementation_reason": ("a single call returning the full credits array, with the exact "
+                                          "length stated and a JSON example of that length, returned valid "
+                                          "arrays but local judges copied the example credits instead of "
+                                          "grading"),
+                "strength_mismatch_items": "not collected (they never change credit)",
+                "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+                "actions": "generated actions stay separate, numbered in order",
+                "shown_to_judge": {
+                    "action_call": ["labeled_condition", "subjective", "objective",
+                                    "one_reference_action", "generated_actions"],
+                    "extras_call": ["labeled_condition", "subjective", "objective",
                                     "reference_actions", "generated_actions"],
+                },
                 "unavailable_references": ['["none recorded"]', "missing or empty plan",
                                            f"any action containing {RECORD_ARTIFACT_MARKER!r} "
                                            "(any case or spacing)"],
                 "empty_generated_plan": "scores 0 without judge calls when a reference exists",
-                "prompt_template": PLAN_JUDGE_TEMPLATE,
-                "prompt_template_sha256": hashlib.sha256(PLAN_JUDGE_TEMPLATE.encode()).hexdigest(),
+                "action_prompt_template": PLAN_ACTION_JUDGE_TEMPLATE,
+                "action_prompt_template_sha256": hashlib.sha256(PLAN_ACTION_JUDGE_TEMPLATE.encode()).hexdigest(),
+                "extras_prompt_template": PLAN_EXTRAS_JUDGE_TEMPLATE,
+                "extras_prompt_template_sha256": hashlib.sha256(PLAN_EXTRAS_JUDGE_TEMPLATE.encode()).hexdigest(),
             },
             "rank_weighting": {
                 "formula": "1 / rank",
                 "weights": {str(rank): rank_weight(rank) for rank in (1, 2, 3)},
-                "applied_to": ["weighted_diagnosis_score = diagnosis_score / rank",
-                               "weighted_plan_score = plan_score / rank"],
-                "reported_aggregate": ("rank-weighted mean = average of score / rank over judged ranks 1-3; "
+                "applied_to": ["weighted diagnosis score = clinical concept similarity score / rank",
+                               "weighted plan score = plan score / rank"],
+                "reported_aggregate": ("rank-weighted mean = average of score / rank over scored ranks 1-3; "
                                        "not normalized, maximum (1 + 1/2 + 1/3) / 3 = 0.6111"),
                 "combined_score": None,
             },
@@ -312,7 +417,7 @@ class CorrectnessJudges:
 
     @staticmethod
     def _record(error, cause):
-        """Save a judge failure under the active patient and scoring stage, once."""
+        """Save a scoring failure under the active patient and scoring stage, once."""
         error.__cause__ = cause
         record_error(error, unique=True)
 
@@ -327,63 +432,67 @@ class CorrectnessJudges:
                              error={"type": type(exc).__name__, "message": "Judging interrupted"})
             raise
 
-    def judge_diagnosis(self, entry, generator):
-        """Fill a pending diagnosis_entry in place with the panel median and its weight."""
+    def score_diagnosis(self, entry):
+        """Fill a pending diagnosis_entry in place with the BioLORD clinical concept similarity score and its weight."""
         if entry["status"] != "pending":
             return entry
-        panel = self.panel(generator)
-        if panel is None:
-            entry.update(status="unavailable", reason="panel_unavailable")
+        try:
+            cosine = self.similarity.cosine(entry["normalized_reference"], entry["normalized_generated"])
+        except Exception as exc:
+            entry.update(status="error", reason="similarity_failed",
+                         error={"type": type(exc).__name__, "message": str(exc)})
+            self._record(SimilarityError(f"BioLORD diagnosis similarity failed: {type(exc).__name__}: {exc}"),
+                         exc)
             return entry
-        messages = diagnosis_messages(entry["reference"], entry["generated"])
-        judges = []
-        with self._keep_interrupted(entry, judges):
-            for judge in panel:
-                judges.append(self._ask(judge, "diagnosis", messages, parse_diagnosis_judgement))
-        entry["judges"] = judges
-        if any(record["status"] != "scored" for record in judges):
-            entry.update(status="error", reason="judge_failed", error={
-                "type": "JudgePanelIncomplete", "message": "Not every judge returned a valid score"})
-            return entry
-        score = float(median(record["score"] for record in judges))
-        entry.update(status="scored", score=score, weighted_score=score * entry["rank_weight"])
+        score = diagnosis_score(cosine)
+        entry.update(status="scored", cosine_similarity=cosine, score=score,
+                     weighted_score=score * entry["rank_weight"])
         return entry
 
-    def judge_plan(self, entry, generator, condition, patient):
-        """Fill a pending plan_entry in place from per-action panel medians."""
+    def judge_plan(self, entry, condition, patient):
+        """Fill a pending plan_entry in place: one call per reference action, then one extras call.
+
+        Every call is attempted so valid replies are saved even when another fails.
+        """
         if entry["status"] != "pending":
             return entry
-        panel = self.panel(generator)
-        if panel is None:
-            entry.update(status="unavailable", reason="panel_unavailable")
+        if self.plan_judge not in self.model_ids:
+            entry.update(status="unavailable", reason="judge_unavailable")
             return entry
-        reference = entry["reference_actions"]
-        messages = plan_messages(condition, patient["subjective"], patient["objective"],
-                                 reference, entry["generated_actions"])
+        reference, generated = entry["reference_actions"], entry["generated_actions"]
+        context = (condition, patient["subjective"], patient["objective"])
         judges = []
         with self._keep_interrupted(entry, judges):
-            for judge in panel:
-                judges.append(self._ask(judge, "plan", messages,
-                                        lambda content: parse_plan_judgement(content, len(reference))))
+            for number, action in enumerate(reference, 1):
+                record = self._ask(self.plan_judge, "plan_action",
+                                   plan_action_messages(*context, action, generated), parse_action_judgement)
+                judges.append({"call": "action", "reference_item": number, **record})
+            record = self._ask(self.plan_judge, "plan_extras",
+                               plan_extras_messages(*context, reference, generated),
+                               lambda content: parse_extras_judgement(content, len(generated)))
+            judges.append({"call": "extras", "reference_item": None, **record})
         entry["judges"] = judges
         if any(record["status"] != "scored" for record in judges):
             entry.update(status="error", reason="judge_failed", error={
-                "type": "JudgePanelIncomplete", "message": "Not every judge returned a valid judgement"})
+                "type": "JudgeFailed", "message": "The Plan judge did not return every valid judgement"})
             return entry
-        credits = [float(median(record["credits"][index] for record in judges))
-                   for index in range(len(reference))]
-        deduction = float(median(record["deduction"] for record in judges))
+        credits = [record["credit"] for record in judges[:-1]]
+        extras = judges[-1]["unsupported_extra_count"]
+        deduction = DEDUCTION_PER_UNSUPPORTED_EXTRA * extras
         score = plan_score(credits, deduction)
         entry.update(status="scored", score=score, weighted_score=score * entry["rank_weight"],
-                     median_credits=credits, median_deduction=deduction)
+                     credits=credits, unsupported_extra_count=extras, deduction=deduction)
         return entry
 
 
 def diagnosis_entry(rank, reference, generated, problem=None):
-    """A pending diagnosis-correctness entry, or a final one when judging cannot apply."""
-    entry = {"status": "pending", "reason": None, "score": None, "weighted_score": None,
+    """A pending BioLORD diagnosis entry, or a final one when scoring cannot apply."""
+    entry = {"status": "pending", "method": "biolord_2023_cosine", "reason": None,
+             "cosine_similarity": None, "score": None, "weighted_score": None,
              "rank_weight": rank_weight(rank), "reference": reference, "generated": generated,
-             "judges": [], "error": None}
+             "normalized_reference": normalize_diagnosis(reference) if isinstance(reference, str) else None,
+             "normalized_generated": normalize_diagnosis(generated) if isinstance(generated, str) else None,
+             "error": None}
     if problem is not None:
         entry.update(status="unavailable", reason=problem)
     elif generated is None or not generated.strip():
@@ -397,10 +506,13 @@ def plan_entry(rank, reference, generated, problem=None):
     An explicitly empty generated Plan scores 0 without judge calls when the
     reference is available, as the rubric specifies.
     """
-    entry = {"status": "pending", "reason": None, "score": None, "weighted_score": None,
+    entry = {"status": "pending", "method": "single_local_judge", "validation": PLAN_VALIDATION_STATUS,
+             "reason": None,
+             "score": None, "weighted_score": None,
              "rank_weight": rank_weight(rank), "reference_actions": list(reference),
              "generated_actions": list(generated) if isinstance(generated, list) else None,
-             "median_credits": None, "median_deduction": None, "judges": [], "error": None}
+             "credits": None, "unsupported_extra_count": None, "deduction": None, "judges": [],
+             "error": None}
     reason = unavailable_plan_reason(reference)
     if reason is not None:
         entry.update(status="unavailable", reason=reason)
@@ -410,5 +522,5 @@ def plan_entry(rank, reference, generated, problem=None):
         entry.update(status="unavailable", reason="missing_generation")
     elif not generated:
         entry.update(status="scored", reason="empty_generated_plan", score=0.0, weighted_score=0.0,
-                     median_credits=[0.0] * len(reference), median_deduction=0.0)
+                     credits=[0.0] * len(reference), unsupported_extra_count=0, deduction=0.0)
     return entry

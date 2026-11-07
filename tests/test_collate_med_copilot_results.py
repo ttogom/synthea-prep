@@ -49,7 +49,7 @@ def output(value=0.5):
 
 
 def judged(score_value, rank, status="scored", reason=None):
-    """A saved judge entry as the scorer writes it (median score and score / rank)."""
+    """A saved correctness entry as the scorer writes it (score and score / rank)."""
     return {"status": status, "reason": reason, "rank_weight": 1 / rank,
             "score": score_value if status == "scored" else None,
             "weighted_score": score_value / rank if status == "scored" else None,
@@ -1313,15 +1313,61 @@ class CorrectnessReportTests(unittest.TestCase):
         document = Document(html).root
         table = document.find_one('table', **{'class': 'score-table'})
         headers = [cell.text for cell in table.find_one('thead').find_all('th')]
-        self.assertEqual(headers[2:4], ['Judge score', 'Weighted (score ÷ rank)'])
+        self.assertEqual(headers[2:4], ['Score (diagnosis: concept similarity; Plan: judge)', 'Weighted (score ÷ rank)'])
         cells = [cell.text for cell in table.find_all('tbody')[1].find_all('tr')[0].find_all('td')]
-        self.assertEqual(cells[:2], ['0.5000Judged', '0.2500'])
+        self.assertEqual(cells[:2], ['0.5000Scored', '0.2500'])
         card = document.find_one('table', **{'class': 'top-rank-table'})
         self.assertEqual([cell.text for cell in card.find_one('thead').find_all('th')][-2:],
-                         ['Diagnosis judge', 'Plan judge'])
+                         ['Diagnosis concept similarity', 'Plan judge'])
         self.assertIn('data-metric="weighted_score"', html)
         self.assertIn("never combined", html)
         self.assertIn("its maximum is about 0.611", html)
+        self.assertIn("preliminary single-model midterm metric", html)
+
+    def test_experimental_unvalidated_plan_scores_are_shown_but_excluded_from_every_aggregate(self):
+        self.native_v3()
+        for variant in ("llm_only", "guidelines"):
+            for slot in self.rows[0]["variants"][variant]["assessment_plans"].values():
+                for entry in slot["evaluation"]:
+                    entry["diagnosis_correctness"] = judged(1.0, entry["rank"])
+                    entry["plan_correctness"] = {**judged(0.75, entry["rank"]),
+                                                 "validation": "experimental_unvalidated"}
+        self.metadata["evaluation"]["correctness"] = {"plan": {"judge_model": "ollama_llama3",
+                                                               "validation_status": "experimental_unvalidated"}}
+        self.write()
+        data = self.load()
+        plan = data["patients"][0]["outputs"][0]["predictions"][0]["correctness"]["plan"]
+        self.assertEqual((plan["status"], plan["score"], plan["weighted_score"]),
+                         ("experimental_unvalidated", 0.75, 0.75))
+        self.assertIn("not accuracy", plan["reason"])
+        rows = [row for row in data["correctness_summary"] if row["field"] == "plan"]
+        self.assertTrue(rows)
+        self.assertTrue(all(row["judged"] == 0 and row["mean_score"] is None for row in rows))
+        diagnosis = [row for row in data["correctness_summary"] if row["field"] == "diagnosis"]
+        self.assertTrue(all(row["judged"] == 1 for row in diagnosis))
+        text = format_judge_summary(data)
+        self.assertIn("plan: experimental_unvalidated - excluded from these aggregates", text)
+        self.assertIn("plan: rank-1 N/A (n=0), rank-weighted mean N/A (n=0)", text)
+        self.assertNotIn("0.7500", text)
+        self.assertTrue(any("experimental and unvalidated" in note and "not a measure of accuracy" in note
+                            for note in data["notices"]))
+        html = render_report(data)
+        self.assertIn("Experimental, unvalidated; excluded from aggregates; not accuracy", html)
+
+    def test_recorded_preliminary_metric_is_labeled_in_a_notice_and_the_console_summary(self):
+        self.native_v3()
+        self.metadata["evaluation"]["correctness"] = {"status": "preliminary single-model midterm metric",
+                                                      "plan": {"judge_model": "ollama_llama3"}}
+        self.write()
+        data = self.load()
+        [notice] = [note for note in data["notices"] if "preliminary" in note]
+        self.assertIn("preliminary single-model midterm metric", notice)
+        self.assertIn("BioLORD-2023", notice)
+        self.assertIn("(ollama_llama3)", notice)
+        self.assertIn("Correctness: preliminary single-model midterm metric", format_judge_summary(data))
+        del self.metadata["evaluation"]["correctness"]
+        self.write()
+        self.assertFalse(any("preliminary" in note for note in self.load()["notices"]))
 
     def test_older_runs_without_judgements_show_not_recorded_instead_of_zero(self):
         self.native_v3()

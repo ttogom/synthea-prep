@@ -55,7 +55,10 @@ The shipped config selects all four variants and these final models:
 
 The Ollama entries reuse the upstream OpenAI-compatible adapter at
 `http://localhost:11434/v1` and request `json_schema` output. Keep that server
-running; no key variable is needed for these entries. Optional hosted/local
+running; no key variable is needed for these entries. `ollama_qwen2_5_14b`
+(`qwen2.5:14b`) is registered as the preliminary Plan-correctness judge
+(`PLAN_JUDGE_MODEL` in `scripts/med_copilot_judges.py`); it is loaded separately
+and is not a selected generating model. Optional hosted/local
 Llama 3.3 70B entries remain registered. The shipped `max_patients: null` means every eligible sample patient is run. The sample cohort has 10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-plan filter: 80 final requests before retries with four variants and four models. Shared component calls are additional and are not repeated for each variant/model.
 
 Patient retrieval needs `OPENAI_API_KEY`. Guidelines need `OPENAI_API_KEY` and

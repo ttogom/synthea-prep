@@ -36,7 +36,7 @@ try:
     from scripts.med_copilot_observability import capture_graphrag_responses
     from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
     from scripts.med_copilot_models import AssessmentPlanModels
-    from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges
+    from scripts.med_copilot_judges import JUDGE_FILE, PLAN_JUDGE_MODEL, CorrectnessJudges
     from scripts.collate_med_copilot_results import generate_report, load_report_data, format_top_rank_summary
     from graphrag.cli.query import run_local_search
     from med_copilot.prompts.diagnosis_plan import (
@@ -261,9 +261,24 @@ def main(argv=None, run_file=None):
 
     current = None
     try:
-        # The selected models judge each other's predictions; replies persist per call.
-        scorer.attach_judges(CorrectnessJudges(assessment_models.judge, assessment_models.model_ids,
-                                               run.run_dir / JUDGE_FILE))
+        # Preliminary single-model midterm metric: BioLORD-2023 clinical concept similarity score
+        # for diagnoses (not an accuracy or probability) and one
+        # local Plan judge (PLAN_JUDGE_MODEL), loaded on its own unless it is also a generator.
+        # If it cannot be loaded, Plans are marked judge_unavailable; the run continues.
+        judge_models = assessment_models
+        if PLAN_JUDGE_MODEL not in assessment_models.model_ids:
+            try:
+                judge_models = AssessmentPlanModels(experiment.model_config, [PLAN_JUDGE_MODEL],
+                                                    temperature=experiment.temperature,
+                                                    max_retries=experiment.max_retries)
+            except (OSError, ValueError) as exc:
+                judge_models = None
+                print(f"Plan judge {PLAN_JUDGE_MODEL} unavailable; Plans will not be judged: {exc}",
+                      file=sys.stderr)
+        scorer.attach_judges(CorrectnessJudges(
+            judge_models.judge if judge_models else None, judge_models.model_ids if judge_models else (),
+            run.run_dir / JUDGE_FILE, generator_models=assessment_models.model_ids,
+            judge_model_config=judge_models.metadata(ROOT) if judge_models else None))
         run.update(experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
                    assessment_plan_models=assessment_models.metadata(ROOT),
                    **experiment.variant_metadata(ROOT))

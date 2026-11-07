@@ -370,7 +370,7 @@ Each prediction is scored separately against the same patient labels:
 compares the generated and reference Plan arrays after joining each with
 `", "`. The generated Plan itself stays an array. Each evaluation entry records
 `rank: i + 1`. The six text metrics have no rank weighting, averaging, maximum,
-or combined score; the judge-panel scores below add a separate 1 / rank weight.
+or combined score; the preliminary correctness scores below add a separate 1 / rank weight.
 No additional text cleaning, sorting, deduplication, or comma splitting is
 applied. Labels never enter retrieval or generation prompts. Historical runs
 retain their historical schema; scoring does not fall back to legacy top-level
@@ -441,9 +441,20 @@ per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
 probability. Encoder truncation, upstream import-time NLTK download attempts,
 and per-call BERTScore model initialization remain upstream behavior.
 
-### Judge-panel correctness
+### Preliminary correctness metric (single-model midterm)
 
-The runner also judges every completed prediction for clinical correctness. Each
+> **Preliminary single-model midterm metric.** This is a provisional metric so
+> the group can start using results; it will be revised after review. It
+> replaces the earlier three-judge panel design. The diagnosis score is a
+> BioLORD-2023 clinical concept similarity score (no LLM judge; not an accuracy
+> or probability), and Plan correctness uses
+> one local judge model, `PLAN_JUDGE_MODEL` in `scripts/med_copilot_judges.py`
+> (currently `ollama_qwen2_5_14b`, Ollama tag `qwen2.5:14b`, about 9 GB). The
+> judge is a registry model, not a generating model; the runner and resume
+> command load it on their own. If it cannot be loaded, every Plan entry is
+> `unavailable` with reason `judge_unavailable` and diagnoses are still scored.
+
+The runner also scores every completed prediction for correctness. Each
 evaluation entry gains two keys beside `condition` and `plan`; the six text
 metrics are unchanged:
 
@@ -453,27 +464,26 @@ metrics are unchanged:
   "condition": {"status": "scored", "metrics": {"...": 0.0}, "error": null},
   "plan": {"status": "scored", "metrics": {"...": 0.0}, "error": null},
   "diagnosis_correctness": {
-    "status": "scored", "reason": null, "score": 0.5, "weighted_score": 0.25,
-    "rank_weight": 0.5, "reference": "acute viral pharyngitis",
-    "generated": "acute pharyngitis",
-    "judges": [
-      {"judge_model": "ollama_healthcare", "status": "scored", "score": 0.5,
-       "request_key": "<sha256>", "raw_response": "{\"score\": 0.5}",
-       "model_response": {"reported_model": "...", "response_id": "...", "token_usage": null},
-       "error": null}
-    ],
-    "error": null
+    "status": "scored", "method": "biolord_2023_cosine", "reason": null,
+    "cosine_similarity": 0.7930, "score": 0.7930, "weighted_score": 0.3965,
+    "rank_weight": 0.5, "reference": "essential hypertension", "generated": "HTN",
+    "normalized_reference": "essential hypertension",
+    "normalized_generated": "hypertension", "error": null
   },
   "plan_correctness": {
-    "status": "scored", "reason": null, "score": 0.5, "weighted_score": 0.25,
-    "rank_weight": 0.5,
+    "status": "scored", "method": "single_local_judge",
+    "validation": "passed_balanced_sample", "reason": null,
+    "score": 0.5, "weighted_score": 0.25, "rank_weight": 0.5,
     "reference_actions": ["Throat culture (procedure)"],
     "generated_actions": ["Throat culture", "Antibacterial therapy"],
-    "median_credits": [1.0], "median_deduction": 0.5,
+    "credits": [1.0], "unsupported_extra_count": 1, "deduction": 0.5,
     "judges": [
-      {"judge_model": "ollama_llama3", "status": "scored", "credits": [1.0],
-       "deduction": 0.5, "strength_mismatch_items": [],
-       "request_key": "<sha256>", "raw_response": "...", "model_response": {"...": null},
+      {"call": "action", "reference_item": 1, "judge_model": "ollama_qwen2_5_14b",
+       "status": "scored", "credit": 1.0, "request_key": "<sha256>",
+       "raw_response": "{\"credit\": 1}", "model_response": {"...": null}, "error": null},
+      {"call": "extras", "reference_item": null, "judge_model": "ollama_qwen2_5_14b",
+       "status": "scored", "unsupported_extra_count": 1, "request_key": "<sha256>",
+       "raw_response": "{\"unsupported_extra_count\": 1}", "model_response": {"...": null},
        "error": null}
     ],
     "error": null
@@ -481,29 +491,59 @@ metrics are unchanged:
 }
 ```
 
-The `judges` arrays hold three records (shortened to one above), one per judge.
-
-- **Panel.** The judges are the three `selected_models` other than the model
-  that generated the prediction. A run that does not select exactly four models,
-  or a generator outside them, marks every entry `unavailable` with reason
-  `panel_unavailable` and makes no judge calls. Each judge answers
-  independently, at temperature 0, in JSON object mode (no response format when
-  the model's `output_mode` is `prompt`). Prompts never name the generating
-  model, evidence variant, or rank.
-- **Diagnosis.** Each judge sees only the labeled condition and the generated
-  diagnosis (`med_copilot/prompts/correctness_judges.py`) and returns
-  `{"score": 0 | 0.5 | 1}`: 1 for a clinically equivalent diagnosis or valid
-  synonym, 0.5 for a related but meaningfully broader/narrower diagnosis or one
-  missing an important qualifier, 0 otherwise. `score` is the median of three.
-- **Plan.** Implements `med_copilot/docs/treatment_plan_evaluation.md` with its
-  judge prompt verbatim. Reference and generated actions are passed as separate
-  numbered items, never joined. `median_credits` is the median credit per
-  reference action and `median_deduction` the median total deduction;
-  `score = max(0, (sum(median_credits) - median_deduction) / len(reference_actions))`.
-  An explicitly empty generated Plan scores 0 with reason `empty_generated_plan`
-  and no judge calls.
-- **Rank weight.** `weighted_score = score / rank` (weights 1, 0.5, 1/3).
-  Diagnosis and Plan scores, weighted or not, are never combined.
+- **Diagnosis (clinical concept similarity score).** The labeled condition (underscores replaced by
+  spaces) and the generated diagnosis are normalized, then embedded with
+  `FremyCompany/BioLORD-2023` (sentence-transformers, pinned revision
+  `167aab527b238a50ca65224e6319215d2ff4fc9f`). Normalization is deterministic:
+  `HTN` → `hypertension`, `CHF` → `congestive heart failure`, and `COPD` →
+  `chronic obstructive pulmonary disease`, each only as a whole word in any case
+  (`uncontrolled htn` expands; `HTNX` does not), then whitespace is trimmed and
+  collapsed. `reference`/`generated` keep the original text and
+  `normalized_reference`/`normalized_generated` the encoded text.
+  `cosine_similarity` is the raw cosine; `score` is that cosine clipped to
+  `[0, 1]`. It is a clinical concept similarity score, not an accuracy, a probability, or a
+  graded clinical judgement: related but different conditions can still score high (acute viral
+  pharyngitis vs streptococcal sore throat: 0.69). Original sanity pairs
+  (unchanged by normalization): heart failure ↔ congestive heart failure 0.918,
+  acute viral pharyngitis ↔ acute pharyngitis 0.851, essential hypertension ↔
+  hypertension 0.793, and the incorrect heart failure ↔ anemia 0.253.
+  Abbreviation pairs, before → after normalization: HTN 0.324 → 0.793, CHF
+  0.585 → 0.918, COPD 0.833 → 1.000, and Hypertension 0.793 (unchanged), each
+  against its labeled condition. `tests/test_med_copilot_judges.py` checks the
+  orderings (every related pair above the incorrect pair; normalization never
+  lowers an abbreviation's score), not these exact values, and runs only when
+  the pinned revision is already cached.
+- **Plan.** Applies `med_copilot/docs/treatment_plan_evaluation.md` with one
+  local judge, at temperature 0, in JSON object mode (no response format when
+  the model's `output_mode` is `prompt`). The rubric is split into one scalar
+  call per reference action (`{"credit": 0 | 0.5 | 1}`, the rubric's scale) and
+  one call counting unsupported extra actions
+  (`{"unsupported_extra_count": N}`, 0 to the number of generated actions);
+  prompts are in `med_copilot/prompts/correctness_judges.py`. Generated actions
+  are passed as separate numbered items. `deduction = 0.5 × unsupported_extra_count`
+  and `score = max(0, (sum(credits) - deduction) / len(reference_actions))`.
+  A single call returning the whole credits array was tried first, with the
+  exact length stated and a JSON example of that length; the local judges
+  returned valid arrays but copied the example credits instead of grading.
+  Strength-mismatch items are not collected (they never change credit). An
+  explicitly empty generated Plan scores 0 with reason `empty_generated_plan`
+  and no judge calls. Prompts never name the generating model, evidence variant,
+  or rank. `run.json` records whether the judge is also a generating model
+  (`self_judging`); the shipped judge is not.
+- **Plan validation.** Every Plan entry carries `validation`, the judge's result
+  on a balanced sample of correct, off-target, and placeholder Plans
+  (`PLAN_VALIDATION_STATUS`, with the evidence in `run.json`). The shipped judge
+  is `passed_balanced_sample`: on 3 cohort patients × 6 Plans, qwen2.5:14b scored
+  correct Plans 1.00, off-target 0.00, and placeholders 0.083, every correct Plan
+  above every other Plan per patient (llama3 failed: placeholders 0.83). The
+  sample is small, and placeholder credit was sometimes offset only by the
+  extras deduction. A judge marked `experimental_unvalidated` keeps its
+  per-prediction scores for review, but the report shows them as
+  experimental, excludes them from every aggregate (cards, statistics, console
+  summary), and adds a notice that they are not a measure of accuracy.
+- **Rank weight.** `weighted_score = score / rank` (weights 1, 0.5, 1/3), for
+  the concept similarity score and the Plan score separately. Diagnosis and Plan scores,
+  weighted or not, are never combined.
 
 `status` is one of `scored`, `unavailable`, `error`, `interrupted`, or `pending`;
 `score` and `weighted_score` are `null` unless `scored`. `reason` explains the
@@ -514,53 +554,62 @@ status:
   in any case or spacing, such as `( Record  Artifact )`),
   `missing_reference` (empty or blank reference Plan), `missing_generation`,
   `invalid_generation` (malformed prediction pair or field), or
-  `panel_unavailable`. Reference reasons take precedence over generation reasons.
-- `error`: `judge_failed` — a judge call raised, or its reply was refused or
-  not valid JSON for the rubric. Each judge record keeps its own `status`
-  (`scored`, `invalid_response`, or `error`), the raw reply, and
-  `error: {type, message}`. Each such failure is also saved in
+  `judge_unavailable` (the Plan judge model is not among `selected_models`).
+  Reference reasons take precedence over generation reasons.
+- `error`: `similarity_failed` (BioLORD could not be loaded or returned unusable
+  embeddings; saved in `run.json.errors` as `SimilarityError`) or
+  `judge_failed` — a Plan judge call raised, or its reply was refused or not
+  valid for its schema. Every call for the Plan is still attempted. Each judge
+  record keeps its own `status` (`scored`, `invalid_response`, or `error`), the
+  raw reply, and `error: {type, message}`. Each such failure is also saved in
   `run.json.errors` with stage `scoring` and the patient's ID, as
   `JudgeCallError` (the call raised; the original exception is the chained
   cause) or `JudgeResponseError` (refused or malformed reply). The message
   names the task, judge model, and request key. An entry with the same patient,
   stage, type, and message is saved only once, so resuming adds no duplicates.
-  No median is taken from fewer than three valid judgements.
-- `interrupted`: judging stopped mid-panel; the judge records obtained so far are
+- `interrupted`: judging stopped mid-Plan; the judge records obtained so far are
   kept. Later ranks remain `pending`.
 
-Judging only runs for model slots whose generation `completed`. Records from
-runs without judging have no correctness keys, and the report shows them as not
-recorded rather than zero.
+Correctness scoring only runs for model slots whose generation `completed`.
+Records from runs without it have no correctness keys, and the report shows
+them as not recorded rather than zero.
 
 **Auditing and resumption.** Every completed judge call is appended (and
 `fsync`ed) to `judge_responses.jsonl` in the run directory before its reply is
-used, with the request key, task, judge model, full messages, raw content,
-refusal, provider metadata, `valid`, and the parse `error`. Only `valid: true`
-replies are reused: identical requests to the same judge are then asked once.
-Malformed or refused replies stay in the file for auditing, but they are
-requested again, as are calls that raised (which have no reply to save). `python scripts/resume_med_copilot_evaluation.py
+used, with the request key, task (`plan_action` or `plan_extras`), judge model,
+full messages, raw content, refusal, provider metadata, `valid`, and the parse
+`error`. Only `valid: true` replies are reused: identical requests are then
+asked once. Malformed or refused replies stay in the file for auditing, but
+they are requested again, as are calls that raised (which have no reply to
+save). BioLORD concept similarity scores are recomputed, not cached. `python scripts/resume_med_copilot_evaluation.py
 RUN_DIRECTORY` rebuilds the run's cohort and models from `run.json` (refusing
 changed input or labels), re-scores every saved prediction, replaces
 `results.jsonl` atomically after each patient, and regenerates the report.
 Valid judge calls are never repeated, and generation is never re-run. It exits
-0 when every judge panel finished, 1 when the run directory or inputs cannot be
-used or some panels still failed (rerun to retry them), and 130 when interrupted.
+0 when every correctness entry finished, 1 when the run directory or inputs
+cannot be used or some entries still failed (rerun to retry them), and 130 when
+interrupted.
 
-`run.json.evaluation.correctness` records the method, judge selection rule,
-`selected_models`, judge temperature and response format, hidden fields, the
-diagnosis scale and prompt template (with SHA-256), the Plan rubric file and
-SHA-256, credit values, deduction, formula, unavailable-reference rules, Plan
-prompt template (with SHA-256), and `rank_weighting`
+`run.json.evaluation.correctness` records `status: "preliminary single-model
+midterm metric"`, the method, `selected_models` (the models the judge can
+call), hidden fields, the BioLORD model, revision, and normalization rule, the
+Plan judge model, its registry settings (`judge_model_config`), whether it
+loaded, the generating models and `self_judging`, the Plan
+`validation_status` and `validation_evidence`, judge temperature and response format, the rubric file and
+SHA-256, the per-action implementation and why it replaced the full-array call,
+credit values, deduction, formula, unavailable-reference rules, both Plan
+prompt templates (with SHA-256), and `rank_weighting`
 (`{"formula": "1 / rank", "weights": {"1": 1.0, "2": 0.5, "3": 0.3333333333333333}, "combined_score": null}`).
 
-The report adds `Judge score` and `Weighted (score ÷ rank)` columns for every
-prediction, rank-1 diagnosis and Plan judge means on each model card, and
-unweighted and weighted judge statistics for every rank. The console summary
-adds, per model and variant, the unweighted rank-1 mean and the **rank-weighted
-mean**: the average of `score / rank` over every judged rank 1–3. That aggregate
-is not normalized, so even perfect predictions give at most
+The report labels these scores as the preliminary single-model midterm metric
+in a notice, adds `Score (diagnosis: concept similarity; Plan: judge)` and `Weighted (score ÷ rank)` columns for every
+prediction, rank-1 `Diagnosis concept similarity` and `Plan judge` means on each model
+card, and unweighted and weighted correctness statistics for every rank. The
+console summary adds, per model and variant, the unweighted rank-1 mean and the
+**rank-weighted mean**: the average of `score / rank` over every scored rank
+1–3. That aggregate is not normalized, so even perfect predictions give at most
 `(1 + 1/2 + 1/3) / 3 ≈ 0.611`. A single weighted score is at most `1 / rank`.
-Missing judgements are excluded, never counted as zero.
+Missing scores are excluded, never counted as zero.
 
 Inside the patient-retrieval component capture, both ranked lists are `null` until their order is known and `[]` if their stage
 completes with an empty ranking. An empty hybrid ranking skips reranking, so
