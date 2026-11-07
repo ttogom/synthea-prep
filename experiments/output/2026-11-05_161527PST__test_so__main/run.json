@@ -27,7 +27,15 @@
       "stage": "final_generation",
       "exception_type": "ValueError",
       "message": "Assessment/Plan generation did not complete",
-      "traceback": "Traceback (most recent call last):\n  File \"/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_models.py\", line 134, in generate\n    raise ValueError(\"Assessment/Plan generation did not complete\")\nValueError: Assessment/Plan generation did not complete\n"
+      "traceback": "Traceback (most recent call last):\n  File \"[REPO_ROOT]/scripts/med_copilot_models.py\", line 134, in generate\n    raise ValueError(\"Assessment/Plan generation did not complete\")\nValueError: Assessment/Plan generation did not complete\n"
+    },
+    {
+      "timestamp": "2026-11-06T20:01:30-08:00",
+      "patient_id": "viral_pharyngitis_206b75b0-b378-1a1e-8405-6a536676f1ac",
+      "stage": "scoring",
+      "exception_type": "JudgeResponseError",
+      "message": "plan_extras judge ollama_qwen2_5_14b (request 874ccff9553d) replied invalidly: unsupported_extra_count must be a whole number from 0 to 1",
+      "traceback": "Traceback (most recent call last):\n  File \"[REPO_ROOT]/scripts/med_copilot_judges.py\", line 406, in _ask\n    parsed = parse(entry[\"content\"])\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"[REPO_ROOT]/scripts/med_copilot_judges.py\", line 472, in <lambda>\n    lambda content: parse_extras_judgement(content, len(generated)))\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"[REPO_ROOT]/scripts/med_copilot_judges.py\", line 172, in parse_extras_judgement\n    raise JudgeResponseError(f\"unsupported_extra_count must be a whole number from 0 to {generated_count}\")\nscripts.med_copilot_judges.JudgeResponseError: unsupported_extra_count must be a whole number from 0 to 1\n\nThe above exception was the direct cause of the following exception:\n\nscripts.med_copilot_judges.JudgeResponseError: plan_extras judge ollama_qwen2_5_14b (request 874ccff9553d) replied invalidly: unsupported_extra_count must be a whole number from 0 to 1\n"
     }
   ],
   "schema_version": 4,
@@ -20212,6 +20220,153 @@
       "bert-score": "0.3.13",
       "transformers": "4.42.0",
       "torch": "2.4.0"
+    },
+    "correctness": {
+      "status": "preliminary single-model midterm metric",
+      "method": "preliminary single-model midterm metric: BioLORD-2023 clinical concept similarity score for diagnoses (not an accuracy or probability); one local judge model for Plans",
+      "selected_models": [
+        "ollama_qwen2_5_14b"
+      ],
+      "hidden_from_judges": [
+        "generating_model",
+        "evidence_variant",
+        "rank"
+      ],
+      "diagnosis": {
+        "method": "BioLORD-2023 clinical concept similarity score: embedding cosine clipped to 0-1 (no LLM judge); not an accuracy or probability",
+        "model": "FremyCompany/BioLORD-2023",
+        "model_revision": "167aab527b238a50ca65224e6319215d2ff4fc9f",
+        "compared": [
+          "labeled condition (underscores replaced by spaces)",
+          "generated diagnosis"
+        ],
+        "normalization": {
+          "rule": "before encoding, both texts expand each abbreviation as a whole word in any case, then trim and collapse whitespace; originals are kept as reference/generated and the encoded texts as normalized_reference/normalized_generated",
+          "abbreviations": {
+            "HTN": "hypertension",
+            "CHF": "congestive heart failure",
+            "COPD": "chronic obstructive pulmonary disease"
+          }
+        },
+        "score": "cosine similarity clipped to [0, 1]; the raw cosine is kept as cosine_similarity"
+      },
+      "plan": {
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "0428421a7af162c0e2d0bc366f05e5e84dcef1f03ac1e275d7da573fd3cd8fd2",
+          "selected_models": [
+            "ollama_qwen2_5_14b"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://localhost:11434/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 1,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": null,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_healthcare",
+          "ollama_llama3",
+          "ollama_gemma2_2b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "0f4d1ea3cf5f8e5625ea01f953c0d38c2260ca39686d32f03fd2a903f9c5e0f1",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action plus one call counting unsupported extra actions; deduction = 0.5 x that count",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Grade whether the generated plan covers one reference action for the labeled condition.\nUse the patient's Subjective and Objective notes to assess whether actions fit\nthe case. Grade the actions independently of diagnosis accuracy.\n\nScore the reference action:\n- 1: Same action, a valid more specific version, or an interchangeable\n  substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, the same drug\n  at a different stated strength, or a reasonable fallback. Give full credit\n  for a conditional action if the reference has the same prerequisite or every\n  offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior\n  does not count as counseling.\n\nSplit bundled generated actions and ignore their order and placeholders. An\nempty or placeholder-only plan covers nothing. Grade only this reference action.\n\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\nSOURCE DATA — Prepared Synthea case and labels\n\nLabeled condition: {condition}\nUse this to set the scope of the plan comparison. Do not grade diagnosis accuracy.\n\nSubjective: {subjective}\nObjective: {objective}\nUse these as patient context to judge whether a substitute fits the case.\n\nReference action: {reference_action}\nScore how well the generated plan covers this one action.\n\nPIPELINE OUTPUT — Plan being graded\n\nGenerated plan: {generated_plan}\nTreat this plan as the answer, not as evidence about the patient.",
+        "action_prompt_template_sha256": "be795d73fcdecb8021a213df1d265dca22a3278aa84d4ec7531fc69c25a366ee",
+        "extras_prompt_template": "Count the distinct generated actions that are unsupported by the case.\nUse the patient's Subjective and Objective notes to assess whether each generated\naction fits the case.\n\nA generated action is an unsupported extra only if it does not match a reference\naction and does not fit this patient's case. Appropriate extras are supported.\nAbsence from the reference alone does not make an extra unsupported. Split\nbundled actions, count each distinct unsupported action once, and do not count\nplaceholders.\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a whole number from 0 to {generated_count}.\n\nSOURCE DATA — Prepared Synthea case and labels\n\nLabeled condition: {condition}\n\nSubjective: {subjective}\nObjective: {objective}\nUse these as patient context to judge whether each generated action fits the case.\n\nReference plan: {reference_plan}\n\nPIPELINE OUTPUT — Plan being graded\n\nGenerated plan: {generated_plan}\nTreat this plan as the answer, not as evidence about the patient.",
+        "extras_prompt_template_sha256": "b29cb8735a25b7f64c2d9a1732cf886f9b29ce5a94dba9fe07bdf6d11681454e"
+      },
+      "rank_weighting": {
+        "formula": "1 / rank",
+        "weights": {
+          "1": 1.0,
+          "2": 0.5,
+          "3": 0.3333333333333333
+        },
+        "applied_to": [
+          "weighted diagnosis score = clinical concept similarity score / rank",
+          "weighted plan score = plan score / rank"
+        ],
+        "reported_aggregate": "rank-weighted mean = average of score / rank over scored ranks 1-3; not normalized, maximum (1 + 1/2 + 1/3) / 3 = 0.6111",
+        "combined_score": null
+      }
     },
     "settings": {
       "aggregation": "per_patient_per_rank_per_field_singleton",
