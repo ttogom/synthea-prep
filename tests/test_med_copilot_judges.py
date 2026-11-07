@@ -1,8 +1,9 @@
-"""Offline tests for the diagnosis and treatment-plan judge panels.
+"""Offline tests for the preliminary single-model midterm correctness metric.
 
 Run directly: python tests/test_med_copilot_judges.py
 Or discover: python -m unittest discover -s tests -p 'test_*.py'
-Judge models are fakes; no API or local model is called.
+BioLORD embeddings and the Plan judge are fakes; no API or local model is called, except that
+BioLordSanityOrderingTests uses the pinned BioLORD-2023 when it is already cached (never downloads).
 """
 
 import json
@@ -10,22 +11,39 @@ from pathlib import Path
 import re
 import sys
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import patch
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from med_copilot.prompts.correctness_judges import PLAN_JUDGE_TEMPLATE
+from med_copilot.prompts.correctness_judges import (
+    PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE, PLAN_JUDGE_TEMPLATE,
+)
 from scripts.med_copilot_judges import (
-    JUDGE_FILE, CorrectnessJudges, JudgeCache, diagnosis_entry, parse_plan_judgement,
-    plan_entry, plan_messages, rank_weight, unavailable_plan_reason,
+    BIOLORD_MODEL, BIOLORD_REVISION, DIAGNOSIS_ABBREVIATIONS, EXPERIMENTAL_UNVALIDATED, JUDGE_FILE,
+    METRIC_STATUS, PLAN_JUDGE_MODEL, PLAN_VALIDATION_STATUS, BioLordSimilarity,
+    CorrectnessJudges, JudgeCache, diagnosis_entry, diagnosis_score, normalize_diagnosis, parse_action_judgement,
+    parse_extras_judgement,
+    plan_action_messages, plan_entry, plan_extras_messages, rank_weight, unavailable_plan_reason,
 )
 from scripts.med_copilot_run_file import RunFile, error_scope, pipeline_stage
 
 MODELS = ("gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b")
+JUDGE = MODELS[2]
 LABEL_CONDITION = "acute viral pharyngitis"
 PATIENT = {"subjective": "Sore throat for 2 days.", "objective": "Temperature 38.1 °C."}
+# Fake 3-dimensional embeddings with known cosines to the reference.
+VECTORS = {
+    LABEL_CONDITION: [1.0, 0.0, 0.0],
+    "viral pharyngitis": [0.8, 0.6, 0.0],          # cosine 0.8
+    "Viral sore throat": [2.0, 0.0, 0.0],          # cosine 1.0 (norm differs)
+    "Anemia": [0.0, 0.0, 1.0],                     # cosine 0
+    "Limited social contact": [-0.6, 0.8, 0.0],    # cosine -0.6, clipped to 0
+}
 
 
 def response(content, refusal=None):
@@ -33,29 +51,51 @@ def response(content, refusal=None):
         finish_reason="stop", message=SimpleNamespace(content=content, refusal=refusal))])
 
 
-class FakeModels:
-    """Answer judge requests from per-judge replies; record every request."""
+def is_extras(messages):
+    return messages[0]["content"].startswith("Count the distinct generated actions")
 
-    def __init__(self, replies):
-        self.replies = replies
+
+def reference_action(messages):
+    return re.search(r"Reference action: (.*)\n", messages[0]["content"]).group(1)
+
+
+def replies(credits=None, extras=0, action_content=None, extras_content=None):
+    """Judge replies: per-action credits (default 1) and an unsupported-extra count."""
+    def reply(messages):
+        if is_extras(messages):
+            return extras_content if extras_content is not None else json.dumps(
+                {"unsupported_extra_count": extras})
+        action = reference_action(messages)
+        if isinstance(action_content, dict) and action in action_content:
+            return action_content[action]
+        return json.dumps({"credit": (credits or {}).get(action, 1)})
+    return reply
+
+
+class FakeJudge:
+    """Answer judge requests; record every (model, messages) request."""
+
+    def __init__(self, reply):
+        self.reply = reply
         self.requests = []
 
     def __call__(self, model_id, messages):
         self.requests.append((model_id, messages))
-        reply = self.replies[model_id]
-        reply = reply(messages) if callable(reply) else reply
-        if isinstance(reply, BaseException):
-            raise reply
-        return response(reply)
+        value = self.reply(messages)
+        if isinstance(value, BaseException):
+            raise value
+        return value if isinstance(value, SimpleNamespace) else response(value)
 
 
-def scores(*values):
-    return {model: json.dumps({"score": value}) for model, value in zip(MODELS[1:], values)}
+class FakeEncoder:
+    def __init__(self, vectors=VECTORS, error=None):
+        self.vectors, self.error, self.calls = vectors, error, []
 
-
-def plans(*judgements):
-    return {model: json.dumps({"credits": credits, "deduction": deduction, "strength_mismatch_items": []})
-            for model, (credits, deduction) in zip(MODELS[1:], judgements)}
+    def __call__(self, texts):
+        self.calls.append(list(texts))
+        if self.error:
+            raise self.error
+        return [self.vectors[text] for text in texts]
 
 
 class JudgeTestCase(unittest.TestCase):
@@ -65,148 +105,277 @@ class JudgeTestCase(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.cache = self.directory / JUDGE_FILE
 
-    def judges(self, replies, models=MODELS):
-        fake = FakeModels(replies)
-        return CorrectnessJudges(fake, models, self.cache), fake
+    def judges(self, reply=None, models=MODELS, encoder=None):
+        fake = FakeJudge(reply or replies())
+        encoder = encoder or FakeEncoder()
+        judges = CorrectnessJudges(fake, models, self.cache, similarity=BioLordSimilarity(encoder),
+                                   plan_judge=JUDGE)
+        return judges, fake, encoder
 
-    def diagnosis(self, replies, generated="viral pharyngitis", rank=1):
-        judges, fake = self.judges(replies)
+    def diagnosis(self, generated="viral pharyngitis", rank=1, encoder=None):
+        judges, fake, encoder = self.judges(encoder=encoder)
         entry = diagnosis_entry(rank, LABEL_CONDITION, generated)
-        judges.judge_diagnosis(entry, MODELS[0])
-        return entry, fake
+        judges.score_diagnosis(entry)
+        return entry, encoder, fake
 
-    def plan(self, replies, reference=("Throat culture (procedure)",), generated=("Throat culture",), rank=1):
-        judges, fake = self.judges(replies)
+    def plan(self, reply=None, reference=("Throat culture (procedure)",), generated=("Throat culture",),
+             rank=1, models=MODELS):
+        judges, fake, _ = self.judges(reply, models)
         entry = plan_entry(rank, list(reference), None if generated is None else list(generated))
-        judges.judge_plan(entry, MODELS[0], LABEL_CONDITION, PATIENT)
+        judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
         return entry, fake
 
 
 class PromptTests(JudgeTestCase):
-    def test_plan_template_is_the_rubric_judge_prompt_verbatim(self):
+    def test_rubric_prompt_is_kept_verbatim_for_reference(self):
         doc = (ROOT / "med_copilot/docs/treatment_plan_evaluation.md").read_text(encoding="utf-8")
         block = re.search(r"## Judge prompt\n\n```text\n(.*?)\n```", doc, re.S).group(1)
         fields = {name: "{" + name + "}" for name in
                   ("condition", "subjective", "objective", "reference_plan", "generated_plan")}
         self.assertEqual(PLAN_JUDGE_TEMPLATE.format(**fields), block)
 
-    def test_plan_actions_stay_separate_and_numbered(self):
-        [message] = plan_messages(LABEL_CONDITION, "S", "O", ["Amlodipine 5 mg", "Lifestyle education"],
-                                  ["Diet, exercise", "ECG"])
-        self.assertEqual(message["role"], "user")
-        self.assertIn("Reference plan: 1. Amlodipine 5 mg\n2. Lifestyle education\n", message["content"])
-        self.assertIn("Generated plan: 1. Diet, exercise\n2. ECG\n", message["content"])
+    def test_action_prompt_uses_the_rubric_scale_verbatim(self):
+        scale = re.search(r"(Score each reference action:\n.*?counseling\.\n)", PLAN_JUDGE_TEMPLATE, re.S).group(1)
+        self.assertIn(scale.replace("Score each reference action:", "Score the reference action:"),
+                      PLAN_ACTION_JUDGE_TEMPLATE)
 
-    def test_judges_never_see_generator_variant_or_rank(self):
-        replies = {**scores(1, 1, 1)}
-        _, fake = self.diagnosis(replies, rank=3)
-        _, plan_fake = self.plan(plans(([1], 0), ([1], 0), ([1], 0)), rank=2)
-        for _, messages in fake.requests + plan_fake.requests:
+    def test_action_prompt_shows_one_reference_action_and_numbered_generated_actions(self):
+        [message] = plan_action_messages(LABEL_CONDITION, "S", "O", "Amlodipine 5 mg", ["Diet, exercise", "ECG"])
+        self.assertEqual(message["role"], "user")
+        self.assertIn("Reference action: Amlodipine 5 mg\n", message["content"])
+        self.assertIn("Generated plan: 1. Diet, exercise\n2. ECG\n", message["content"])
+        self.assertIn('Valid outputs are {"credit": 0}, {"credit": 0.5}, or {"credit": 1}.', message["content"])
+
+    def test_extras_prompt_states_the_count_range_and_numbers_both_plans(self):
+        [message] = plan_extras_messages(LABEL_CONDITION, "S", "O", ["Amlodipine", "Lifestyle education"],
+                                         ["Diet", "ECG", "Antibiotics"])
+        self.assertIn("Reference plan: 1. Amlodipine\n2. Lifestyle education\n", message["content"])
+        self.assertIn("Generated plan: 1. Diet\n2. ECG\n3. Antibiotics\n", message["content"])
+        self.assertIn('{"unsupported_extra_count": N}, where N is a whole number from 0 to 3.', message["content"])
+
+    def test_prompts_never_contain_example_credit_arrays(self):
+        for template in (PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE):
+            self.assertNotIn('"credits"', template)
+
+    def test_judge_never_sees_generator_variant_or_rank(self):
+        _, fake = self.plan(rank=2)
+        for _, messages in fake.requests:
             text = json.dumps(messages)
-            for hidden in (*MODELS, "patient_retrieval", "guidelines", "llm_only", "rank 2", "rank 3",
+            for hidden in (*MODELS, "patient_retrieval", "guidelines", "llm_only", "rank 2",
                            "Rank:", "variant"):
                 self.assertNotIn(hidden, text)
 
-    def test_diagnosis_prompt_contains_only_the_reference_and_generated_diagnosis(self):
-        _, fake = self.diagnosis(scores(1, 1, 1), generated="Pharyngitis, viral")
-        prompt = fake.requests[0][1][0]["content"]
-        self.assertIn(f"Reference condition: {LABEL_CONDITION}\n", prompt)
-        self.assertIn("Generated diagnosis: Pharyngitis, viral\n", prompt)
-        self.assertNotIn(PATIENT["subjective"], prompt)
 
-
-class PanelTests(JudgeTestCase):
-    def test_each_panel_is_the_three_other_selected_models(self):
-        judges, _ = self.judges({})
-        for generator in MODELS:
-            self.assertEqual(judges.panel(generator), [model for model in MODELS if model != generator])
-
-    def test_panel_requires_exactly_three_other_selected_models(self):
-        self.assertIsNone(self.judges({}, MODELS[:3])[0].panel(MODELS[0]))
-        self.assertIsNone(self.judges({})[0].panel("unselected_model"))
-        entry, fake = self.diagnosis(scores(1, 1, 1))
-        judges, fake = self.judges({}, MODELS[:2])
-        entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
-        judges.judge_diagnosis(entry, MODELS[0])
-        self.assertEqual((entry["status"], entry["reason"], fake.requests), ("unavailable", "panel_unavailable", []))
-
-    def test_generator_is_excluded_from_every_request(self):
-        _, fake = self.diagnosis(scores(1, 1, 1))
-        self.assertEqual([model for model, _ in fake.requests], list(MODELS[1:]))
-
-
-class DiagnosisTests(JudgeTestCase):
-    def test_synonym_judged_equivalent_scores_one(self):
-        entry, _ = self.diagnosis(scores(1, 1, 1), generated="Viral sore throat")
-        self.assertEqual((entry["status"], entry["score"], entry["weighted_score"]), ("scored", 1.0, 1.0))
-
-    def test_partial_match_takes_the_median_of_three(self):
-        entry, _ = self.diagnosis(scores(0.5, 1, 0.5), generated="acute pharyngitis")
-        self.assertEqual(entry["score"], 0.5)
-        self.assertEqual([judge["score"] for judge in entry["judges"]], [0.5, 1.0, 0.5])
-
-    def test_incorrect_diagnosis_scores_zero_even_if_one_judge_disagrees(self):
-        entry, _ = self.diagnosis(scores(0, 1, 0), generated="Anemia")
-        self.assertEqual((entry["score"], entry["weighted_score"]), (0.0, 0.0))
-
-    def test_rank_weights_divide_the_unweighted_score(self):
-        for rank, weight in ((1, 1.0), (2, 0.5), (3, 1 / 3)):
-            entry, _ = self.diagnosis(scores(1, 1, 0.5), rank=rank)
-            self.assertEqual(entry["rank_weight"], weight)
-            self.assertEqual(entry["score"], 1.0)
-            self.assertAlmostEqual(entry["weighted_score"], 1.0 / rank)
+class BioLordDiagnosisTests(JudgeTestCase):
+    def test_score_is_the_cosine_similarity_and_weight_divides_by_rank(self):
+        for rank in (1, 2, 3):
+            entry, _, _ = self.diagnosis(rank=rank)
+            self.assertEqual((entry["status"], entry["method"]), ("scored", "biolord_2023_cosine"))
+            self.assertAlmostEqual(entry["cosine_similarity"], 0.8)
+            self.assertAlmostEqual(entry["score"], 0.8)
+            self.assertAlmostEqual(entry["weighted_score"], 0.8 / rank)
         self.assertAlmostEqual(rank_weight(3), 0.333333, places=6)
 
-    def test_raw_replies_and_parsed_scores_are_kept_per_judge(self):
-        replies = {**scores(1, 1, 1), MODELS[2]: '{"score": 1, "reason": "same disease"}'}
-        entry, _ = self.diagnosis(replies)
-        self.assertEqual([judge["judge_model"] for judge in entry["judges"]], list(MODELS[1:]))
-        self.assertEqual(entry["judges"][1]["raw_response"], '{"score": 1, "reason": "same disease"}')
-        self.assertEqual(entry["judges"][1]["model_response"]["response_id"], "resp")
-        self.assertTrue(all(len(judge["request_key"]) == 64 for judge in entry["judges"]))
+    def test_cosine_ignores_vector_length(self):
+        entry, _, _ = self.diagnosis(generated="Viral sore throat")
+        self.assertAlmostEqual(entry["score"], 1.0)
 
-    def test_missing_or_blank_generated_diagnosis_is_unavailable_without_calls(self):
+    def test_negative_similarity_is_clipped_to_zero_and_raw_cosine_kept(self):
+        entry, _, _ = self.diagnosis(generated="Limited social contact", rank=2)
+        self.assertAlmostEqual(entry["cosine_similarity"], -0.6)
+        self.assertEqual((entry["score"], entry["weighted_score"]), (0.0, 0.0))
+        entry, _, _ = self.diagnosis(generated="Anemia")
+        self.assertEqual(entry["score"], 0.0)
+
+    def test_embeddings_are_cached_and_no_judge_is_asked(self):
+        judges, fake, encoder = self.judges()
+        for rank in (1, 2, 3):
+            judges.score_diagnosis(diagnosis_entry(rank, LABEL_CONDITION, "viral pharyngitis"))
+        judges.score_diagnosis(diagnosis_entry(1, LABEL_CONDITION, "Anemia"))
+        self.assertEqual(encoder.calls, [[LABEL_CONDITION, "viral pharyngitis"], ["Anemia"]])
+        self.assertEqual(fake.requests, [])
+
+    def test_missing_or_blank_generated_diagnosis_is_unavailable_without_encoding(self):
         for generated in (None, "  "):
-            entry, fake = self.diagnosis(scores(1, 1, 1), generated=generated)
-            self.assertEqual((entry["status"], entry["reason"], fake.requests),
-                             ("unavailable", "missing_generation", []))
+            entry, encoder, _ = self.diagnosis(generated=generated)
+            self.assertEqual((entry["status"], entry["reason"], entry["score"], encoder.calls),
+                             ("unavailable", "missing_generation", None, []))
+
+    def test_similarity_failure_is_an_error_saved_under_the_scoring_stage(self):
+        run = RunFile.begin(self.directory / "output")
+        for encoder in (FakeEncoder(error=OSError("model download failed")),
+                        FakeEncoder(vectors={LABEL_CONDITION: [1.0, 0.0], "viral pharyngitis": [0.0, 0.0]})):
+            entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
+            judges, _, _ = self.judges(encoder=encoder)
+            with error_scope(run, patient_id="patient-a"), pipeline_stage("scoring"):
+                judges.score_diagnosis(entry)
+            self.assertEqual((entry["status"], entry["reason"], entry["score"]),
+                             ("error", "similarity_failed", None))
+        errors = json.loads((run.run_dir / "run.json").read_text())["errors"]
+        self.assertEqual([(e["patient_id"], e["stage"], e["exception_type"]) for e in errors],
+                         [("patient-a", "scoring", "SimilarityError")] * 2)
+        self.assertIn("OSError: model download failed", errors[0]["message"])
+        self.assertIn("OSError: model download failed", errors[0]["traceback"])  # chained cause
+
+    def test_default_similarity_loads_the_pinned_biolord_revision_on_first_use(self):
+        loaded = []
+
+        class FakeSentenceTransformer:
+            def __init__(self, name, revision=None):
+                loaded.append((name, revision))
+
+            def encode(self, texts, convert_to_numpy):
+                return [VECTORS[text] for text in texts]
+
+        module = ModuleType("sentence_transformers")
+        module.SentenceTransformer = FakeSentenceTransformer
+        with patch.dict(sys.modules, {"sentence_transformers": module}):
+            similarity = BioLordSimilarity()
+            self.assertEqual(loaded, [])
+            self.assertAlmostEqual(similarity.cosine(LABEL_CONDITION, "viral pharyngitis"), 0.8)
+            similarity.cosine(LABEL_CONDITION, "Anemia")
+        self.assertEqual(loaded, [(BIOLORD_MODEL, BIOLORD_REVISION)])
+
+
+class DiagnosisNormalizationTests(JudgeTestCase):
+    # The four sanity pairs: the generated text BioLORD encodes after normalization.
+    SANITY_PAIRS = [("essential hypertension", "HTN", "hypertension"),
+                    ("chronic congestive heart failure", "CHF", "congestive heart failure"),
+                    ("chronic obstructive pulmonary disease", "COPD", "chronic obstructive pulmonary disease"),
+                    ("essential hypertension", "Hypertension", "Hypertension")]
+
+    def test_abbreviations_expand_as_whole_words_in_any_case(self):
+        self.assertEqual(DIAGNOSIS_ABBREVIATIONS, {"HTN": "hypertension", "CHF": "congestive heart failure",
+                                                   "COPD": "chronic obstructive pulmonary disease"})
+        for reference, generated, normalized in self.SANITY_PAIRS:
+            self.assertEqual(normalize_diagnosis(generated), normalized)
+            self.assertEqual(normalize_diagnosis(reference), reference)
+        self.assertEqual(normalize_diagnosis("  uncontrolled htn,  with CHF "),
+                         "uncontrolled hypertension, with congestive heart failure")
+        self.assertEqual(normalize_diagnosis("copd exacerbation"), "chronic obstructive pulmonary disease exacerbation")
+        for unchanged in ("HTNX", "CHFs", "pre-COPDish", "hypertension"):
+            self.assertEqual(normalize_diagnosis(unchanged), unchanged)
+
+    def test_entry_keeps_original_and_normalized_text_and_encodes_the_normalized_text(self):
+        encoder = FakeEncoder({"essential hypertension": [1.0, 0.0], "hypertension": [0.6, 0.8]})
+        judges, _, _ = self.judges(encoder=encoder)
+        entry = diagnosis_entry(2, "essential hypertension", " HTN ")
+        judges.score_diagnosis(entry)
+        self.assertEqual((entry["reference"], entry["generated"]), ("essential hypertension", " HTN "))
+        self.assertEqual((entry["normalized_reference"], entry["normalized_generated"]),
+                         ("essential hypertension", "hypertension"))
+        self.assertEqual(encoder.calls, [["essential hypertension", "hypertension"]])
+        self.assertAlmostEqual(entry["score"], 0.6)
+        self.assertAlmostEqual(entry["weighted_score"], 0.3)
+
+    def test_metadata_documents_the_normalization(self):
+        normalization = self.judges()[0].metadata(ROOT)["diagnosis"]["normalization"]
+        self.assertEqual(normalization["abbreviations"], DIAGNOSIS_ABBREVIATIONS)
+        self.assertIn("whole word in any case", normalization["rule"])
+
+    def test_original_sanity_pairs_have_no_abbreviations_to_expand(self):
+        for first, second, _ in ORIGINAL_SANITY_PAIRS:
+            self.assertEqual((normalize_diagnosis(first), normalize_diagnosis(second)), (first, second))
+
+
+# The four original BioLORD sanity pairs: (text, text, related?).
+ORIGINAL_SANITY_PAIRS = [("heart failure", "congestive heart failure", True),
+                         ("heart failure", "anemia", False),
+                         ("acute viral pharyngitis", "acute pharyngitis", True),
+                         ("essential hypertension", "hypertension", True)]
+# (labeled condition, abbreviated generated diagnosis); normalization must raise the similarity.
+ABBREVIATION_PAIRS = [("essential hypertension", "HTN"), ("chronic congestive heart failure", "CHF"),
+                      ("chronic obstructive pulmonary disease", "COPD")]
+
+
+def _cached_biolord():
+    """The pinned BioLORD-2023 revision from the local Hugging Face cache, or None (never downloads)."""
+    try:
+        from sentence_transformers import SentenceTransformer
+        model = SentenceTransformer(BIOLORD_MODEL, revision=BIOLORD_REVISION, local_files_only=True)
+    except Exception:
+        return None
+    return BioLordSimilarity(lambda texts: model.encode(texts, convert_to_numpy=True))
+
+
+class BioLordSanityOrderingTests(unittest.TestCase):
+    """Real-model regression on orderings, not exact floats; skipped unless BioLORD is cached locally."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.similarity = _cached_biolord()
+        if cls.similarity is None:
+            raise unittest.SkipTest(f"{BIOLORD_MODEL}@{BIOLORD_REVISION} is not in the local cache")
+
+    def score(self, first, second):
+        return diagnosis_score(self.similarity.cosine(normalize_diagnosis(first), normalize_diagnosis(second)))
+
+    def test_every_related_pair_scores_above_every_incorrect_pair(self):
+        related = {pair[:2]: self.score(*pair[:2]) for pair in ORIGINAL_SANITY_PAIRS if pair[2]}
+        incorrect = {pair[:2]: self.score(*pair[:2]) for pair in ORIGINAL_SANITY_PAIRS if not pair[2]}
+        for pair, value in related.items():
+            for other, lower in incorrect.items():
+                self.assertGreater(value, lower, f"{pair} should score above {other}")
+
+    def test_normalization_raises_each_abbreviation_to_at_least_the_incorrect_pair(self):
+        incorrect = self.score("heart failure", "anemia")
+        for reference, abbreviation in ABBREVIATION_PAIRS:
+            raw = diagnosis_score(self.similarity.cosine(reference, abbreviation))
+            normalized = self.score(reference, abbreviation)
+            self.assertGreaterEqual(normalized, raw, abbreviation)
+            self.assertGreater(normalized, incorrect, abbreviation)
+        self.assertGreater(self.score("essential hypertension", "HTN"),
+                           self.score("essential hypertension", "chronic low back pain"))
 
 
 class PlanTests(JudgeTestCase):
     def test_rubric_worked_examples(self):
         cases = [
-            (["Throat culture"], [[1]] * 3, [0] * 3, 1.0),
-            (["Amlodipine", "Lifestyle education"], [[0, 1]] * 3, [0] * 3, 0.5),
-            (["ECG", "Stress testing", "NYHA classification"], [[1, 0, 0]] * 3, [0] * 3, 1 / 3),
-            (["Throat culture"], [[1]] * 3, [0.5] * 3, 0.5),
+            (["Throat culture"], {}, 0, 1.0),
+            (["Amlodipine", "Lifestyle education"], {"Amlodipine": 0}, 0, 0.5),
+            (["ECG", "Stress testing", "NYHA classification"], {"Stress testing": 0, "NYHA classification": 0}, 0, 1 / 3),
+            (["Throat culture"], {}, 1, 0.5),
         ]
-        for reference, credits, deductions, expected in cases:
-            with self.subTest(reference=reference, deduction=deductions[0]):
+        for reference, credits, extras, expected in cases:
+            with self.subTest(reference=reference, extras=extras):
                 self.cache.unlink(missing_ok=True)  # Identical requests would reuse cached replies.
-                entry, _ = self.plan(plans(*zip(credits, deductions)), reference=reference)
+                entry, _ = self.plan(replies(credits, extras), reference=reference,
+                                     generated=["Throat culture", "Antibiotics"])
                 self.assertEqual(entry["status"], "scored")
                 self.assertAlmostEqual(entry["score"], expected)
+                self.assertEqual(entry["deduction"], 0.5 * extras)
 
-    def test_item_and_deduction_medians_are_taken_separately(self):
-        entry, _ = self.plan(plans(([1, 0], 0), ([0.5, 0], 0.5), ([1, 1], 1)),
-                             reference=["Culture", "Rest"], generated=["Culture", "Antibiotics"])
-        self.assertEqual(entry["median_credits"], [1.0, 0.0])
-        self.assertEqual(entry["median_deduction"], 0.5)
-        self.assertEqual(entry["score"], 0.25)
+    def test_one_call_per_reference_action_then_one_extras_call_to_the_single_judge(self):
+        entry, fake = self.plan(replies({"Rest": 0.5}, 1), reference=["Culture", "Rest"],
+                                generated=["Culture", "Antibiotics", "Imaging"])
+        self.assertEqual({model for model, _ in fake.requests}, {JUDGE})
+        self.assertEqual([("extras" if is_extras(m) else reference_action(m)) for _, m in fake.requests],
+                         ["Culture", "Rest", "extras"])
+        self.assertEqual([(judge["call"], judge["reference_item"]) for judge in entry["judges"]],
+                         [("action", 1), ("action", 2), ("extras", None)])
+        self.assertEqual((entry["credits"], entry["unsupported_extra_count"], entry["deduction"]),
+                         ([1.0, 0.5], 1, 0.5))
+        self.assertAlmostEqual(entry["score"], 0.5)
+        self.assertTrue(all(len(judge["request_key"]) == 64 for judge in entry["judges"]))
+        self.assertEqual(entry["judges"][1]["raw_response"], '{"credit": 0.5}')
 
     def test_unsupported_extras_reduce_the_score_to_a_zero_floor(self):
-        entry, _ = self.plan(plans(([0.5], 1), ([0.5], 1.5), ([0], 1)))
-        self.assertEqual((entry["score"], entry["weighted_score"]), (0.0, 0.0))
+        entry, _ = self.plan(replies({"Throat culture (procedure)": 0.5}, 2), generated=["A", "B", "C"])
+        self.assertEqual((entry["score"], entry["weighted_score"], entry["deduction"]), (0.0, 0.0, 1.0))
 
     def test_weighted_plan_score_uses_the_rank(self):
-        entry, _ = self.plan(plans(([1], 0), ([1], 0), ([1], 0)), rank=2)
+        entry, _ = self.plan(rank=2)
         self.assertEqual((entry["score"], entry["weighted_score"], entry["rank_weight"]), (1.0, 0.5, 0.5))
 
+    def test_plan_judge_outside_the_selected_models_is_unavailable_without_calls(self):
+        entry, fake = self.plan(models=("gpt_4o_mini", "ollama_healthcare"))
+        self.assertEqual((entry["status"], entry["reason"], fake.requests), ("unavailable", "judge_unavailable", []))
+
     def test_explicitly_empty_generated_plan_scores_zero_without_calls(self):
-        entry, fake = self.plan(plans(), reference=["Culture", "Rest"], generated=[])
+        entry, fake = self.plan(reference=["Culture", "Rest"], generated=[])
         self.assertEqual((entry["status"], entry["reason"], entry["score"], fake.requests),
                          ("scored", "empty_generated_plan", 0.0, []))
-        self.assertEqual(entry["median_credits"], [0.0, 0.0])
+        self.assertEqual((entry["credits"], entry["deduction"]), ([0.0, 0.0], 0.0))
 
     def test_unavailable_references_are_never_judged(self):
         for reference, reason in ((["none recorded"], "no_recorded_plan"), ([], "missing_reference"),
@@ -217,7 +386,7 @@ class PlanTests(JudgeTestCase):
                                   (["COPD plan ( RECORD   artifact )"], "record_artifact_plan"),
                                   (["COPD plan (record\tartifact)"], "record_artifact_plan")):
             with self.subTest(reference=reference):
-                entry, fake = self.plan(plans(), reference=reference, generated=[])
+                entry, fake = self.plan(reference=reference, generated=[])
                 self.assertEqual((entry["status"], entry["reason"], entry["score"], fake.requests),
                                  ("unavailable", reason, None, []))
                 self.assertEqual(unavailable_plan_reason(reference), reason)
@@ -225,171 +394,202 @@ class PlanTests(JudgeTestCase):
         self.assertIsNone(unavailable_plan_reason(["Review the record (artifacts excluded)"]))
 
     def test_missing_generated_plan_is_unavailable(self):
-        entry, fake = self.plan(plans(), generated=None)
+        entry, fake = self.plan(generated=None)
         self.assertEqual((entry["status"], entry["reason"], fake.requests), ("unavailable", "missing_generation", []))
 
 
 class MalformedJudgementTests(JudgeTestCase):
-    def test_invalid_replies_fail_the_panel_and_keep_the_raw_text(self):
-        valid = json.dumps({"credits": [1], "deduction": 0, "strength_mismatch_items": []})
+    def test_invalid_action_replies_fail_the_plan_keep_the_raw_text_and_still_ask_the_rest(self):
         cases = {
-            "not_json": "Score: 1", "fenced": f"```json\n{valid}\n```", "array": "[1]", "empty": "",
-            "missing_key": '{"credits": [1], "deduction": 0}', "wrong_credit": '{"credits": [0.7], "deduction": 0, "strength_mismatch_items": []}',
-            "too_many_credits": '{"credits": [1, 1], "deduction": 0, "strength_mismatch_items": []}',
-            "bool_credit": '{"credits": [true], "deduction": 0, "strength_mismatch_items": []}',
-            "odd_deduction": '{"credits": [1], "deduction": 0.3, "strength_mismatch_items": []}',
-            "negative_deduction": '{"credits": [1], "deduction": -0.5, "strength_mismatch_items": []}',
-            "mismatch_out_of_range": '{"credits": [1], "deduction": 0, "strength_mismatch_items": [2]}',
-            "duplicate_key": '{"credits": [1], "credits": [0], "deduction": 0, "strength_mismatch_items": []}',
-            "nonfinite": '{"credits": [1], "deduction": NaN, "strength_mismatch_items": []}',
+            "not_json": "Credit: 1", "fenced": '```json\n{"credit": 1}\n```', "array": "[1]", "empty": "",
+            "missing_key": '{"score": 1}', "wrong_credit": '{"credit": 0.7}', "string_credit": '{"credit": "1"}',
+            "bool_credit": '{"credit": true}', "duplicate_key": '{"credit": 1, "credit": 0}',
+            "nonfinite": '{"credit": NaN}', "credits_array": '{"credits": [1, 0.5]}',
         }
         for name, content in cases.items():
             with self.subTest(case=name):
                 self.cache.unlink(missing_ok=True)
-                entry, _ = self.plan({MODELS[1]: valid, MODELS[2]: content, MODELS[3]: valid})
+                entry, fake = self.plan(replies(action_content={"Culture": content}),
+                                        reference=["Culture", "Rest"], generated=["Culture"])
                 self.assertEqual((entry["status"], entry["reason"], entry["score"]), ("error", "judge_failed", None))
-                self.assertEqual(entry["judges"][1]["status"], "invalid_response")
-                self.assertEqual(entry["judges"][1]["raw_response"], content)
                 self.assertEqual([judge["status"] for judge in entry["judges"]],
-                                 ["scored", "invalid_response", "scored"])
+                                 ["invalid_response", "scored", "scored"])
+                self.assertEqual(entry["judges"][0]["raw_response"], content)
+                self.assertEqual(len(fake.requests), 3)
 
-    def test_invalid_diagnosis_scores_and_refusals_are_invalid_responses(self):
-        for content in ('{"score": 0.75}', '{"score": "1"}', '{"verdict": 1}', '{"score": true}'):
+    def test_invalid_extras_counts_fail_the_plan(self):
+        for content in ('{"unsupported_extra_count": -1}', '{"unsupported_extra_count": 3}',
+                        '{"unsupported_extra_count": 1.5}', '{"unsupported_extra_count": 1.0}',
+                        '{"unsupported_extra_count": true}', '{"unsupported_extra_count": "1"}', '{"extras": 1}'):
             with self.subTest(content=content):
                 self.cache.unlink(missing_ok=True)
-                entry, _ = self.diagnosis({**scores(1, 1, 1), MODELS[3]: content})
-                self.assertEqual(entry["status"], "error")
-                self.assertEqual(entry["judges"][2]["status"], "invalid_response")
-        self.cache.unlink(missing_ok=True)
-        judges = CorrectnessJudges(lambda model, messages: response('{"score": 1}', refusal="no"), MODELS, self.cache)
-        entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
-        judges.judge_diagnosis(entry, MODELS[0])
-        self.assertEqual({judge["status"] for judge in entry["judges"]}, {"invalid_response"})
+                entry, _ = self.plan(replies(extras_content=content), generated=["Culture", "Antibiotics"])
+                self.assertEqual((entry["status"], entry["judges"][-1]["status"]), ("error", "invalid_response"))
 
-    def test_strength_mismatches_are_parsed_but_do_not_change_credit(self):
-        judgement = parse_plan_judgement('{"credits": [0.5, 1], "deduction": 0, "strength_mismatch_items": [1]}', 2)
-        self.assertEqual(judgement, {"credits": [0.5, 1.0], "deduction": 0.0, "strength_mismatch_items": [1]})
+    def test_refusals_are_invalid_responses(self):
+        refusal = lambda messages: response('{"credit": 1}', refusal="I cannot grade this")
+        entry, _ = self.plan(refusal)
+        self.assertEqual({judge["status"] for judge in entry["judges"]}, {"invalid_response"})
+        self.assertEqual(entry["status"], "error")
+
+    def test_parsers_accept_only_the_rubric_values(self):
+        self.assertEqual(parse_action_judgement('{"credit": 0.5, "reason": "less specific"}'), {"credit": 0.5})
+        self.assertEqual(parse_extras_judgement('{"unsupported_extra_count": 2}', 3), {"unsupported_extra_count": 2})
 
 
 class JudgeFailureTests(JudgeTestCase):
-    def test_failed_call_is_saved_under_the_scoring_stage_and_fails_only_that_panel(self):
+    def test_failed_call_is_saved_under_the_scoring_stage_and_other_calls_are_kept(self):
         run = RunFile.begin(self.directory / "output")
-        replies = {**scores(1, 1, 1), MODELS[2]: RuntimeError("judge server down")}
-        judges, _ = self.judges(replies)
-        entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
+        base = replies()
+        failing = lambda messages: RuntimeError("judge server down") if is_extras(messages) else base(messages)
+        judges, _, _ = self.judges(failing)
+        entry = plan_entry(1, ["Culture"], ["Culture", "Antibiotics"])
         with error_scope(run, patient_id="patient-a"), pipeline_stage("scoring"):
-            judges.judge_diagnosis(entry, MODELS[0])
+            judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
         self.assertEqual((entry["status"], entry["reason"]), ("error", "judge_failed"))
         self.assertEqual(entry["judges"][1]["error"], {"type": "RuntimeError", "message": "judge server down"})
         [error] = json.loads((run.run_dir / "run.json").read_text())["errors"]
         self.assertEqual((error["patient_id"], error["stage"], error["exception_type"]),
                          ("patient-a", "scoring", "JudgeCallError"))
-        self.assertIn(f"diagnosis judge {MODELS[2]}", error["message"])
-        self.assertIn("RuntimeError: judge server down", error["message"])
+        self.assertIn(f"plan_extras judge {JUDGE}", error["message"])
         self.assertIn("RuntimeError: judge server down", error["traceback"])  # chained cause
         # Only completed calls are cached; the failed one will be retried.
-        self.assertEqual(len(JudgeCache(self.cache).entries), 2)
+        self.assertEqual(len(JudgeCache(self.cache).entries), 1)
 
-    def test_malformed_and_refused_replies_are_saved_once_per_patient_across_resumes(self):
-        refusal = lambda messages: response('{"score": 1}', refusal="I cannot grade this")
-        replies = {**scores(1, 1, 1), MODELS[1]: "not json", MODELS[3]: None}
-        fake_models = FakeModels(replies)
-        def complete(model_id, messages):
-            if model_id == MODELS[3]:
-                fake_models.requests.append((model_id, messages))
-                return refusal(messages)
-            return fake_models(model_id, messages)
+    def test_malformed_replies_are_saved_once_per_patient_across_resumes(self):
+        reply = replies(action_content={"Culture": "not json"})
+        fake = FakeJudge(reply)
         run = RunFile.begin(self.directory / "output")
         for _ in range(2):
-            judges = CorrectnessJudges(complete, MODELS, self.cache)
-            entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
+            judges = CorrectnessJudges(fake, MODELS, self.cache, similarity=BioLordSimilarity(FakeEncoder()),
+                                       plan_judge=JUDGE)
+            entry = plan_entry(1, ["Culture", "Rest"], ["Culture"])
             with error_scope(run, patient_id="patient-a"), pipeline_stage("scoring"):
-                judges.judge_diagnosis(entry, MODELS[0])
+                judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
             self.assertEqual([judge["status"] for judge in entry["judges"]],
-                             ["invalid_response", "scored", "invalid_response"])
+                             ["invalid_response", "scored", "scored"])
         errors = json.loads((run.run_dir / "run.json").read_text())["errors"]
         self.assertEqual([(e["patient_id"], e["stage"], e["exception_type"]) for e in errors],
-                         [("patient-a", "scoring", "JudgeResponseError")] * 2)
-        self.assertIn(f"diagnosis judge {MODELS[1]}", errors[0]["message"])
+                         [("patient-a", "scoring", "JudgeResponseError")])
+        self.assertIn(f"plan_action judge {JUDGE}", errors[0]["message"])
         self.assertIn("invalid JSON", errors[0]["message"])
-        self.assertIn("refused", errors[1]["message"])
-        # Both bad replies were requested again on the second pass; the valid one was reused.
-        self.assertEqual([model for model, _ in fake_models.requests],
-                         [MODELS[1], MODELS[2], MODELS[3], MODELS[1], MODELS[3]])
+        # The bad reply was requested again on the second pass; valid ones were reused.
+        self.assertEqual(["extras" if is_extras(m) else reference_action(m) for _, m in fake.requests],
+                         ["Culture", "Rest", "extras", "Culture"])
 
     def test_a_different_patient_with_the_same_failure_gets_its_own_error(self):
         run = RunFile.begin(self.directory / "output")
         for patient in ("patient-a", "patient-b"):
-            judges, _ = self.judges({**scores(1, 1, 1), MODELS[2]: RuntimeError("down")})
+            judges, _, _ = self.judges(lambda messages: RuntimeError("down"))
             with error_scope(run, patient_id=patient), pipeline_stage("scoring"):
-                judges.judge_diagnosis(diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis"), MODELS[0])
+                judges.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
         errors = json.loads((run.run_dir / "run.json").read_text())["errors"]
-        self.assertEqual([e["patient_id"] for e in errors], ["patient-a", "patient-b"])
+        self.assertEqual(sorted({e["patient_id"] for e in errors}), ["patient-a", "patient-b"])
+        self.assertEqual(len(errors), 4)  # action and extras failures for each patient
 
 
 class ResumptionTests(JudgeTestCase):
-    def test_interrupted_panel_resumes_without_repeating_completed_calls(self):
-        replies = {**plans(([1], 0), ([1], 0.5), ([0.5], 0)), MODELS[3]: KeyboardInterrupt()}
-        judges, first = self.judges(replies)
-        entry = plan_entry(1, ["Throat culture"], ["Throat culture", "Antibiotics"])
+    def test_interrupted_plan_resumes_without_repeating_completed_calls(self):
+        base = replies()
+        interrupting = lambda messages: KeyboardInterrupt() if is_extras(messages) else base(messages)
+        judges, first, _ = self.judges(interrupting)
+        entry = plan_entry(1, ["Culture", "Rest"], ["Culture", "Antibiotics"])
         with self.assertRaises(KeyboardInterrupt):
-            judges.judge_plan(entry, MODELS[0], LABEL_CONDITION, PATIENT)
+            judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
         self.assertEqual(entry["status"], "interrupted")
-        self.assertEqual([judge["judge_model"] for judge in entry["judges"]], list(MODELS[1:3]))
+        self.assertEqual([judge["call"] for judge in entry["judges"]], ["action", "action"])
         self.assertEqual(len(first.requests), 3)
-        resumed, second = self.judges(plans(([1], 0), ([1], 0.5), ([0.5], 0)))
-        entry = plan_entry(1, ["Throat culture"], ["Throat culture", "Antibiotics"])
-        resumed.judge_plan(entry, MODELS[0], LABEL_CONDITION, PATIENT)
-        self.assertEqual([model for model, _ in second.requests], [MODELS[3]])
+        resumed, second, _ = self.judges(replies())
+        entry = plan_entry(1, ["Culture", "Rest"], ["Culture", "Antibiotics"])
+        resumed.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual([is_extras(m) for _, m in second.requests], [True])
         self.assertEqual((resumed.calls, resumed.cache_hits), (1, 2))
         self.assertEqual((entry["status"], entry["score"]), ("scored", 1.0))
 
     def test_malformed_reply_is_kept_for_audit_but_requested_again_on_resume(self):
-        judges, _ = self.judges({**scores(1, 1, 1), MODELS[1]: "not json"})
-        first = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
-        judges.judge_diagnosis(first, MODELS[0])
+        judges, _, _ = self.judges(replies(extras_content="not json"))
+        first = plan_entry(1, ["Culture"], ["Culture"])
+        judges.judge_plan(first, LABEL_CONDITION, PATIENT)
         self.assertEqual(first["status"], "error")
-        again, fake = self.judges(scores(1, 1, 1))
-        entry = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
-        again.judge_diagnosis(entry, MODELS[0])
-        self.assertEqual([model for model, _ in fake.requests], [MODELS[1]])
+        again, fake, _ = self.judges(replies())
+        entry = plan_entry(1, ["Culture"], ["Culture"])
+        again.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual([is_extras(m) for _, m in fake.requests], [True])
         self.assertEqual((entry["status"], entry["score"]), ("scored", 1.0))
         saved = [json.loads(line) for line in self.cache.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual([(row["judge_model"], row["valid"]) for row in saved],
-                         [(MODELS[1], False), (MODELS[2], True), (MODELS[3], True), (MODELS[1], True)])
-        self.assertEqual(saved[0]["content"], "not json")
-        self.assertIn("invalid JSON", saved[0]["error"]["message"])
+        self.assertEqual([(row["task"], row["valid"]) for row in saved],
+                         [("plan_action", True), ("plan_extras", False), ("plan_extras", True)])
+        self.assertEqual(saved[1]["content"], "not json")
+        self.assertIn("invalid JSON", saved[1]["error"]["message"])
 
     def test_partial_trailing_cache_line_is_dropped_and_appends_stay_valid(self):
-        judges, _ = self.judges(scores(1, 1, 1))
-        judges.judge_diagnosis(diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis"), MODELS[0])
+        judges, _, _ = self.judges()
+        judges.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
         with self.cache.open("a", encoding="utf-8") as handle:
             handle.write('{"key": "torn')
         cache = JudgeCache(self.cache)
-        self.assertEqual(len(cache.entries), 3)
+        self.assertEqual(len(cache.entries), 2)
         self.assertTrue(self.cache.read_text(encoding="utf-8").endswith("\n"))
 
-    def test_identical_requests_to_the_same_judge_are_asked_once(self):
-        judges, fake = self.judges(scores(1, 1, 1))
+    def test_identical_requests_are_asked_once(self):
+        judges, fake, _ = self.judges()
         for rank in (1, 2):
-            judges.judge_diagnosis(diagnosis_entry(rank, LABEL_CONDITION, "viral pharyngitis"), MODELS[0])
-        self.assertEqual(len(fake.requests), 3)
-        self.assertEqual(judges.cache_hits, 3)
+            judges.judge_plan(plan_entry(rank, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+        self.assertEqual(len(fake.requests), 2)
+        self.assertEqual(judges.cache_hits, 2)
 
 
 class MetadataTests(JudgeTestCase):
-    def test_metadata_records_method_models_rubric_and_rank_weights(self):
-        metadata = self.judges({})[0].metadata(ROOT)
+    def test_metadata_labels_the_preliminary_metric_and_records_models_prompts_and_weights(self):
+        metadata = self.judges()[0].metadata(ROOT)
+        self.assertEqual(metadata["status"], METRIC_STATUS)
+        self.assertEqual(METRIC_STATUS, "preliminary single-model midterm metric")
+        self.assertIn("preliminary single-model midterm metric", metadata["method"])
         self.assertEqual(metadata["selected_models"], list(MODELS))
-        self.assertEqual(metadata["judge_temperature"], 0)
         self.assertEqual(metadata["hidden_from_judges"], ["generating_model", "evidence_variant", "rank"])
-        self.assertEqual(metadata["plan"]["rubric_file"], "med_copilot/docs/treatment_plan_evaluation.md")
-        self.assertEqual(len(metadata["plan"]["rubric_sha256"]), 64)
-        self.assertEqual(metadata["diagnosis"]["scale"]["0.5"],
-                         "clinically related but meaningfully broader, narrower, or missing an important qualifier")
+        self.assertEqual((metadata["diagnosis"]["model"], metadata["diagnosis"]["model_revision"]),
+                         (BIOLORD_MODEL, BIOLORD_REVISION))
+        plan = metadata["plan"]
+        self.assertEqual((plan["judge_model"], plan["judge_count"], plan["judge_available"],
+                          plan["judge_temperature"]), (JUDGE, 1, True, 0))
+        self.assertIsNone(plan["self_judging"])  # Generators unknown to this panel-less fixture.
+        judges = CorrectnessJudges(FakeJudge(replies()), [JUDGE], self.cache, plan_judge=JUDGE,
+                                   similarity=BioLordSimilarity(FakeEncoder()), generator_models=MODELS,
+                                   judge_model_config={"selected_models": [JUDGE]})
+        plan_with_generators = judges.metadata(ROOT)["plan"]
+        self.assertEqual(plan_with_generators["self_judging"], "the judge also generated Plans and judges its own outputs")
+        self.assertEqual(plan_with_generators["generator_models"], list(MODELS))
+        self.assertEqual(plan_with_generators["judge_model_config"], {"selected_models": [JUDGE]})
+        separate = CorrectnessJudges(FakeJudge(replies()), ["qwen"], self.cache, plan_judge="qwen",
+                                     similarity=BioLordSimilarity(FakeEncoder()), generator_models=MODELS)
+        self.assertEqual(separate.metadata(ROOT)["plan"]["self_judging"], "the judge is not a generating model")
+        self.assertEqual(plan["rubric_file"], "med_copilot/docs/treatment_plan_evaluation.md")
+        for key in ("rubric_sha256", "action_prompt_template_sha256", "extras_prompt_template_sha256"):
+            self.assertEqual(len(plan[key]), 64)
         self.assertEqual(metadata["rank_weighting"]["weights"], {"1": 1.0, "2": 0.5, "3": 1 / 3})
         self.assertIsNone(metadata["rank_weighting"]["combined_score"])
         json.dumps(metadata, allow_nan=False)
+
+    def test_plan_entries_and_metadata_carry_the_plan_validation_status(self):
+        entry, _ = self.plan()
+        self.assertEqual(entry["validation"], PLAN_VALIDATION_STATUS)
+        plan = self.judges()[0].metadata(ROOT)["plan"]
+        self.assertEqual(plan["validation_status"], PLAN_VALIDATION_STATUS)
+        self.assertTrue(plan["validation_evidence"])
+        if PLAN_VALIDATION_STATUS == EXPERIMENTAL_UNVALIDATED:
+            self.assertIn("excluded from reported aggregate results", plan["reporting"])
+            self.assertIn("not an accuracy measure", plan["reporting"])
+
+    def test_default_plan_judge_is_a_local_registry_model_that_passed_validation(self):
+        registry = yaml.safe_load((ROOT / "experiments/configs/condition_plan_models.yaml").read_text())["models"]
+        self.assertEqual(PLAN_JUDGE_MODEL, "ollama_qwen2_5_14b")
+        self.assertEqual(registry[PLAN_JUDGE_MODEL]["model"], "qwen2.5:14b")
+        self.assertEqual(registry[PLAN_JUDGE_MODEL]["api_base"], "http://localhost:11434/v1")
+        self.assertNotIn("api_key_env", registry[PLAN_JUDGE_MODEL])
+        self.assertEqual(PLAN_VALIDATION_STATUS, "passed_balanced_sample")
+        judges = CorrectnessJudges(FakeJudge(replies()), MODELS, self.cache,
+                                   similarity=BioLordSimilarity(FakeEncoder()))
+        self.assertEqual(judges.plan_judge, PLAN_JUDGE_MODEL)
 
 
 if __name__ == "__main__":

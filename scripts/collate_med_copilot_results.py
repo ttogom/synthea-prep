@@ -48,23 +48,29 @@ SCORE_REASONS = {
     "not_processed": "Generation not completed; scoring unavailable",
     "invalid_metrics": "Saved scores are incomplete or invalid",
 }
-# Judge-panel correctness, saved beside the text metrics for each rank.
+# Preliminary single-model midterm correctness metric, saved beside the text metrics for
+# each rank: the BioLORD-2023 clinical concept similarity score for the diagnosis (not an
+# accuracy or probability) and one local Plan judge's rubric score.
 CORRECTNESS_FIELDS = {"condition": "diagnosis_correctness", "plan": "plan_correctness"}
 CORRECTNESS_LABELS = {"condition": "diagnosis", "plan": "plan"}
 # The rank-weighted mean averages score / rank over ranks 1-3, so it cannot
 # exceed (1 + 1/2 + 1/3) / 3 = 0.6111 even when every prediction scores 1.
 # It is reported as is, not normalized.
 WEIGHTED_MEAN_MAXIMUM = (1 + 1 / 2 + 1 / 3) / 3
+# Saved entries with this validation status are excluded from every aggregate.
+EXPERIMENTAL_UNVALIDATED = "experimental_unvalidated"
 CORRECTNESS_REASONS = {
-    "scored": "Judged",
+    "scored": "Scored",
     "empty_generated_plan": "Empty generated plan; scored 0",
     "no_recorded_plan": "No reference plan recorded; not judged",
     "record_artifact_plan": "Reference plan is a record artifact; not judged",
     "missing_reference": "Reference unavailable; not judged",
     "missing_generation": "Prediction unavailable; not judged",
     "invalid_generation": "Prediction invalid; not judged",
-    "panel_unavailable": "Three-judge panel unavailable",
-    "judge_failed": "A judge failed or replied invalidly",
+    "judge_unavailable": "Plan judge model not selected; not judged",
+    "judge_failed": "The Plan judge failed or replied invalidly",
+    "similarity_failed": "BioLORD clinical concept similarity failed",
+    "experimental_unvalidated": "Experimental, unvalidated; excluded from aggregates; not accuracy",
     "interrupted": "Judging interrupted",
     "pending": "Judging not attempted",
     "not_judged": "Judging not recorded",
@@ -142,7 +148,7 @@ def _score(entry, generated):
 
 
 def _correctness(entry, generated):
-    """Normalize one saved judge entry to {status, score, weighted_score, reason}."""
+    """Normalize one saved correctness entry to {status, score, weighted_score, reason}."""
     if not isinstance(entry, dict):
         status = "not_judged" if generated else "not_processed"
         return {"status": status, "score": None, "weighted_score": None,
@@ -152,6 +158,10 @@ def _correctness(entry, generated):
     if status == "scored" and not (_finite_number(score) and _finite_number(weighted)
                                    and 0 <= score <= 1 and 0 <= weighted <= score):
         status = "invalid_judgement"
+    if status == "scored" and entry.get("validation") == EXPERIMENTAL_UNVALIDATED:
+        # Shown per prediction for review, but no aggregate counts a non-"scored" status.
+        return {"status": EXPERIMENTAL_UNVALIDATED, "score": score, "weighted_score": weighted,
+                "reason": CORRECTNESS_REASONS[EXPERIMENTAL_UNVALIDATED]}
     reason_key = entry.get("reason") if status in ("scored", "unavailable", "error") else status
     reason = CORRECTNESS_REASONS.get(reason_key if isinstance(reason_key, str) else status,
                                      "Judging unavailable")
@@ -442,6 +452,19 @@ def load_report_data(run_dir, *, root=ROOT):
     if any(output["variant"] == "not_recorded" for patient in patients for output in patient["outputs"]):
         notices.append("Evidence variants were not recorded for some outputs. They are shown as “not recorded”; "
                        "no variant has been inferred and those outputs are excluded from baseline comparisons.")
+    correctness = (metadata.get("evaluation") or {}).get("correctness")
+    if isinstance(correctness, dict):
+        plan = correctness.get("plan") if isinstance(correctness.get("plan"), dict) else {}
+        judge = plan.get("judge_model")
+        notices.append("Correctness scores are a preliminary single-model midterm metric and will be revised: "
+                       "diagnosis is a BioLORD-2023 clinical concept similarity score (not an accuracy or probability); "
+                       "Plans use one local judge model"
+                       + (f" ({judge})" if _text(judge) else "") + ".")
+        if plan.get("validation_status") == EXPERIMENTAL_UNVALIDATED:
+            notices.append("Plan correctness is experimental and unvalidated: the judge did not clearly "
+                           "separate relevant Plans from placeholder and off-target Plans. Its per-prediction "
+                           "scores are shown for review only, are excluded from every aggregate (cards, "
+                           "statistics, console summary), and are not a measure of accuracy.")
     if expected_hash is None:
         notices.append("Reference labels have no saved fingerprint; their original contents could not be verified.")
     if not patients:
@@ -478,7 +501,8 @@ def _metric_header():
 
 
 def _judge_header():
-    return '<th scope="col">Judge score</th><th scope="col">Weighted (score ÷ rank)</th>'
+    return ('<th scope="col">Score (diagnosis: concept similarity; Plan: judge)</th>'
+            '<th scope="col">Weighted (score ÷ rank)</th>')
 
 
 def _judge_cells(entry):
@@ -513,7 +537,7 @@ def _patient_html(patient, index, variant_labels):
                        f'<span class="variant-id">{_e(output["variant"])}</span></span>'
                        f'<span class="badge {status}">{_e(note)}</span></summary>'
                        f'<div class="model-body">{reported}<div class="table-scroll"><table class="score-table">'
-                       '<caption class="sr-only">All three ranked condition and plan predictions with judge scores and all six text metrics</caption>'
+                       '<caption class="sr-only">All three ranked condition and plan predictions with preliminary correctness scores and all six text metrics</caption>'
                        f'<thead><tr><th scope="col">Rank</th><th scope="col">Prediction / scoring</th>{_judge_header()}{_metric_header()}</tr></thead>'
                        f'{"".join(pairs)}</table></div></div></details>')
     search = (patient["id"] + ' ' + patient["reference_condition"] + ' '
@@ -549,7 +573,7 @@ def _best_variant(variants):
 
 
 def _judge_groups(data):
-    """Scored judge values by model, variant, and field: rank-1 scores and all weighted scores."""
+    """Scored correctness values by model, variant, and field: rank-1 scores and all weighted scores."""
     groups = {model: {variant: {field: {"rank1": [], "weighted": []} for field in CORRECTNESS_FIELDS}
                       for variant in data.get("selected_variants", [])}
               for model in data.get("selected_models", [])}
@@ -567,16 +591,26 @@ def _judge_groups(data):
 
 
 def format_judge_summary(data):
-    """Summarize judge correctness: rank-1 mean and the rank-weighted mean over ranks 1-3.
+    """Summarize the preliminary correctness metric: rank-1 mean and rank-weighted mean.
 
-    The rank-weighted mean averages score / rank over every judged rank, so its
+    Diagnosis is the BioLORD-2023 clinical concept similarity score (clipped to 0-1; not an
+    accuracy or probability); Plan is the single
+    local judge's rubric score. The rank-weighted mean averages score / rank over every scored rank, so its
     maximum is about 0.611 (WEIGHTED_MEAN_MAXIMUM), not 1; it is not normalized.
     Diagnosis and Plan stay separate; there is no combined score. Unjudged
     predictions are excluded, never counted as zero.
     """
-    lines = ["Judge correctness (median of three judges; higher is better).",
+    experimental = any(entry["status"] == EXPERIMENTAL_UNVALIDATED for patient in data["patients"]
+                       for output in patient["outputs"] for prediction in output["predictions"]
+                       for entry in prediction.get("correctness", {}).values())
+    lines = ["Correctness: preliminary single-model midterm metric (higher is better).",
+             ("diagnosis: BioLORD-2023 clinical concept similarity score to the labeled condition, clipped to 0-1; "
+              "not an accuracy or probability."),
+             ("plan: experimental_unvalidated - excluded from these aggregates; its saved scores are "
+              "not a measure of accuracy." if experimental
+              else "plan: treatment-plan rubric score from one local judge model."),
              "rank-1: unweighted mean score of rank-1 predictions (0-1).",
-             "rank-weighted mean: average of score / rank over every judged rank 1-3; "
+             "rank-weighted mean: average of score / rank over every scored rank 1-3; "
              f"not normalized, so its maximum is {WEIGHTED_MEAN_MAXIMUM:.4f} (all three ranks scoring 1).",
              "Diagnosis and Plan are kept separate; no combined score is calculated."]
     for model, variants in _judge_groups(data).items():
@@ -595,7 +629,7 @@ def format_judge_summary(data):
 
 
 def format_top_rank_summary(data):
-    """Summarize top-1 BERTScore, then judge correctness; choose best variant by condition mean.
+    """Summarize top-1 BERTScore, then preliminary correctness; choose best variant by condition mean.
 
     Missing/error/skipped scores are excluded, never replaced by zero. Ties
     retain report/config order. Plan scores are independent, without a composite.
@@ -675,7 +709,7 @@ def _variant_statistics_html(ranks, model, variant):
                            for status, count in counts.items() if status != "scored" and count]
             coverage = f'{scored}/{total} scored' + ('; ' + '; '.join(unavailable) if unavailable else '')
             judge = entry.get("judge", {"counts": {}, "score": [], "weighted_score": []})
-            coverage += f'; judge {len(judge["score"])}/{sum(judge["counts"].values())} judged'
+            coverage += f'; correctness {len(judge["score"])}/{sum(judge["counts"].values())} scored'
             for index, metric in enumerate(DISPLAY_METRICS):
                 scores = entry.get("values", {}).get(metric, [])
                 rank_cell = f'<th scope="rowgroup" rowspan="16" class="rank-cell">{rank}</th>' if field == "condition" and index == 0 else ''
@@ -683,12 +717,13 @@ def _variant_statistics_html(ranks, model, variant):
                               f'<span class="score-reason">{_e(coverage)}</span></th>') if index == 0 else ''
                 rows.append(f'<tr data-field="{field}" data-metric="{_e(metric)}">{rank_cell}{field_cell}'
                             f'<th scope="row">{_e(metric)}</th>{_statistics_cells(scores)}</tr>')
-            for key, name in (("score", "Judge score"), ("weighted_score", "Weighted judge score")):
+            label = "Concept similarity score" if field == "condition" else "Judge rubric score"
+            for key, name in (("score", label), ("weighted_score", f"Weighted {label[0].lower()}{label[1:]}")):
                 rows.append(f'<tr data-field="{field}" data-metric="{key}"><th scope="row">{name}</th>'
                             f'{_statistics_cells(judge[key])}</tr>')
         groups.append(f'<tbody data-rank="{rank}">{"".join(rows)}</tbody>')
     return ('<div class="table-scroll"><table class="variant-statistics-table">'
-            f'<caption class="sr-only">All ranks, six-metric and judge statistics for {_e(model)} / {_e(variant)}</caption>'
+            f'<caption class="sr-only">All ranks, six-metric and correctness statistics for {_e(model)} / {_e(variant)}</caption>'
             '<thead><tr><th scope="col">Rank</th><th scope="col">Field / coverage</th><th scope="col">Metric</th>'
             '<th scope="col">Mean</th><th scope="col">Population SD</th><th scope="col">Min</th>'
             '<th scope="col">Max</th><th scope="col">Scored patients</th></tr></thead>'
@@ -730,14 +765,14 @@ def _top_rank_html(data, labels):
                         f'<span class="top-rank-variant-id">{_e(variant)}</span></th>{"".join(cells)}</tr>'
                         '<tr class="variant-details-row"><td colspan="5">'
                         f'<details class="variant-statistics" data-variant="{_e(variant)}">'
-                        f'<summary>All three ranks · six text metrics and judge scores <span class="sr-only">for {_e(labels.get(variant, variant))}</span></summary>'
+                        f'<summary>All three ranks · six text metrics and correctness scores <span class="sr-only">for {_e(labels.get(variant, variant))}</span></summary>'
                         f'{table}</details></td></tr></tbody>')
         table = ('<div class="table-scroll"><table class="top-rank-table" data-sort-field="condition" data-sort-direction="descending">'
                  f'<caption class="sr-only">Top-ranked BERTScore by evidence variant for {_e(model)}</caption>'
                  '<thead><tr><th scope="col">Evidence variant</th><th scope="col" aria-sort="descending">'
                  '<button type="button" class="score-sort" data-field="condition">Condition <span class="sort-indicator" aria-hidden="true">↓</span></button></th>'
                  '<th scope="col" aria-sort="none"><button type="button" class="score-sort" data-field="plan">Plan <span class="sort-indicator" aria-hidden="true">↕</span></button></th>'
-                 '<th scope="col">Diagnosis judge</th><th scope="col">Plan judge</th></tr></thead>'
+                 '<th scope="col">Diagnosis concept similarity</th><th scope="col">Plan judge</th></tr></thead>'
                  f'{"".join(rows)}</table></div>') if rows else '<p class="unavailable">No evidence variants available.</p>'
         cards.append(f'<article class="top-rank-card" data-model="{_e(model)}">'
                      f'<h3>{_e(model)}</h3>{best_label}{table}</article>')
@@ -817,16 +852,16 @@ _PAGE = r'''<!doctype html>
 <title>MED-COPILOT · Results summary</title><style>@@STYLE@@</style></head>
 <body><header><div class="brand"><span class="brand-mark" aria-hidden="true">M</span> MED-COPILOT <span class="brand-rule"></span> EVALUATION</div>
 <div class="hero"><div><p class="eyebrow">Predictions &amp; reference comparison</p><h1>Results summary<span>.</span></h1>
-<p class="intro">Review model predictions, their corresponding plans, six text metrics, and judge-panel correctness scores for every patient.</p></div>
+<p class="intro">Review model predictions, their corresponding plans, six text metrics, and preliminary correctness scores for every patient.</p></div>
 <div class="health @@HEALTH_CLASS@@"><strong>@@HEALTH@@</strong><p>@@HEALTH_DETAIL@@</p></div></div>
 <div class="stats"><div><span>Patients</span><strong>@@PATIENTS@@</strong></div><div><span>Models</span><strong>@@MODELS@@</strong></div>
 </div></header>
 <main><noscript><p class="notice">JavaScript is disabled. All patients and expandable details remain available. Sorting and filtering require JavaScript.</p></noscript>
 @@NOTICES@@
 <section aria-labelledby="top-rank-heading"><div class="section-heading"><h2 id="top-rank-heading">Best evidence variant by model</h2></div>
-<p class="section-note">Selected by the highest mean condition BERTScore_F1 for the first-ranked prediction. Higher is better. Plan scores are shown separately. Diagnosis and Plan judge columns are rank-1 means of the three-judge median (0–1).</p>
+<p class="section-note">Selected by the highest mean condition BERTScore_F1 for the first-ranked prediction. Higher is better. Plan scores are shown separately. Diagnosis concept similarity and Plan judge columns are rank-1 means of the preliminary single-model midterm metric (0–1); concept similarity is not an accuracy or probability.</p>
 <div class="top-rank-cards">@@TOP_RANK_SUMMARY@@</div>
-<p class="metric-note">Click Condition or Plan to sort rank-1 means. Missing scores stay last. Counts (n) may differ; ties follow configured order. Expand any variant for all six metrics and the unweighted and rank-weighted (score ÷ rank) judge scores at ranks 1–3, including mean, population SD, range, and scored patient counts. A weighted score is at most 1 ÷ rank (1, 0.5, 0.333); the console summary's rank-weighted mean averages those over ranks 1–3 without normalizing, so its maximum is about 0.611.</p></section>
+<p class="metric-note">Click Condition or Plan to sort rank-1 means. Missing scores stay last. Counts (n) may differ; ties follow configured order. Expand any variant for all six metrics and the unweighted and rank-weighted (score ÷ rank) correctness scores at ranks 1–3, including mean, population SD, range, and scored patient counts. A weighted score is at most 1 ÷ rank (1, 0.5, 0.333); the console summary's rank-weighted mean averages those over ranks 1–3 without normalizing, so its maximum is about 0.611.</p></section>
 <section aria-labelledby="patient-heading"><div class="section-heading"><div><h2 id="patient-heading">Patient predictions</h2></div>
 <button id="expand-all" type="button">Expand shown patients</button></div>
 <div class="filters"><label>Model<select id="model-filter"><option value="">All models</option>@@MODEL_OPTIONS@@</select></label>
@@ -840,7 +875,7 @@ _PAGE = r'''<!doctype html>
 <button id="show-less" type="button" hidden>Show first 10 patients</button></div></section>
 <div id="collapse-controls" class="collapse-controls" role="group" aria-label="Collapse patient details" hidden>
 <button id="collapse-current" type="button">Collapse current patient</button><button id="collapse-all" type="button">Collapse all patients</button></div>
-<footer>Saved predictions and scores only. No generation or scoring is performed by this report. The six text metrics measure similarity, not clinical correctness. Judge scores are the median of three other models' ratings (0–1); diagnosis and Plan are never combined. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</footer></main>
+<footer>Saved predictions and scores only. No generation or scoring is performed by this report. The six text metrics measure similarity, not clinical correctness. Correctness is a preliminary single-model midterm metric: diagnosis is a BioLORD-2023 clinical concept similarity score (clipped to 0–1; not an accuracy or probability) and Plan is one local judge model's rubric score (0–1); they are never combined. Values display to four decimal places; hover for full precision. N/A means unavailable, not zero.</footer></main>
 <script id="report-data" type="application/json">@@DATA@@</script><script>@@SCRIPT@@</script></body></html>'''
 
 

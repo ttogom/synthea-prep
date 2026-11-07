@@ -3,13 +3,14 @@
 Usage: python scripts/resume_med_copilot_evaluation.py RUN_DIRECTORY
 
 Rebuilds the run's scorer and models from run.json, re-scores every saved
-prediction (text metrics and judge panels), reuses valid judgements from
+prediction (text metrics and the preliminary single-model midterm correctness
+metric), reuses valid Plan judgements from
 judge_responses.jsonl, then rewrites results.jsonl and results_summary.html.
 Generation is never repeated.
 
-Exit status: 0 when every judge panel finished; 1 when the run directory or its
-inputs cannot be used, or when some judge panels still failed (rerun to retry
-them); 130 when interrupted (completed judge calls are kept for the next run).
+Exit status: 0 when every correctness entry finished; 1 when the run directory or
+its inputs cannot be used, or when some correctness entries still failed (rerun
+to retry them); 130 when interrupted (completed judge calls are kept for the next run).
 """
 
 import argparse
@@ -26,6 +27,7 @@ sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 load_dotenv(ROOT / ".env", override=False)
 
 from scripts.collate_med_copilot_results import generate_report
+from scripts import med_copilot_judges
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.med_copilot_scoring import PatientScorer, resume_evaluation
@@ -39,8 +41,8 @@ def _verified(root, recorded, label):
     return path
 
 
-def _failed_panels(run_dir):
-    """Count judge entries left in error, which a later resume will retry."""
+def _failed_entries(run_dir):
+    """Count correctness entries left in error, which a later resume will retry."""
     failed = 0
     for line in (run_dir / "results.jsonl").read_text(encoding="utf-8").split("\n"):
         if line.strip():
@@ -67,7 +69,19 @@ def _prepare(run_dir, root, models_factory):
         root / models_metadata["config_file"], models_metadata["selected_models"],
         temperature=experiment["temperature"], max_retries=experiment["max_retries"],
     )
-    return scorer, models
+    judge = med_copilot_judges.PLAN_JUDGE_MODEL
+    # The preliminary Plan judge is loaded on its own unless it is also a generator. If it
+    # cannot be loaded, Plans are marked judge_unavailable and diagnoses are still scored.
+    judge_models = models
+    if judge not in models.model_ids:
+        try:
+            judge_models = models_factory(
+                root / models_metadata["config_file"], [judge],
+                temperature=experiment["temperature"], max_retries=experiment["max_retries"],
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Plan judge {judge} unavailable; Plans will not be judged: {exc}", file=sys.stderr)
+    return scorer, models, judge_models
 
 
 def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
@@ -75,22 +89,22 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
     parser.add_argument("run_directory", type=Path, help="Directory containing run.json and results.jsonl")
     run_dir = parser.parse_args(argv).run_directory.resolve()
     try:
-        scorer, models = _prepare(run_dir, root, models_factory)
+        scorer, models, judge_models = _prepare(run_dir, root, models_factory)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         detail = f"missing run.json field {exc}" if isinstance(exc, KeyError) else exc
         print(f"Cannot resume evaluation of {run_dir}: {detail}", file=sys.stderr)
         return 1
     try:
-        judges = resume_evaluation(run_dir, scorer, models, root=root)
+        judges = resume_evaluation(run_dir, scorer, models, root=root, judge_models=judge_models)
     except KeyboardInterrupt:
         print("Evaluation interrupted. Completed judge calls are saved; rerun this command to resume.",
               file=sys.stderr)
         return 130
     print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
     print(f"HTML results: {generate_report(run_dir, root=root)}")
-    failed = _failed_panels(run_dir)
+    failed = _failed_entries(run_dir)
     if failed:
-        print(f"{failed} judge panels failed (see run.json errors); rerun this command to retry them.",
+        print(f"{failed} correctness entries failed (see run.json errors); rerun this command to retry them.",
               file=sys.stderr)
         return 1
     return 0

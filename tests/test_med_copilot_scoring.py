@@ -39,6 +39,25 @@ with patch.object(nltk, "download", return_value=True):
     from scripts.med_copilot_scoring import resume_evaluation
 
 
+class FakeSimilarity:
+    """Offline stand-in for BioLORD-2023: identical text 1.0, anything else 0.75."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def cosine(self, reference, generated):
+        return 1.0 if reference.strip().lower() == generated.strip().lower() else 0.75
+
+
+def setUpModule():
+    # Never load the real BioLORD model, and judge Plans with a fake selected model.
+    for target, value in (("scripts.med_copilot_judges.BioLordSimilarity", FakeSimilarity),
+                          ("scripts.med_copilot_judges.PLAN_JUDGE_MODEL", "llama")):
+        patcher = patch(target, value)
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+
+
 class PatientScorerTests(unittest.TestCase):
     def test_each_model_scores_against_same_patient_without_mutating_predictions(self):
         first, second = self.result(condition="mini"), self.result(condition="llama")
@@ -799,8 +818,12 @@ def judge_response(content):
         finish_reason="stop", message=SimpleNamespace(content=content, refusal=None))])
 
 
+ACTION_PROMPT = "Grade whether the generated plan covers"
+EXTRAS_PROMPT = "Count the distinct generated actions"
+
+
 class FakeJudgeModels:
-    """Full credit unless a reply override matches; records judge, prompt pairs."""
+    """Full credit and no extras unless a reply override matches; records judge, prompt pairs."""
 
     model_ids = JUDGE_MODELS
 
@@ -815,12 +838,8 @@ class FakeJudgeModels:
         if isinstance(content, BaseException):
             raise content
         if content is None:
-            if prompt.startswith("Grade the generated diagnosis"):
-                content = '{"score": 1}'
-            else:
-                reference = prompt.split("Reference plan: ", 1)[1].split("\nUse these as the actions", 1)[0]
-                content = json.dumps({"credits": [1] * len(reference.split("\n")), "deduction": 0,
-                                      "strength_mismatch_items": []})
+            content = ('{"credit": 1}' if prompt.startswith(ACTION_PROMPT)
+                       else '{"unsupported_extra_count": 0}')
         return judge_response(content)
 
     def redact(self, text):
@@ -846,28 +865,34 @@ class CorrectnessScoringTests(unittest.TestCase):
             model: self.result(**kwargs) for model in JUDGE_MODELS}}}}
 
     def test_every_rank_keeps_text_metrics_and_adds_separate_diagnosis_and_plan_scores(self):
-        record = self.multi_model(condition="Acute bronchitis", plan=["Rest", "Fluids"])
+        record = self.multi_model(condition="Bronchitis", plan=["Rest", "Fluids"])
         _, models = self.judged(record)
         for output in record["variants"]["llm_only"]["assessment_plans"].values():
             for rank, entry in enumerate(output["evaluation"], 1):
                 self.assertEqual(set(entry), {"rank", "condition", "plan", "diagnosis_correctness", "plan_correctness"})
                 self.assertEqual(entry["condition"]["metrics"], self.metrics)
                 self.assertEqual(entry["plan"]["metrics"], self.metrics)
-                for kind in ("diagnosis_correctness", "plan_correctness"):
+                for kind, score in (("diagnosis_correctness", 0.75), ("plan_correctness", 1.0)):
                     self.assertEqual(entry[kind]["status"], "scored")
-                    self.assertEqual(entry[kind]["score"], 1.0)
-                    self.assertAlmostEqual(entry[kind]["weighted_score"], 1 / rank)
+                    self.assertEqual(entry[kind]["score"], score)
+                    self.assertAlmostEqual(entry[kind]["weighted_score"], score / rank)
+                self.assertEqual(entry["diagnosis_correctness"]["method"], "biolord_2023_cosine")
+                self.assertEqual(entry["diagnosis_correctness"]["reference"], "acute bronchitis")
                 self.assertEqual(entry["plan_correctness"]["reference_actions"], ["Rest", " Drink fluids "])
                 self.assertEqual(entry["plan_correctness"]["generated_actions"], ["Rest", "Fluids"])
         self.assertNotIn("combined", json.dumps(record))
 
-    def test_each_generator_is_judged_by_the_other_three_models(self):
+    def test_only_the_single_plan_judge_is_asked_and_diagnoses_use_no_judge(self):
         record = {"id": "patient-a", "variants": {"llm_only": {"assessment_plans": {
             model: self.result(condition=f"DX by {model}") for model in JUDGE_MODELS}}}}
         _, models = self.judged(record)
-        for generator in JUDGE_MODELS:
-            judges = {model for model, prompt in models.requests if f"DX by {generator}" in prompt}
-            self.assertEqual(judges, set(JUDGE_MODELS) - {generator})
+        self.assertEqual({model for model, _ in models.requests}, {"llama"})
+        self.assertFalse(any("DX by" in prompt for _, prompt in models.requests))
+        self.assertEqual({prompt.split("\n", 1)[0] for _, prompt in models.requests},
+                         {"Grade whether the generated plan covers one reference action for the labeled condition.",
+                          "Count the distinct generated actions that are unsupported by the case."})
+        gemma = record["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][0]
+        self.assertEqual(gemma["plan_correctness"]["judges"][0]["judge_model"], "llama")
 
     def test_unavailable_plan_labels_are_never_judged_but_diagnoses_are(self):
         for plan, reason in ((["none recorded"], "no_recorded_plan"),
@@ -883,7 +908,7 @@ class CorrectnessScoringTests(unittest.TestCase):
                 self.assertEqual((entry["plan_correctness"]["status"], entry["plan_correctness"]["reason"]),
                                  ("unavailable", reason))
                 self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
-                self.assertFalse(any(prompt.startswith("Grade the generated plan") for _, prompt in models.requests))
+                self.assertEqual(models.requests, [])
 
     def test_invalid_or_missing_generations_are_unavailable_per_rank(self):
         predictions = [{"condition": None, "plan": None}, {"condition": 3, "plan": "Rest"}, ["bad"]]
@@ -910,11 +935,13 @@ class CorrectnessScoringTests(unittest.TestCase):
         scorer, _ = self.judged(self.multi_model())
         correctness = scorer.metadata(ROOT)["correctness"]
         self.assertEqual(correctness["selected_models"], list(JUDGE_MODELS))
+        self.assertEqual(correctness["status"], "preliminary single-model midterm metric")
+        self.assertEqual(correctness["plan"]["judge_model"], "llama")
         self.assertEqual(correctness["rank_weighting"]["formula"], "1 / rank")
 
     def test_judge_interruption_marks_the_panel_and_leaves_later_ranks_pending(self):
         def reply(model, prompt):
-            return KeyboardInterrupt() if prompt.startswith("Grade the generated plan") else None
+            return KeyboardInterrupt()
         record = self.multi_model()
         with self.assertRaises(KeyboardInterrupt):
             self.judged(record, FakeJudgeModels(reply))
@@ -956,30 +983,31 @@ class ResumeEvaluationTests(unittest.TestCase):
         record, run = self.saved()
         entry = record["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][1]
         self.assertEqual((entry["diagnosis_correctness"]["score"], entry["diagnosis_correctness"]["weighted_score"]),
-                         (1.0, 0.5))
+                         (0.75, 0.375))
         self.assertEqual(run["evaluation"]["correctness"]["selected_models"], list(JUDGE_MODELS))
+        self.assertEqual(run["evaluation"]["correctness"]["status"], "preliminary single-model midterm metric")
         self.assertEqual(run["status"], "completed")
-        # Each judge answers each distinct request once: 4 generators' diagnoses x 3 judges,
-        # plus one shared plan text (the plan prompt omits the diagnosis) x 4 judges.
-        self.assertEqual(judges.calls, 4 * 3 + 4)
-        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 2 * 3)
+        # Every generator and rank shares one plan text: 2 action calls + 1 extras call are
+        # distinct; the other 4 x 3 x 3 - 3 requests reuse them.
+        self.assertEqual(judges.calls, 3)
+        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 3)
 
     def test_interrupted_evaluation_resumes_without_repeating_completed_calls(self):
         self.write_run()
         calls = []
         def reply(model, prompt):
             calls.append(model)
-            return KeyboardInterrupt() if len(calls) == 10 else None
+            return KeyboardInterrupt() if len(calls) == 2 else None
         with self.assertRaises(KeyboardInterrupt):
             self.resume(FakeJudgeModels(reply))
         before, _ = self.saved()
         self.assertNotIn("evaluation", before["variants"]["llm_only"]["assessment_plans"]["mini"])
         resumed = FakeJudgeModels()
         judges = self.resume(resumed)
-        # 16 distinct requests: 9 completed before the interruption, 7 remain.
-        self.assertEqual(judges.calls, 16 - 9)
-        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 2 * 3)
-        self.assertEqual(len(resumed.requests), 7)
+        # 3 distinct requests: 1 completed before the interruption, 2 remain.
+        self.assertEqual(judges.calls, 3 - 1)
+        self.assertEqual(judges.calls + judges.cache_hits, 4 * 3 * 3)
+        self.assertEqual(len(resumed.requests), 2)
         third = self.resume(FakeJudgeModels())
         self.assertEqual(third.calls, 0)
 
@@ -997,9 +1025,9 @@ class ResumeEvaluationTests(unittest.TestCase):
         self.resume(FakeJudgeModels(reply))
         self.assertEqual(self.saved()[1]["errors"], run["errors"])
         entry = record["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
-        self.assertEqual(entry["diagnosis_correctness"]["reason"], "judge_failed")
-        healthy = record["variants"]["llm_only"]["assessment_plans"]["llama"]["evaluation"][0]
-        self.assertEqual(healthy["diagnosis_correctness"]["status"], "scored")
+        self.assertEqual(entry["plan_correctness"]["reason"], "judge_failed")
+        # BioLORD diagnosis scores need no judge, so they are unaffected.
+        self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
 
     def test_resume_refuses_a_different_cohort(self):
         self.write_run()
@@ -1099,12 +1127,12 @@ class ResumeCommandTests(unittest.TestCase):
         calls = []
         def reply(model, prompt):
             calls.append(model)
-            return KeyboardInterrupt() if len(calls) == 20 else None
+            return KeyboardInterrupt() if len(calls) == 2 else None
         status, _, stderr, _ = self.command(reply=reply)
         self.assertEqual(status, 130)
         self.assertIn("rerun this command to resume", stderr)
         cached = len((self.run_dir / "judge_responses.jsonl").read_text().splitlines())
-        self.assertEqual(cached, 19)
+        self.assertEqual(cached, 1)
         status, _, _, models = self.command()
         self.assertEqual(status, 0)
         requested = {(model, prompt) for model, prompt in models.requests}
@@ -1115,15 +1143,16 @@ class ResumeCommandTests(unittest.TestCase):
     def test_failed_judges_exit_one_record_errors_once_and_succeed_after_retry(self):
         self.build_run()
         def reply(model, prompt):
-            return "not json" if model == "llama" and prompt.startswith("Grade the generated diagnosis") else None
+            return "not json" if prompt.startswith(ACTION_PROMPT) else None
         status, _, stderr, _ = self.command(reply=reply)
         self.assertEqual(status, 1)
-        self.assertIn("judge panels failed", stderr)
+        self.assertIn("correctness entries failed", stderr)
         _, run = self.saved()
         errors = run["errors"]
         self.assertTrue(errors)
         self.assertEqual({(e["stage"], e["exception_type"]) for e in errors}, {("scoring", "JudgeResponseError")})
-        self.assertEqual({e["patient_id"] for e in errors}, {"patient-a", "patient-b"})
+        # patient-b's Plan label is ["none recorded"], so only patient-a's Plans are judged.
+        self.assertEqual({e["patient_id"] for e in errors}, {"patient-a"})
         self.assertEqual(self.command(reply=reply)[0], 1)
         self.assertEqual(self.saved()[1]["errors"], errors)  # retried, but not recorded twice
         self.assertEqual(self.command()[0], 0)

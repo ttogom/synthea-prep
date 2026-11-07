@@ -158,7 +158,7 @@ class PatientScorer:
         self.judges = None
 
     def attach_judges(self, judges):
-        """Also judge diagnosis/Plan correctness with a CorrectnessJudges panel."""
+        """Also score diagnosis/Plan correctness (preliminary single-model midterm metric)."""
         self.judges = judges
 
     def metadata(self, root):
@@ -227,21 +227,21 @@ class PatientScorer:
             for variant in result["variants"].values():
                 self.score_result({"id": result["id"], "assessment_plans": variant["assessment_plans"]})
         elif "assessment_plans" in result:
-            for model_id, output in result["assessment_plans"].items():
+            for output in result["assessment_plans"].values():
                 if output["status"] == "completed":
-                    self._score_predictions(result["id"], output, model_id)
+                    self._score_predictions(result["id"], output)
         else:
             self._score_predictions(result["id"], result)
         return result
 
-    def _score_predictions(self, patient_id, result, model_id=None):
+    def _score_predictions(self, patient_id, result):
         label = self._labels[patient_id]
         result["evaluation"] = [
             {"rank": rank, **{field: _empty_entry("pending") for field in ("condition", "plan")}}
             for rank in range(1, 4)
         ]
         if self.judges is not None:
-            # Text metrics fill every rank first; judge panels then run per rank.
+            # Text metrics fill every rank first; correctness scoring then runs per rank.
             judged = [self._correctness_entries(label, result.get("predictions"), index)
                       for index in range(3)]
             for evaluation, (diagnosis, plan) in zip(result["evaluation"], judged):
@@ -304,8 +304,8 @@ class PatientScorer:
         if self.judges is not None:
             patient = self._patients[patient_id]
             for evaluation in result["evaluation"]:
-                self.judges.judge_diagnosis(evaluation["diagnosis_correctness"], model_id)
-                self.judges.judge_plan(evaluation["plan_correctness"], model_id,
+                self.judges.score_diagnosis(evaluation["diagnosis_correctness"])
+                self.judges.judge_plan(evaluation["plan_correctness"],
                                        label["condition"].replace("_", " "), patient)
         return result
 
@@ -341,11 +341,12 @@ def _write_results(run_dir, records):
         temporary.unlink(missing_ok=True)
 
 
-def resume_evaluation(run_dir, scorer, models, *, root):
+def resume_evaluation(run_dir, scorer, models, *, root, judge_models=None):
     """Re-score a saved run, reusing every completed judge call in judge_responses.jsonl.
 
-    `scorer` must select the run's recorded cohort. `models` provides judge(),
-    model_ids, and redact(). results.jsonl is replaced after each patient, so an
+    `scorer` must select the run's recorded cohort. `models` (the run's generating
+    models) provides model_ids and redact(); `judge_models` (default `models`)
+    provides judge() and model_ids for the Plan judge. results.jsonl is replaced after each patient, so an
     interruption keeps finished patients; their judge calls are never repeated.
     Ordinary scoring failures are saved in run.json errors under the scoring stage.
     """
@@ -356,7 +357,11 @@ def resume_evaluation(run_dir, scorer, models, *, root):
         raise ValueError("The scorer's cohort does not match the run's selected_patient_ids")
     run_file = RunFile(run_dir, metadata)
     run_file.redact = models.redact
-    judges = CorrectnessJudges(models.judge, models.model_ids, run_dir / JUDGE_FILE)
+    judge_models = judge_models or models
+    judges = CorrectnessJudges(judge_models.judge, judge_models.model_ids, run_dir / JUDGE_FILE,
+                               generator_models=models.model_ids,
+                               judge_model_config=(judge_models.metadata(root)
+                                                   if hasattr(judge_models, "metadata") else None))
     scorer.attach_judges(judges)
     text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
     records = [json.loads(line) for line in text.split("\n") if line.strip()]
