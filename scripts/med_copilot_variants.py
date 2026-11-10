@@ -44,6 +44,24 @@ VARIANTS = {
         prompt_key="patient_retrieval_guidelines",
         bindings={"example": ("patient_retrieval", "example"), "Key_info": ("guidelines", "Key_info")},
     ),
+    "agentic_patient_retrieval": VariantSpec(
+        description="S/O + agent-selected similar-patient example",
+        components=("agent_patients",),
+        prompt_key="patient_retrieval",
+        bindings={"example": ("agent_patients", "example")},
+    ),
+    "agentic_guidelines": VariantSpec(
+        description="S/O + agent-selected clinical guidelines",
+        components=("agent_guidelines",),
+        prompt_key="guidelines",
+        bindings={"Key_info": ("agent_guidelines", "Key_info")},
+    ),
+    "agentic_both": VariantSpec(
+        description="S/O + agent-selected patient and guideline evidence",
+        components=("agent_both",),
+        prompt_key="patient_retrieval_guidelines",
+        bindings={"example": ("agent_both", "example"), "Key_info": ("agent_both", "Key_info")},
+    ),
 }
 
 
@@ -89,6 +107,30 @@ class ComponentSpec:
     implementation: str = "scripts/run_med_copilot.py"  # Source file fingerprinted, not auto-imported.
 
 
+# Shared parameter sets for the three agent components below.
+AGENT_PARAMETERS = {
+    # OpenAI chat model that drives the agent's tool calls (must support function calling).
+    "agent_model": Parameter("str", default="gpt-4o-mini"),
+    # Maximum searches (similar-patient plus guideline) before the agent must finish.
+    "max_searches": Parameter("int", default=4, minimum=1, maximum=10),
+    # Agent sampling temperature; 0 keeps runs as repeatable as the provider allows.
+    "temperature": Parameter("number", default=0.0, minimum=0, maximum=2),
+    # False applies the fixed pipeline's diagnosis-term screen to guideline questions.
+    "allow_diagnosis_terms": Parameter("bool", default=False),
+}
+PATIENT_SEARCH_PARAMETERS = {
+    "alpha": Parameter("number", config_field="patient_retrieval_alpha", minimum=0, maximum=1),
+    "top_k": Parameter("int", config_field="patient_retrieval_top_k", minimum=1),
+    # Reranked patients shown to the agent per search; the agent picks one for the prompt.
+    "results_per_search": Parameter("int", default=3, minimum=1, maximum=10),
+}
+GUIDELINE_SEARCH_PARAMETERS = {
+    "community_level": Parameter("int", config_field="guideline_community_level", minimum=0),
+    "response_type": Parameter("str", config_field="guideline_response_type"),
+    "verbose": Parameter("bool", config_field="guideline_verbose"),
+}
+
+
 COMPONENTS = {
     "patient_retrieval": ComponentSpec(
         description="Similar-patient retrieval and reranking",
@@ -117,5 +159,26 @@ COMPONENTS = {
             "verbose": Parameter("bool", config_field="guideline_verbose"),
         },
         resources=("guidelines",), credentials=("OPENAI_API_KEY", "GRAPHRAG_API_KEY"),
+    ),
+    "agent_patients": ComponentSpec(
+        description="Agent-driven similar-patient search",
+        outputs=("example",),
+        parameters={**AGENT_PARAMETERS, **PATIENT_SEARCH_PARAMETERS},
+        resources=("patient_retrieval",), credentials=("OPENAI_API_KEY",),
+        implementation="scripts/med_copilot_agent.py",
+    ),
+    "agent_guidelines": ComponentSpec(
+        description="Agent-driven clinical guideline search",
+        outputs=("Key_info",),
+        parameters={**AGENT_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS},
+        resources=("guidelines",), credentials=("OPENAI_API_KEY", "GRAPHRAG_API_KEY"),
+        implementation="scripts/med_copilot_agent.py",
+    ),
+    "agent_both": ComponentSpec(
+        description="Agent-driven patient and guideline search",
+        outputs=("example", "Key_info"),
+        parameters={**AGENT_PARAMETERS, **PATIENT_SEARCH_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS},
+        resources=("patient_retrieval", "guidelines"), credentials=("OPENAI_API_KEY", "GRAPHRAG_API_KEY"),
+        implementation="scripts/med_copilot_agent.py",
     ),
 }
