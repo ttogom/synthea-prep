@@ -47,6 +47,7 @@ RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
 OBSERVABILITY = ROOT / "scripts" / "med_copilot_observability.py"
 SCORING = ROOT / "scripts" / "med_copilot_scoring.py"
 MODELS = ROOT / "scripts" / "med_copilot_models.py"
+AGENT = ROOT / "scripts" / "med_copilot_agent.py"
 CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
@@ -207,6 +208,9 @@ vector_store:
     container_name: default
 """
 HELPER_NAMESPACE = runpy.run_path(str(HELPERS))
+
+# Legacy matrix tests cover the original four variants; agentic variants get their own tests.
+HELPER_NAMESPACE["VARIANT_SOURCES"] = {k: v for k, v in HELPER_NAMESPACE["VARIANT_SOURCES"].items() if not k.startswith("agentic_")}
 SHA256_BUNDLE = HELPER_NAMESPACE["sha256_bundle"]
 PACIFIC_TIME = HELPER_NAMESPACE["pacific_time"]
 PROMPT_NAMES = {"KEY_QUESTIONS_TEMPLATE", "EVALUATE_TEMPLATE_KEYINFO"}
@@ -383,6 +387,7 @@ class PipelineFixture:
                 SCORING.read_text(encoding="utf-8"), encoding="utf-8")
         (self.upstream / "evaluate_metrics.py").write_bytes(UPSTREAM_EVALUATOR.read_bytes())
         (self.script.parent / MODELS.name).write_bytes(MODELS.read_bytes())
+        (self.script.parent / AGENT.name).write_bytes(AGENT.read_bytes())
         (self.script.parent / CONFIG.name).write_bytes(CONFIG.read_bytes())
         (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
@@ -772,7 +777,7 @@ class PipelineFixture:
                 # Exercise this fixture's real project prompts, even when a
                 # caller has already imported the repository's package.
                 for name in ["med_copilot.prompts.diagnosis_plan", "med_copilot.prompts", "med_copilot",
-                             "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
+                             "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_agent", "scripts.med_copilot_config",
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
                              "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
