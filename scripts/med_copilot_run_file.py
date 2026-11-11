@@ -26,7 +26,7 @@ SHARED_CREDENTIALS = ("OPENAI_API_KEY", "GRAPHRAG_API_KEY")
 RUN_STAGES = (
     "startup", "input_loading", "corpus_loading", "retrieval_initialization",
     "keyword_extraction", "patient_retrieval", "reranking", "guideline_question_generation",
-    "guideline_retrieval", "final_generation", "scoring", "output_saving",
+    "guideline_retrieval", "agentic_retrieval", "final_generation", "scoring", "output_saving",
 )
 # The run/patient a failure belongs to and the active stage, local to each execution.
 _ERROR_SCOPE = ContextVar("med_copilot_error_scope", default=None)

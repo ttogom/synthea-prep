@@ -14,6 +14,9 @@ sys.path.insert(0, str(UPSTREAM))
 
 # Standard library only, so run.json exists before the heavy imports below.
 from scripts.med_copilot_run_file import RunFile, make_run_name
+from scripts.med_copilot_agent import run_retrieval_agent, PATIENT_TOOL, GUIDELINE_TOOL
+
+
 
 # A launched script records startup failures in a provisional run directory
 # under the default output root; main() renames it once the config is loaded.
@@ -75,6 +78,7 @@ except BaseException as exc:
 
 # The shared client is initialized only after startup validation and confirmation.
 client = None
+AGENT_COMPONENTS = {"agent_patients": (True, False), "agent_guidelines": (False, True), "agent_both": (True, True)}
 
 def process_patient(patient, result, corpus_records, retriever, reranker, guideline_output,
                     assessment_models, experiment=None):
@@ -172,6 +176,73 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
                 component["outputs"]["Key_info"] = format(key_info)
                 print("\n========== CLINICAL GUIDELINE EVIDENCE ==========\n")
                 print(key_info)
+# %% ------------------------------------------------------------------
+# Agentic retrieval: an LLM agent chooses searches; output keys match the fixed components
+# ---------------------------------------------------------------------
+    for component_id, (use_patients, use_guidelines) in AGENT_COMPONENTS.items():
+        if not experiment.needs(component_id):
+            continue
+        for instance, settings in experiment.component_instances(component_id):
+            component = result["components"][instance]
+            if component["status"] != "not_processed" or not component_needed(experiment, instance, result):
+                continue
+            with pipeline_stage("agentic_retrieval"), capture_component(
+                    component, error_metadata=assessment_models.error_metadata,
+                    corpus_records=corpus_records, retriever=retriever, reranker=reranker,
+                    credential_names=experiment.required_credentials) as capture:
+                seen_patients, seen_guidelines, screened = {}, {}, []
+
+                def search_patients(query):
+                    if retriever is None:
+                        raise RuntimeError("agent patient search needs the patient retriever, which was not initialized")
+                    with chdir(experiment.patient_retrieval_artifacts_dir):
+                        retriever.alpha = settings["alpha"]
+                        candidates = retriever.search(query, topk=settings["top_k"])
+                        found = (reranker.rerank(query, candidates, topk=settings["results_per_search"])
+                                 if candidates else [])
+                    lines = []
+                    for text in found:
+                        ref = f"P{len(seen_patients) + 1}"
+                        seen_patients[ref] = str(text)
+                        lines.append(f"[{ref}] {text}")
+                    return "\n\n".join(lines) or "No similar patients found."
+
+                def search_guidelines(question):
+                    # Same screen as the fixed pipeline: no diagnosis names that are absent from S/O.
+                    if not settings["allow_diagnosis_terms"]:
+                        found = find_diagnosis_terms(question, s_o)
+                        if found:
+                            screened.append({"question": question, "terms": found})
+                            question = remove_diagnosis_terms(question, found)
+                            if not str(question).strip():
+                                return "Question removed by the diagnosis-term screen; ask about symptoms or findings."
+                    with chdir(guideline_output), capture_graphrag_responses(capture["model_responses"]):
+                        key_info, _ctx = run_local_search(
+                            config_filepath=experiment.guidelines / "settings.yaml",
+                            data_dir=guideline_output, root_dir=experiment.guidelines,
+                            community_level=settings["community_level"], response_type=settings["response_type"],
+                            streaming=False, query=question, verbose=settings["verbose"],
+                        )
+                    ref = f"G{len(seen_guidelines) + 1}"
+                    seen_guidelines[ref] = format(key_info)
+                    return f"[{ref}] {key_info}"
+
+                outcome = run_retrieval_agent(
+                    client, s_o, {PATIENT_TOOL: search_patients, GUIDELINE_TOOL: search_guidelines},
+                    model=settings["agent_model"], max_searches=settings["max_searches"],
+                    temperature=settings["temperature"], use_patients=use_patients,
+                    use_guidelines=use_guidelines, allow_diagnosis_terms=settings["allow_diagnosis_terms"])
+                capture["agent"] = {**outcome, "patient_results": seen_patients,
+                                    "guideline_results": seen_guidelines, "screened_questions": screened}
+                if use_patients:
+                    component["outputs"]["example"] = seen_patients.get(
+                        outcome["patient_ref"], "No reference patient available.")
+                if use_guidelines:
+                    kept = [seen_guidelines[r] for r in outcome["guideline_refs"] if r in seen_guidelines]
+                    component["outputs"]["Key_info"] = "\n\n".join(kept) or "No guideline evidence selected."
+                print("\n========== AGENTIC RETRIEVAL ==========\n")
+                print(f"{component_id}: searches={outcome['searches']} stop={outcome['stop_reason']} "
+                      f"patient={outcome['patient_ref']} guidelines={outcome['guideline_refs']}")
 
 # %% ------------------------------------------------------------------
 # Render each variant from its component outputs; run all final models
@@ -239,7 +310,8 @@ def main(argv=None, run_file=None):
             run_file.discard()
             return "cancelled"
         with pipeline_stage("startup"):
-            client = OpenAI(api_key=os.environ["OPENAI_API_KEY"]) if experiment.needs("guidelines") else None
+            client = OpenAI(api_key=os.environ["OPENAI_API_KEY"]) if (
+                experiment.needs("guidelines") or any(experiment.needs(c) for c in AGENT_COMPONENTS)) else None
         credentials = [os.environ.get(name) for name in experiment.required_credentials]
 
         run = ExperimentRun.start(
@@ -295,7 +367,7 @@ def main(argv=None, run_file=None):
                     corpus_records = json.load(f)
                 df = pd.DataFrame(corpus_records)
 
-            if not df.empty and experiment.needs("patient_retrieval"):
+            if not df.empty and any(experiment.needs(c) for c in ("patient_retrieval", "agent_patients", "agent_both")):
                 experiment.patient_retrieval_artifacts_dir.mkdir(parents=True, exist_ok=True)
                 with pipeline_stage("retrieval_initialization"), \
                         chdir(experiment.patient_retrieval_artifacts_dir):

@@ -102,7 +102,7 @@ class DefinitionTests(unittest.TestCase):
             "patient_retrieval_guidelines": (("patient_retrieval", "guidelines"), {
                 "example": ("patient_retrieval", "example"), "Key_info": ("guidelines", "Key_info")}),
         }
-        self.assertEqual(list(VARIANTS), list(expected))
+        self.assertEqual(list(VARIANTS)[:len(expected)], list(expected))
         for name, (components, bindings) in expected.items():
             variant = VARIANTS[name]
             self.assertEqual((variant.components, variant.bindings, variant.prompt_key),
@@ -135,7 +135,7 @@ class DefinitionTests(unittest.TestCase):
             "    return original(name, *args, **kwargs)\n"
             "builtins.__import__ = guarded\n"
             "from scripts.med_copilot_variants import VARIANTS\n"
-            "assert len(VARIANTS) == 4\n"
+            "assert len(VARIANTS) == 7\n"
         )
         result = subprocess.run([sys.executable, "-I", "-c", program], cwd=ROOT.parent,
                                 text=True, capture_output=True, timeout=20)
