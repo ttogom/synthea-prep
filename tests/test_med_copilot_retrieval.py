@@ -318,9 +318,7 @@ class SOMatchingTests(unittest.TestCase):
         self.assertEqual(self.records, original)
         expected = 0.5 * candidates[0]["embedding_score"] + 0.5
         self.assertAlmostEqual(candidates[0]["hybrid_score"], expected)
-        self.assertEqual(retriever.compute_case_phrase_contributions.call_count, 2)
-        self.assertIn("REFERENCE_PLAN", retriever.compute_case_phrase_contributions.call_args_list[0]
-                      .kwargs["case_text"])
+        retriever.compute_case_phrase_contributions.assert_not_called()
 
     def test_search_empty_keywords_uses_full_target_and_multiple_keywords_use_mean_embedding(self):
         retriever = self.retriever()
@@ -349,7 +347,7 @@ class SOMatchingTests(unittest.TestCase):
         self.assertEqual([item["idx"] for item in retriever.search("cough")], [0])
 
     def test_search_failures_propagate_instead_of_becoming_no_reference(self):
-        for stage in ("keyword", "embedding", "index", "attribution"):
+        for stage in ("keyword", "embedding", "index"):
             with self.subTest(stage=stage):
                 retriever = self.retriever(encoder=FakeEncoder())
                 error = RuntimeError(stage)
@@ -359,8 +357,6 @@ class SOMatchingTests(unittest.TestCase):
                     retriever.embedder.model.encode = Mock(side_effect=error)
                 elif stage == "index":
                     retriever.embedder.index.search = Mock(side_effect=error)
-                else:
-                    retriever.compute_case_phrase_contributions.side_effect = error
                 with self.assertRaisesRegex(RuntimeError, stage):
                     retriever.search("cough")
 
@@ -414,14 +410,130 @@ class SOMatchingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "model failure"):
             reranker.rerank("query", candidates)
 
+    def test_deferred_attribution_preserves_eager_examples_and_full_ranking(self):
+        records = [dict(self.records[index % 2], id=f"N{index}", condition=f"Condition {index}")
+                   for index in range(20)]
+        # The reranker winner is not the first hybrid candidate. Defaults also
+        # exercise the future agentic caller, without importing that branch.
+        for topk, limit, consumed in ((5, 1, 1), (3, None, 3), (2, None, 2), (30, None, 20)):
+            with self.subTest(topk=topk, limit=limit):
+                retriever = self.retriever(records)
+                terms = [{"original_text": "cough café", "contribution": .91234567}]
+                retriever.compute_case_phrase_contributions.return_value = (terms, terms)
+                candidates = retriever.search("cough")
+                retriever.compute_case_phrase_contributions.assert_not_called()
+                scores = [.1, .9, .9, .8, .7] + [.2] * 15
+                ranker = self.module.CrossEncoderReranker()
+                ranker.model.predict = Mock(return_value=scores)
+                snapshots = []
+                ranker.on_ranking = lambda ranking: snapshots.append(
+                    [(item["idx"], item["rerank_score"]) for item in ranking])
+                # Reference: the former eager path supplied annotations on every
+                # candidate before reranking/formatting. Keep its full output.
+                eager = [{k: copy.deepcopy(v) for k, v in item.items() if k != "_phrase_attribution"}
+                         for item in candidates]
+                for item in eager:
+                    item.update(term_contributions=terms, dominant_terms=terms)
+                expected = ranker.rerank("cough", eager, topk=topk)
+                expected_ranking = snapshots.pop()
+                actual = ranker.rerank("cough", candidates, topk=topk, format_top_k=limit)
+                self.assertEqual(actual, expected[:consumed])
+                self.assertEqual(snapshots, [expected_ranking])
+                self.assertEqual(len(ranker.ranked_candidates), min(topk, 20))
+                self.assertEqual(retriever.compute_case_phrase_contributions.call_count, consumed)
+                self.assertEqual(sum("dominant_terms" in item for item in candidates), consumed)
+                for item, call in zip(ranker.ranked_candidates[:consumed],
+                                      retriever.compute_case_phrase_contributions.call_args_list):
+                    self.assertEqual(call.kwargs["case_text"], item["display_text"])
+                    self.assertIn(item["condition"], call.kwargs["case_text"])
+                    self.assertEqual(call.kwargs["threshold"], .85)
+                self.assertIn(" - cough café (0.9123)\n", actual[0])
+
+    def test_deferred_attribution_keeps_each_search_query_after_later_searches(self):
+        retriever = self.retriever()
+        retriever.keyword_extractor.extract.return_value = []
+        first = retriever.search("cough")
+        second = retriever.search("fever")
+        # Format out of search order: no shared last-query state may leak.
+        ranker = self.module.CrossEncoderReranker()
+        ranker.rerank("fever", second, format_top_k=1)
+        ranker.rerank("cough", first, format_top_k=1)
+        for call, text in zip(retriever.compute_case_phrase_contributions.call_args_list,
+                              ("fever", "cough")):
+            expected = self.module._unit_vectors(FakeEncoder().encode([text]))
+            np.testing.assert_array_equal(call.kwargs["query_embedding"], expected)
+
+    def test_real_phrase_scoring_matches_former_eager_path_for_winner_and_topthree(self):
+        def nlp(text):
+            phrase = "cough" if "cough" in text else "headache"
+            start = text.index(phrase)
+            span = SimpleNamespace(text=phrase, start_char=start, end_char=start + len(phrase))
+            return SimpleNamespace(noun_chunks=[span], ents=[span])
+
+        method = self.module._UpstreamRetriever.compute_case_phrase_contributions
+        records = [dict(self.records[index % 2], id=f"N{index}") for index in range(20)]
+        for keywords in ([], ["cough", "fever"]):
+            for topk, limit in ((5, 1), (3, None)):
+                with self.subTest(keywords=keywords, topk=topk), patch.dict(
+                        method.__globals__, {"NLP": nlp}):
+                    retriever = self.retriever(records)
+                    retriever.keyword_extractor.extract.return_value = keywords
+                    retriever.compute_case_phrase_contributions = Mock(
+                        wraps=method.__get__(retriever))
+                    candidates = retriever.search("cough fever")
+                    retriever.compute_case_phrase_contributions.assert_not_called()
+                    # Reproduce the old eager attribution loop using the real
+                    # phrase-scoring method, with only NLP/encoder mocked.
+                    vector = candidates[0]["_phrase_attribution"].keywords["query_embedding"].copy()
+                    eager = []
+                    for item in candidates:
+                        old = {k: v for k, v in item.items() if k != "_phrase_attribution"}
+                        all_terms, dominant = method(retriever, vector, old["display_text"], .85)
+                        old.update(term_contributions=all_terms, dominant_terms=dominant)
+                        eager.append(old)
+                    ranker = self.module.CrossEncoderReranker()
+                    expected = ranker.rerank("cough fever", eager, topk=topk)
+                    actual = ranker.rerank("cough fever", candidates, topk=topk, format_top_k=limit)
+                    self.assertEqual(actual, expected[:limit])
+                    self.assertEqual(retriever.compute_case_phrase_contributions.call_count, limit or topk)
+
+    def test_attribution_failure_keeps_both_rankings_and_never_enriches_discarded_cases(self):
+        for error in (RuntimeError("attribution failed"), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                retriever = self.retriever()
+                candidates = retriever.search("cough")
+                ranker = self.module.CrossEncoderReranker()
+                ranker.on_ranking = Mock()
+                retriever.compute_case_phrase_contributions.side_effect = error
+                with self.assertRaises(type(error)) as caught:
+                    ranker.rerank("cough", candidates, format_top_k=1)
+                self.assertIs(caught.exception, error)
+                self.assertEqual(len(retriever.ranked_candidates), 2)
+                self.assertEqual(len(ranker.ranked_candidates), 2)
+                ranker.on_ranking.assert_called_once_with(ranker.ranked_candidates)
+                self.assertEqual(retriever.compute_case_phrase_contributions.call_count, 1)
+
+    def test_invalid_format_limit_fails_before_ranking_or_attribution(self):
+        retriever = self.retriever()
+        candidates = retriever.search("cough")
+        ranker = self.module.CrossEncoderReranker()
+        ranker.model.predict = Mock()
+        for limit in (0, -1, True, 1.5, "1"):
+            with self.subTest(limit=limit), self.assertRaises(ValueError):
+                ranker.rerank("cough", candidates, format_top_k=limit)
+        ranker.model.predict.assert_not_called()
+        retriever.compute_case_phrase_contributions.assert_not_called()
+
     def test_hybrid_capture_is_retained_topk_before_attribution_with_unrounded_scores(self):
         records = [dict(self.records[index % 2], id=f"N{index}") for index in range(35)]
         retriever = self.retriever(records)
         saved = []
         retriever.on_ranking = lambda ranking: saved.append(copy.deepcopy(ranking))
         retriever.compute_case_phrase_contributions.side_effect = RuntimeError("attribution")
+        candidates = retriever.search("cough", topk=20)
+        retriever.compute_case_phrase_contributions.assert_not_called()
         with self.assertRaisesRegex(RuntimeError, "attribution"):
-            retriever.search("cough", topk=20)
+            self.module.CrossEncoderReranker().rerank("cough", candidates, format_top_k=1)
         self.assertEqual(len(saved), 1)
         self.assertEqual(len(saved[0]), 20)
         self.assertEqual([item["idx"] for item in saved[0]], list(range(1, 35, 2)) + [0, 2, 4])
@@ -447,7 +559,7 @@ class SOMatchingTests(unittest.TestCase):
         saved = []
         reranker.on_ranking = lambda ranking: saved.append(copy.deepcopy(ranking))
         for candidate in candidates:
-            del candidate["dominant_terms"]
+            candidate.pop("_phrase_attribution")
         with self.assertRaises(KeyError):
             reranker.rerank("cough", candidates, topk=5)
         expected = [candidates[index]["idx"] for index in (1, 2, 7, 6, 5)]
@@ -472,7 +584,8 @@ class SOMatchingTests(unittest.TestCase):
         second = retriever.search("cough")
         actual = reranker.rerank("cough", second)
         self.assertEqual(actual, expected)
-        self.assertEqual(first, second)
+        self.assertEqual([{k: v for k, v in item.items() if k != "_phrase_attribution"} for item in first],
+                         [{k: v for k, v in item.items() if k != "_phrase_attribution"} for item in second])
         retriever.on_ranking.assert_called_once_with(second)
         reranker.on_ranking.assert_called_once_with(reranker.ranked_candidates)
         self.assertEqual(len(reranker.model.calls), 2)

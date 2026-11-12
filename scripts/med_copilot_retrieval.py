@@ -6,6 +6,7 @@ reference embeddings, keyword scoring, and cross-encoder inputs use matching_tex
 """
 
 import hashlib
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -197,23 +198,30 @@ class HybridRetriever(_UpstreamRetriever):
         self.ranked_candidates = candidates
         if getattr(self, "on_ranking", None) is not None:
             self.on_ranking(candidates)
-        # Full-SOAP phrase attribution is display/generation evidence only. It
-        # runs after hybrid selection and is never an input to either ranker.
+        # Bind each search's query and full SOAP now, but do the expensive work
+        # only when the reranker formats a consumed example. No mutable "last
+        # query" state: older search results must survive subsequent searches.
         for candidate in candidates:
-            all_terms, dominant_terms = self.compute_case_phrase_contributions(
-                query_embedding=query_vector, case_text=candidate["display_text"],
+            candidate["_phrase_attribution"] = partial(
+                self.compute_case_phrase_contributions,
+                query_embedding=query_vector.copy(), case_text=candidate["display_text"],
                 threshold=CONTRIBUTION_THRESHOLD,
             )
-            candidate["term_contributions"] = all_terms
-            candidate["dominant_terms"] = dominant_terms
         return candidates
 
 
 class CrossEncoderReranker(_UpstreamReranker):
     """Score only S/O pairs and format the winning candidates' full SOAP."""
 
-    def rerank(self, query, candidates, topk=5):
+    def rerank(self, query, candidates, topk=5, *, format_top_k=None):
+        """Retain topk ranking metadata; attribute/format only consumed examples.
+
+        By default every retained result is formatted, including agentic callers
+        requesting several examples. The fixed runner requests only the winner.
+        """
         self.ranked_candidates = None
+        if format_top_k is not None and (type(format_top_k) is not int or format_top_k < 1):
+            raise ValueError("format_top_k must be a positive integer or None")
         if topk <= 0 or not candidates or not query.strip():
             self.ranked_candidates = []
             if getattr(self, "on_ranking", None) is not None:
@@ -230,7 +238,11 @@ class CrossEncoderReranker(_UpstreamReranker):
         if getattr(self, "on_ranking", None) is not None:
             self.on_ranking(ranked)
         results = []
-        for number, record in enumerate(ranked, 1):
+        for number, record in enumerate(ranked[:format_top_k], 1):
+            if "_phrase_attribution" in record:
+                all_terms, dominant_terms = record["_phrase_attribution"]()
+                record["term_contributions"] = all_terms
+                record["dominant_terms"] = dominant_terms
             plan_bullets = "".join(f"- {item}\n" for item in record["plan"])
             info = f"""
 Result {number}

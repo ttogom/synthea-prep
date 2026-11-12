@@ -103,7 +103,7 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
                         candidates = retriever.search(s_o, topk=settings["top_k"])
                         if candidates:
                             with pipeline_stage("reranking"):
-                                results = reranker.rerank(s_o, candidates, topk=settings["rerank_top_k"])
+                                results = reranker.rerank(s_o, candidates, topk=settings["rerank_top_k"], format_top_k=1)
                 retrieved_info = results[0] if results else "No reference patient available."
                 capture["selected_reference_patient"] = selected_reference_patient(
                     corpus_records, candidates, results)

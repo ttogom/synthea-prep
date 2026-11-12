@@ -298,6 +298,10 @@ def frozen_reranker_class(scores):
     reranker = next(node for node in nodes if isinstance(node, ast.ClassDef))
     rerank = next(node for node in reranker.body
                   if isinstance(node, ast.FunctionDef) and node.name == "rerank")
+    # Accept the project-only formatting limit without changing the frozen
+    # upstream implementation exercised by these legacy interoperability tests.
+    rerank.args.kwonlyargs.append(ast.arg(arg="format_top_k"))
+    rerank.args.kw_defaults.append(ast.Constant(value=None))
     retained_sort = next(index for index, node in enumerate(rerank.body)
                          if isinstance(node, ast.Assign)
                          and any(getattr(target, "id", None) == "reranked" for target in node.targets))
@@ -310,7 +314,8 @@ def frozen_reranker_class(scores):
     namespace = {"CrossEncoder": lambda model_name: SimpleNamespace(
         predict=lambda pairs: list(scores[:len(pairs)]),
     )}
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(UPSTREAM_RETRIEVER), "exec"), namespace)
+    exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])),
+                 str(UPSTREAM_RETRIEVER), "exec"), namespace)
     return namespace["CrossEncoderReranker"]
 
 
@@ -643,7 +648,7 @@ class PipelineFixture:
                 fixture.rerank_calls.append(("init", Path.cwd()))
                 fixture.fail_at("reranker_init")
 
-            def rerank(self, query, candidates, topk):
+            def rerank(self, query, candidates, topk, *, format_top_k=None):
                 self.ranked_candidates = None
                 fixture.rerank_calls.append(
                     ("rerank", query, [dict(candidate) for candidate in candidates], topk, Path.cwd()))
@@ -657,7 +662,7 @@ class PipelineFixture:
                 if getattr(self, "on_ranking", None) is not None:
                     self.on_ranking(self.ranked_candidates)
                 fixture.fail_at("rerank_formatting", query)
-                return list(fixture.results[:topk])
+                return list(fixture.results[:topk][:format_top_k])
 
         def graph_search(**kwargs):
             fixture.graph_calls.append((kwargs, Path.cwd()))
@@ -3358,7 +3363,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 else:
                     self.assertEqual(len(record["retrieved_patient_ids"]), 2)
                     self.assertIn("hybrid_score", record["retrieved_patient_ids"][0])
-                if stage == "formatting":
+                if stage in ("attribution", "formatting"):
                     self.assertEqual(len(record["reranked_patient_ids"]), 2)
                     self.assertIn("rerank_score", record["reranked_patient_ids"][0])
                 else:
@@ -3370,7 +3375,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                 if state.rankers:
                     self.assertIsNone(getattr(state.rankers[0], "on_ranking", None))
 
-    def test_real_rankings_keep_nontrivial_rows_disambiguation_scores_ties_and_topfive(self):
+    def test_winner_only_attribution_preserves_prompt_and_full_topfive_ranking(self):
         fixture = self.fixture
         fixture.corpus = [dict(id=f"N{row}", subjective="cough", objective="normal",
                               condition=f"ASSESSMENT {row}", plan=[f"PLAN {row}"], subject_id="SAME")
@@ -3383,6 +3388,8 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         order = [6, 2, 5, 1, 7, 0, 3, 4]
         def initialize(*args, **kwargs):
             instance = constructor(*args, **kwargs)
+            terms = [{"original_text": "cough café", "contribution": .91234567}]
+            instance.compute_case_phrase_contributions = Mock(return_value=(terms, terms))
             instance.embedder.index.search = Mock(return_value=(
                 state.module.np.array([[.9123456789] * 8]), state.module.np.array([order])))
             return instance
@@ -3415,6 +3422,18 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(state.retrievers[0].search.call_count, 1)
         self.assertEqual(state.rankers[0].rerank.call_count, 1)
         self.assertEqual(state.rankers[0].model.predict.call_count, 1)
+        attribution = state.retrievers[0].compute_case_phrase_contributions
+        attribution.assert_called_once()
+        self.assertIn("ASSESSMENT 2", attribution.call_args.kwargs["case_text"])
+        self.assertIn("PLAN 2", attribution.call_args.kwargs["case_text"])
+        self.assertEqual(state.rankers[0].rerank.call_args.kwargs,
+                         {"topk": 5, "format_top_k": 1})
+        # Freeze the consumed example, including whitespace, dominant terms,
+        # rounding and the original prompt template: no prompt change is allowed.
+        example = "\nResult 1\nSubjective:\ncough\nObjective:\nnormal\nCondition:\nASSESSMENT 2\nPlan:\n- PLAN 2\n\nRerank score: 0.9877\n\nDominant medical concepts (contribution >= 0.85):\n - cough café (0.9123)\n"
+        self.assertEqual(prompt, fixture.prompts["EVALUATE_TEMPLATE_KEYINFO"].format(
+            conditions=fixture.conditions, example=example, Key_info=fixture.guideline_text))
+        self.assertEqual(record["assessment_plan_prompts"]["user"], prompt)
 
     def test_empty_processed_keywords_persist_and_real_full_query_fallback_is_unchanged(self):
         fixture = self.fixture
@@ -3468,10 +3487,10 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             if "PATIENT 1" in query:
                 raise RuntimeError("before extract")
             return original_search(instance, query, topk)
-        def rerank(instance, query, candidates, topk):
+        def rerank(instance, query, candidates, topk, *, format_top_k=None):
             if "PATIENT 2" in query:
                 raise RuntimeError("before rerank")
-            return original_rerank(instance, query, candidates, topk)
+            return original_rerank(instance, query, candidates, topk, format_top_k=format_top_k)
         retriever_class.search, ranker_class.rerank = search, rerank
         runner = self.load_runner()
         with fixture.runtime():
@@ -3704,7 +3723,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         root = self.fixture.root
         boundaries = (
             "before_extract", "keyword_api", "keyword_schema", "embedding", "index",
-            "attribution", "rerank_model", "formatting", "questions_api", "questions_response",
+            "rerank_model", "attribution", "formatting", "questions_api", "questions_response",
             "graph_embedding", "graph_stream", "graph_partial_stream", "graph_context",
             "final_api", "final_response",
         )
@@ -3869,7 +3888,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                         self.assertNotIn("rerank_score", record["retrieved_patient_ids"][0])
                     else:
                         self.assertIsNone(record["retrieved_patient_ids"])
-                    if level >= 7:
+                    if level >= 6:
                         self.assertEqual([item["id"] for item in record["reranked_patient_ids"]],
                                          [f"REF-{(index + offset) % 3}" for offset in (1, 0, 2)])
                         self.assertEqual(record["reranked_patient_ids"][0]["rerank_score"], .987654321)
@@ -3896,7 +3915,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
                         self.assertIn(f"REFERENCE PLAN {(index + 1) % 3}", record["assessment_plan_prompts"]["user"])
                 self.assertIsNone(state.retrievers[0].keyword_extractor.capture_result)
                 self.assertEqual(len(fixture.keyword_calls), 3 - int(boundary == "before_extract"))
-                self.assertEqual(state.rankers[0].model.predict.call_count, 2 + int(boundaries.index(boundary) >= 6))
+                self.assertEqual(state.rankers[0].model.predict.call_count, 2 + int(boundaries.index(boundary) >= 5))
 
 
     def test_reranker_callbacks_preserve_ranking_when_test_double_formatting_fails(self):
