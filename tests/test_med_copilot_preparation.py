@@ -26,9 +26,9 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from graphrag.config.load_config import load_config
 from graphrag.language_model.factory import ModelFactory
 from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result
-from scripts.med_copilot_preparation import EvidencePreparer, validate_preparation_result
+from scripts.experiment_runtime.preparation import EvidencePreparer, validate_preparation_result
 from scripts.med_copilot_run_file import RunMetadataError
-from scripts.med_copilot_worker_stream import RedactingStream
+from scripts.experiment_runtime.worker_stream import RedactingStream
 
 
 class FakeClient:
@@ -150,7 +150,7 @@ class PreparationTests(unittest.TestCase):
         self.env = patch.dict(os.environ, OPENAI_API_KEY="private-openai", GRAPHRAG_API_KEY="private-graph")
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.graph_capture = patch("scripts.med_copilot_preparation.capture_graphrag_responses",
+        self.graph_capture = patch("scripts.experiment_runtime.preparation.capture_graphrag_responses",
                                    side_effect=lambda responses: nullcontext())
         self.graph_capture.start()
         self.addCleanup(self.graph_capture.stop)
@@ -388,7 +388,7 @@ class WorkerProtocolTests(unittest.TestCase):
             events = []
             modules = {name: ModuleType(name) for name in (
                 "torch", "sentence_transformers", "scripts.med_copilot_retrieval",
-                "graphrag.cli.query", "scripts.med_copilot_preparation")}
+                "graphrag.cli.query", "scripts.experiment_runtime.preparation")}
             modules["torch"].set_num_threads = lambda n: events.append(("threads", n))
             def encoder(name, **kwargs):
                 events.append(("encoder", kwargs))
@@ -418,7 +418,7 @@ class WorkerProtocolTests(unittest.TestCase):
                     self.error(entry)
                     self.errors.append(entry)
                     return {**result, "prepared": True}
-            modules["scripts.med_copilot_preparation"].EvidencePreparer = Preparer
+            modules["scripts.experiment_runtime.preparation"].EvidencePreparer = Preparer
             original_import = builtins.__import__
             def tracked_import(name, *args, **kwargs):
                 if name == "scripts.med_copilot_retrieval":
@@ -428,10 +428,10 @@ class WorkerProtocolTests(unittest.TestCase):
             source = io.StringIO("".join(json.dumps(command) + "\n" for command in commands))
             with patch.dict(sys.modules, modules), \
                     patch.dict(os.environ, OPENAI_API_KEY="private-openai"), \
-                    patch.object(sys, "argv", ["med_copilot_worker.py", str(config)]), \
+                    patch.object(sys, "argv", ["worker.py", str(config)]), \
                     patch.object(sys, "stdin", source), patch("builtins.__import__", side_effect=tracked_import), \
                     redirect_stdout(output), redirect_stderr(errors), self.assertRaises(SystemExit) as stopped:
-                runpy.run_path(str(ROOT / "scripts/med_copilot_worker.py"), run_name="__main__")
+                runpy.run_path(str(ROOT / "scripts/experiment_runtime/worker.py"), run_name="__main__")
             return stopped.exception.code, [json.loads(line) for line in output.getvalue().splitlines()], errors.getvalue(), events
 
     def test_bootstrap_order_and_acknowledged_protocol_with_clean_stdout(self):

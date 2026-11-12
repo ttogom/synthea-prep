@@ -9,7 +9,7 @@
 # api_base: Optional server base URL, such as a local model server's /v1 endpoint.
 # output_mode: json_schema requests schema enforcement; json_object requests valid JSON; prompt relies on prompt instructions without an API format option.
 # ollama_* entries use downloaded model tags on the local Ollama server; no api_key_env is needed.
-# ollama_qwen2_5_14b is the shipped plan_judge in experiment.yaml, not a selected generator.
+# ollama_qwen2_5_14b_speedup is the shipped plan_judge in experiment.yaml, not a selected generator.
 # llama_3_3_70b is an optional Groq enterprise model, excluded from the selected local experiment.
 
 models:

@@ -26,7 +26,7 @@ from scripts.med_copilot_run_file import checkpoint, error_scope, pipeline_stage
 from scripts.med_copilot_variants import COMPONENTS
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def validate_preparation_result(experiment, result):

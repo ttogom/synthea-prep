@@ -5,7 +5,7 @@ patient_input: experiments/input/test_so.jsonl  # Prepared patient S/O records.
 patient_labels: experiments/input/test_labels.jsonl  # Gold labels joined by exact patient ID.
 presenting_evidence_only: true  # Keep patients with presenting evidence in their label.
 exclude_none_recorded_plans: true  # Exclude label plan exactly ["none recorded"].
-max_patients: 10  # Ramdomly sample N after both filters with seed 42; null runs every eligible patient (2,378 in the full test set).
+max_patients: null  # Run every eligible patient (2,378); a positive N samples with seed 42.
 
 # Evidence variants — every selected final model runs each selected variant.
 selected_variants:
@@ -45,9 +45,9 @@ plan_judge_concurrency: 8  # Initial separate Plan-stage concurrency; recorded s
 temperature: 1  # Shared temperature for final model calls.
 max_retries: 3  # Shared upstream retry setting for final model calls.
 
-# Scheduling for scripts/run_experiments.py. The original runner remains serial.
+# Scheduling for run_experiments.py. The original runner remains serial.
 execution:
-  preparation_workers: 2
+  preparation_workers: 4
   local_concurrency: 4
   hosted_concurrency: 4
   scoring_batch_patients: 8

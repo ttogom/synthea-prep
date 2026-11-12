@@ -101,6 +101,31 @@ class ExperimentConfigTests(unittest.TestCase):
         self.path.write_text("changed after initialization")
         self.assertEqual(config.metadata(self.root)["config_sha256"], original_hash)
 
+    def test_shipped_full_cohort_and_four_worker_settings_match_saved_metadata(self):
+        config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
+        self.assertIsNone(config.max_patients)
+        self.assertEqual(config.selected_variants, [
+            "llm_only", "patient_retrieval", "guidelines", "patient_retrieval_guidelines"])
+        expected = {"preparation_workers": 4, "cpu_threads": 2, "encoder_device": "cpu",
+                    "local_concurrency": 4, "hosted_concurrency": 4,
+                    "ollama_parallel_slots": 4, "ollama_context_length": 16384,
+                    "manage_ollama": True}
+        metadata = config.metadata(ROOT)
+        for field, value in expected.items():
+            with self.subTest(setting=field):
+                self.assertEqual(config.execution[field], value)
+                self.assertEqual(metadata["execution"][field], value)
+        self.assertEqual(EXECUTION_DEFAULTS["preparation_workers"], 2,
+                         "Older configs keep their backward-compatible default")
+        patients = [json.loads(line) for line in config.patient_input.read_text().split("\n") if line.strip()]
+        labels = {row["id"]: row for row in
+                  (json.loads(line) for line in config.patient_labels.read_text().split("\n") if line.strip())}
+        eligible = [patient for patient in patients if labels[patient["id"]]["has_presenting_evidence"]
+                    and labels[patient["id"]]["plan"] != ["none recorded"]]
+        self.assertEqual(len(patients), 4959)
+        self.assertEqual(len(eligible), 2378)
+        self.assertEqual(len(eligible) * len(config.selected_variants) * len(config.selected_models), 38048)
+
     def test_shipped_ollama_entries_match_downloaded_tags_and_need_no_provider_keys(self):
         config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
         registry, _ = read_yaml_config(config.model_config)

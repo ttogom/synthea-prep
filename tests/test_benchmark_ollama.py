@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-from scripts import benchmark_ollama as benchmark
+from scripts.experiment_runtime import benchmark_ollama as benchmark
 
 
 class FakeModels:

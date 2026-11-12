@@ -3,12 +3,24 @@
 Edit `experiment.yaml` before each run. Model definitions live in the fixed sibling
 `condition_plan_models.yaml`; tokens stay in the repository-root `.env` (see
 `.env.example`). Paths resolve from the repository root, independently of the
-launch directory. There are no model/config CLI overrides.
+launch directory. The concurrent runner selects a YAML file with `--config`;
+model and scheduling overrides belong in that file. The original serial runner
+retains its existing CLI and fixed default config.
+
+```bash
+python run_experiments.py --config experiments/configs/experiment.yaml
+python run_experiments.py --config experiments/configs/experiment.yaml --resume RUN_DIRECTORY
+python run_experiments.py --config experiments/configs/experiment.yaml --yes
+python judge_treatment_plans.py RUN_DIRECTORY
+# Optional runtime-only overrides; valid saved replies are reused:
+python judge_treatment_plans.py RUN_DIRECTORY --concurrency 8 --context-length 4096
+```
 
 | Experiment setting | Meaning |
 | --- | --- |
 | `selected_models` | Nonempty, unique registry aliases, in execution order. |
 | `plan_judge` | Nonblank registry alias used for Plan correctness. Reuses a selected generating model, or loads the judge separately. Defaults to `ollama_qwen2_5_14b` for older configs. |
+| `plan_judge_concurrency` | Initial simultaneous requests in the separate Plan stage, integer 1–64; older configs default to 2. The judge CLI can override this stage's runtime. |
 | `temperature` | Shared final-model temperature, finite number from 0 to 2. |
 | `max_retries` | Shared upstream final-model retry setting, integer at least 1. |
 | `max_patients` | Sample up to N eligible patients without replacement using seed 42; positive integer or `null` for all. Selected patients run in input order. |
@@ -32,11 +44,63 @@ launch directory. There are no model/config CLI overrides.
 | `guideline_response_type` | Free-form answer description, e.g. `Single Paragraph`, `Single Sentence`, `List of 3-7 Points`; any nonblank text is accepted upstream. |
 | `guideline_verbose` | Boolean controlling GraphRAG diagnostic output. |
 | `experiment_output` | Parent directory for timestamped run artifacts and the generated HTML report. |
+| `execution` | Concurrent runner scheduling and isolated Ollama settings, detailed below. |
+
+The shipped `execution` values are:
+
+| Setting | Value and purpose |
+| --- | --- |
+| `preparation_workers` | `4` persistent, isolated evidence processes. |
+| `local_concurrency` | `4` final requests for the active local model. |
+| `hosted_concurrency` | `4` hosted final requests, overlapping preparation/local inference. |
+| `scoring_batch_patients` | `8` patients per durable scoring batch. |
+| `overlap_scoring` | `true`; score available outputs while later local model phases run. |
+| `cpu_threads` | `2` Torch threads per preparation worker. |
+| `encoder_device` | `cpu`; keep retrieval and scoring work off Ollama's GPU. |
+| `manage_ollama` | `true`; start/stop an experiment-owned server. Older configs default to `false`. |
+| `ollama_host` | `127.0.0.1:11435`; never adopt or stop the GUI daemon on 11434. |
+| `ollama_parallel_slots` | `4`; allocated before model loading, at least `local_concurrency`. |
+| `ollama_context_length` | `16384` tokens per generation slot. |
+| `ollama_judge_context_length` | Initially `4096` tokens per separate judge slot; the judge CLI can override the stage's context. |
+
+Local generation drains one model across the cohort before loading the next.
+The owned server keeps one model resident. Two evidence workers prepare exact
+prompts once per patient, and one persistent scorer reuses its BERTScore model
+with batches of up to 64 text pairs. `jobs.sqlite3` checkpoints independent jobs;
+keep it and any WAL/SHM sidecars with the run directory when resuming.
+
+Unexpected preparation subprocess exits and broken pipes trigger replacement
+and retry from the interrupted patient's latest durable checkpoint. The fixed
+policy allows two replacements per patient per invocation; there is no new YAML
+or CLI setting. Completed durable work is reused. Configuration, validation,
+protocol, and checkpoint-writing failures stop immediately. Exhaustion also
+stops cleanly; after fixing the cause, explicit `--resume` starts a fresh recovery
+budget. Recovery attempts are recorded in `run.json.preparation_recovery` and
+`preparation-recovery.log`; worker diagnostics append to `preparation-N.log`.
+Initial startup deaths also have a two-replacement budget per worker slot.
+A response lost before its checkpoint committed can be requested
+again. The existing exact-config resume checks still apply.
+
+The guideline project's `med_copilot/data/guidelines/settings.yaml` separately
+sets `default_chat_model.requests_per_minute: 12` and
+`tokens_per_minute: 200000`. These are per-worker limits: four preparation workers
+have nominal combined ceilings of 48 RPM / 800,000 TPM. Other API clients do not
+share these local buckets; retain quota headroom if adding traffic or workers.
+Both `default_embedding_model` limits remain `null`.
+
+For Plan judging, explicit CLI overrides take precedence over the last saved
+`run.json.plan_evaluation.concurrency` and `context_length`, which take precedence
+over the original experiment defaults. The client pool and owned server receive
+the same effective values. A subsequent invocation without overrides reuses the
+last Plan-stage values and valid scalar replies in the same run directory.
+These overrides do not edit `experiment.yaml` or generation provenance in
+`run.json.experiment`. Previous stages, with settings, start/finish times, counts,
+and status, are retained in `run.json.plan_evaluation_history`.
 
 The YAML groups fields by pipeline stage and documents each one. The presenting-evidence filter runs first, the recorded-plan filter second, followed by `max_patients`. All input
 and label rows are validated before selection, including excluded rows. An empty
 eligible cohort is an error. The existing `--presenting-evidence-only true|false`
-option overrides its matching YAML flag; its effective value is saved.
+option in the original serial runner overrides its matching YAML flag; its effective value is saved.
 
 The four variants are `llm_only` (S/O), `patient_retrieval` (S/O + similar patient),
 `guidelines` (S/O + guidelines), and `patient_retrieval_guidelines` (both sources).
@@ -50,17 +114,21 @@ The shipped config selects all four variants and these final models:
 | Alias | Model tag |
 | --- | --- |
 | `gpt_4o_mini` | `gpt-4o-mini` |
-| `ollama_healthcare` | `Jayasimma/healthcare:latest` |
-| `ollama_llama3` | `llama3:latest` |
-| `ollama_gemma2_2b` | `gemma2:2b` |
+| `ollama_gemma3_4b` | `gemma3:4b` |
+| `ollama_llama3_2_3b` | `llama3.2:3b` |
+| `ollama_ministral_3_3b` | `ministral-3:3b` |
 
 The Ollama entries reuse the upstream OpenAI-compatible adapter at
-`http://localhost:11434/v1` and request `json_schema` output. Keep that server
-running; no key variable is needed for these entries. `ollama_qwen2_5_14b`
+`http://127.0.0.1:11435/v1` and request `json_schema` output, capped at 768 tokens.
+Download these weights before running; no key variable is needed. `ollama_qwen2_5_14b_speedup`
 (`qwen2.5:14b`) is registered as the preliminary Plan-correctness judge
 (the shipped `plan_judge` in `experiment.yaml`); it is loaded separately
 because it is not a selected generating model. Optional hosted/local
-Llama 3.3 70B entries remain registered. The shipped `max_patients: null` means every eligible sample patient is run. The sample cohort has 10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-plan filter: 80 final requests before retries with four variants and four models. Shared component calls are additional and are not repeated for each variant/model.
+Llama 3.3 70B entries remain registered. The judge has a 64-token cap and the
+shipped `plan_judge_concurrency` is 8. The shipped full test input has 4,959 rows,
+of which 2,378 pass both filters. The shipped `max_patients: null` selects all
+2,378 (38,048 final requests). A positive value selects a seeded eligible sample.
+Shared component calls are additional and are not repeated per variant/model.
 
 Patient retrieval needs `OPENAI_API_KEY`. Guidelines need `OPENAI_API_KEY` and
 `GRAPHRAG_API_KEY`. Shared credentials/resources are checked only for selected
@@ -94,10 +162,15 @@ best variant per model using mean top-ranked condition BERTScore_F1, with separa
 condition/Plan statistics and counts. All variants/models and all three ranks
 remain available in the report and version-4 JSONL. Component captures are canonical; variants reference the outputs they consume. Historical schemas remain readable without rewriting old artifacts.
 
-Encoder startup is isolated in `scripts/med_copilot_startup.py`. It reads the
+The original runner's encoder startup is isolated in `scripts/med_copilot_startup.py`. It reads the
 config before retrieval imports FAISS, loads only a requested encoder, and retains
 loading errors for dependent variants. The same configured model ID reaches the
 preloader and retrieval manifest; source/encoder changes invalidate the cache.
 Restart the runner after changing the encoder setting. Upstream implementations
 remain unchanged. Streaming/JSON contracts and prompt wording remain in code;
 other GraphRAG settings continue to belong to the guideline project's YAML.
+The concurrent runner uses `scripts/experiment_runtime/worker.py` to load each worker's
+physical CPU encoder before retrieval imports FAISS, retaining its retriever and
+reranker across patients. Runtime metadata records effective devices and owned
+Ollama settings/model identities. Plan judging runs separately and preserves
+generation, evidence, text metrics, and diagnosis scores.

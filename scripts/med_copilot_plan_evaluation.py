@@ -16,7 +16,7 @@ from pathlib import Path
 
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
-from scripts.med_copilot_ollama import plan_judge_settings
+from scripts.experiment_runtime.ollama import plan_judge_settings
 from scripts.med_copilot_judges import (
     DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
     parse_action_judgement, parse_extras_judgement, plan_action_messages,

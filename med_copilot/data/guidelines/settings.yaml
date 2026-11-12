@@ -21,8 +21,8 @@ models:
     async_mode: threaded # or asyncio
     retry_strategy: native
     max_retries: 10
-    tokens_per_minute: 200000            # Per preparation worker; tested with two workers.
-    requests_per_minute: 12              # Per preparation worker; tested with two workers.
+    tokens_per_minute: 200000            # Per preparation worker; tested with four workers.
+    requests_per_minute: 12              # Per preparation worker; tested with four workers.
   default_embedding_model:
     type: openai_embedding # or azure_openai_embedding
     # api_base: https://<instance>.openai.azure.com

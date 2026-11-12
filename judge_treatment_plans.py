@@ -1,6 +1,6 @@
 """Finish deferred Plan judging without repeating generation or completed metrics.
 
-Usage: python scripts/judge_treatment_plans.py RUN_DIRECTORY [--concurrency N] [--context-length N]
+Usage: python judge_treatment_plans.py RUN_DIRECTORY [--concurrency N] [--context-length N]
 
 Reads the recorded cohort and loads only its recorded Plan judge. Completed
 Plan judgements and scalar replies are reused. Text metrics, diagnosis scores,
@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 # Standalone execution must resolve the project and its vendored dependencies
 # before importing the model and scoring adapters below.
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 load_dotenv(ROOT / ".env", override=False)
@@ -32,7 +32,7 @@ from scripts.collate_med_copilot_results import generate_report
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
-from scripts.med_copilot_ollama import ollama_for_saved_run, plan_judge_settings
+from scripts.experiment_runtime.ollama import ollama_for_saved_run, plan_judge_settings
 from scripts.med_copilot_plan_evaluation import PlanJudgeUnavailableError, resume_plan_evaluation
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.med_copilot_run_lock import exclusive_run_lock

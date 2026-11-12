@@ -17,7 +17,7 @@ from urllib.error import URLError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.med_copilot_ollama import ManagedOllama, ollama_for_saved_run, plan_judge_settings
+from scripts.experiment_runtime.ollama import ManagedOllama, ollama_for_saved_run, plan_judge_settings
 
 
 class ManagedOllamaTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class ManagedOllamaTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         # Exercise real flock contention only inside this test's directory;
         # offline tests must coexist with an authorized live pilot server.
-        lock_directory = patch("scripts.med_copilot_ollama.tempfile.gettempdir", return_value=str(self.root))
+        lock_directory = patch("scripts.experiment_runtime.ollama.tempfile.gettempdir", return_value=str(self.root))
         lock_directory.start()
         self.addCleanup(lock_directory.stop)
         self.settings = {"manage_ollama": True, "ollama_host": "127.0.0.1:11435",
@@ -37,7 +37,7 @@ class ManagedOllamaTests(unittest.TestCase):
         self.process.pid = 424242
         self.process.poll.return_value = None
         self.process.wait.return_value = 0
-        signals = patch("scripts.med_copilot_ollama.os.killpg")
+        signals = patch("scripts.experiment_runtime.ollama.os.killpg")
         self.signal_group = signals.start()
         self.addCleanup(signals.stop)
         self.responses = {"/api/version": {"version": "0.40.16"},
@@ -50,7 +50,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_owned_server_has_explicit_settings_and_stops_after_success(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", side_effect=lambda method, path, *args, **kw: self.responses[path]), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process) as start:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process) as start:
             with self.server() as server:
                 metadata = server.metadata()
                 self.assertEqual(metadata["version"], "0.40.16")
@@ -76,7 +76,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_parallel_and_context_overrides_are_server_settings(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process) as start:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process) as start:
             with self.server(parallel=2, context=4096):
                 environment = start.call_args.kwargs["env"]
                 self.assertEqual(environment["OLLAMA_NUM_PARALLEL"], "2")
@@ -86,7 +86,7 @@ class ManagedOllamaTests(unittest.TestCase):
         responses = {**self.responses, "/api/ps": {"models": [{"name": "gemma3:4b", "size_vram": 123}]}}
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", side_effect=lambda method, path, *args, **kw: responses[path]), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process) as start:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process) as start:
             with self.server(max_loaded_models=3) as server:
                 self.assertEqual(start.call_args.kwargs["env"]["OLLAMA_MAX_LOADED_MODELS"], "3")
                 self.assertEqual(server.metadata()["max_loaded_models"], 3)
@@ -108,7 +108,7 @@ class ManagedOllamaTests(unittest.TestCase):
 
     def test_existing_foreign_endpoint_is_never_started_over_or_stopped(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=True), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen") as start:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen") as start:
             with self.assertRaisesRegex(ValueError, "unowned"):
                 with self.server():
                     self.fail("Foreign server must not be adopted")
@@ -118,7 +118,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_experiment_port_lock_prevents_another_owner(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process) as start:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process) as start:
             with self.server():
                 with self.assertRaisesRegex(ValueError, "another experiment"):
                     with self.server():
@@ -131,8 +131,8 @@ class ManagedOllamaTests(unittest.TestCase):
 
     def test_disabled_mode_makes_no_network_process_or_log_changes(self):
         self.settings["manage_ollama"] = False
-        with patch("scripts.med_copilot_ollama.subprocess.Popen") as start, \
-                patch("scripts.med_copilot_ollama.urlopen") as request:
+        with patch("scripts.experiment_runtime.ollama.subprocess.Popen") as start, \
+                patch("scripts.experiment_runtime.ollama.urlopen") as request:
             with self.server() as server:
                 self.assertEqual(server.metadata(), {"managed": False})
                 self.assertEqual(server.ps_snapshot(), {"models": []})
@@ -144,7 +144,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_body_error_still_stops_owned_server(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.assertRaisesRegex(RuntimeError, "pipeline failed"):
                 with self.server():
                     raise RuntimeError("pipeline failed")
@@ -154,7 +154,7 @@ class ManagedOllamaTests(unittest.TestCase):
         self.process.poll.return_value = 1
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request") as request, \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.assertRaisesRegex(RuntimeError, "before becoming ready"):
                 with self.server():
                     pass
@@ -165,9 +165,9 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_startup_waits_for_api_and_timeout_cleans_up(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", side_effect=URLError("not ready")), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process), \
-                patch("scripts.med_copilot_ollama.time.monotonic", side_effect=[0, 31]), \
-                patch("scripts.med_copilot_ollama.time.sleep"):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process), \
+                patch("scripts.experiment_runtime.ollama.time.monotonic", side_effect=[0, 31]), \
+                patch("scripts.experiment_runtime.ollama.time.sleep"):
             with self.assertRaises(TimeoutError):
                 with self.server():
                     pass
@@ -176,8 +176,8 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_initial_connection_failure_then_ready(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", side_effect=[URLError("waiting"), {"version": "test"}]), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process), \
-                patch("scripts.med_copilot_ollama.time.sleep") as sleep:
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process), \
+                patch("scripts.experiment_runtime.ollama.time.sleep") as sleep:
             with self.server():
                 pass
             sleep.assert_called_once_with(0.1)
@@ -186,7 +186,7 @@ class ManagedOllamaTests(unittest.TestCase):
         self.process.wait.side_effect = [subprocess.TimeoutExpired("ollama", 10), 0]
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.server():
                 pass
         self.assertEqual([call.args for call in self.signal_group.call_args_list], [
@@ -198,7 +198,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_invalid_version_response_is_fatal_and_releases_port(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.assertRaisesRegex(ValueError, "version"):
                 with self.server():
                     pass
@@ -209,7 +209,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_failed_spawn_releases_owned_log_and_port_without_signaling_anything(self):
         server = self.server()
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", side_effect=FileNotFoundError("ollama")):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", side_effect=FileNotFoundError("ollama")):
             with self.assertRaises(FileNotFoundError):
                 with server:
                     pass
@@ -224,7 +224,7 @@ class ManagedOllamaTests(unittest.TestCase):
         self.signal_group.side_effect = ProcessLookupError()
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.server():
                 pass
         self.process.wait.assert_called_once_with(timeout=10)
@@ -232,7 +232,7 @@ class ManagedOllamaTests(unittest.TestCase):
     def test_unload_is_empty_native_request_and_does_not_generate(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}) as request, \
-                patch("scripts.med_copilot_ollama.subprocess.Popen", return_value=self.process):
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process):
             with self.server() as server:
                 server.unload("gemma3:4b")
                 self.assertEqual(request.call_args.args, ("POST", "/api/generate", {
@@ -243,20 +243,20 @@ class ManagedOllamaTests(unittest.TestCase):
                         server.unload(tag)
 
     def test_native_request_encodes_json_and_validates_response(self):
-        with patch("scripts.med_copilot_ollama.urlopen", return_value=io.BytesIO(b'{"done":true}')) as request:
+        with patch("scripts.experiment_runtime.ollama.urlopen", return_value=io.BytesIO(b'{"done":true}')) as request:
             value = self.server()._request("POST", "/api/generate", {"model": "test"})
             self.assertEqual(value, {"done": True})
             sent = request.call_args.args[0]
             self.assertEqual(sent.full_url, "http://127.0.0.1:11435/api/generate")
             self.assertEqual(json.loads(sent.data), {"model": "test"})
-        with patch("scripts.med_copilot_ollama.urlopen", return_value=io.BytesIO(b'[]')):
+        with patch("scripts.experiment_runtime.ollama.urlopen", return_value=io.BytesIO(b'[]')):
             with self.assertRaisesRegex(ValueError, "non-object"):
                 self.server()._request("GET", "/api/version")
 
     def test_port_probe_refuses_uncertain_network_failures(self):
-        with patch("scripts.med_copilot_ollama.socket.create_connection", side_effect=ConnectionRefusedError()):
+        with patch("scripts.experiment_runtime.ollama.socket.create_connection", side_effect=ConnectionRefusedError()):
             self.assertFalse(self.server()._port_busy())
-        with patch("scripts.med_copilot_ollama.socket.create_connection", side_effect=TimeoutError()):
+        with patch("scripts.experiment_runtime.ollama.socket.create_connection", side_effect=TimeoutError()):
             with self.assertRaisesRegex(ValueError, "unused"):
                 self.server()._port_busy()
 
@@ -290,7 +290,7 @@ class SavedRunOllamaTests(unittest.TestCase):
         server = Mock()
         server.__enter__ = Mock(return_value=server)
         server.__exit__ = Mock(return_value=None)
-        with patch("scripts.med_copilot_ollama.ManagedOllama", return_value=server) as constructor:
+        with patch("scripts.experiment_runtime.ollama.ManagedOllama", return_value=server) as constructor:
             with ollama_for_saved_run(self.root) as actual:
                 self.assertIs(actual, server)
             settings, path = constructor.call_args.args
@@ -301,7 +301,7 @@ class SavedRunOllamaTests(unittest.TestCase):
 
     def test_old_runs_do_not_start_or_mutate_a_gui_server(self):
         self.write({"plan_judge_concurrency": 2})
-        with patch("scripts.med_copilot_ollama.subprocess.Popen") as process:
+        with patch("scripts.experiment_runtime.ollama.subprocess.Popen") as process:
             with ollama_for_saved_run(self.root) as server:
                 self.assertEqual(server.metadata(), {"managed": False})
             process.assert_not_called()
@@ -323,7 +323,7 @@ class SavedRunOllamaTests(unittest.TestCase):
         server = Mock()
         server.__enter__ = Mock(return_value=server)
         server.__exit__ = Mock(return_value=None)
-        with patch("scripts.med_copilot_ollama.ManagedOllama", return_value=server) as constructor:
+        with patch("scripts.experiment_runtime.ollama.ManagedOllama", return_value=server) as constructor:
             with ollama_for_saved_run(self.root):
                 pass
             self.assertEqual(constructor.call_args.kwargs, {"parallel": 8, "context": 4096})
@@ -359,8 +359,8 @@ class PlanJudgeSettingsTests(unittest.TestCase):
         self.assertEqual(plan_judge_settings(metadata), {"concurrency": 4, "context_length": 4096})
 
     def test_invalid_effective_values_fail_without_any_server_or_api_calls(self):
-        with patch("scripts.med_copilot_ollama.subprocess.Popen") as process, \
-                patch("scripts.med_copilot_ollama.urlopen") as request:
+        with patch("scripts.experiment_runtime.ollama.subprocess.Popen") as process, \
+                patch("scripts.experiment_runtime.ollama.urlopen") as request:
             for value in (True, 0, -1, 65, "8", 1.5):
                 with self.subTest(concurrency=value), self.assertRaisesRegex(ValueError, "concurrency"):
                     plan_judge_settings({}, concurrency=value)

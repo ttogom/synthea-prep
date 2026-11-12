@@ -32,8 +32,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 with patch.object(nltk, "download", return_value=True):
-    from scripts import med_copilot_scheduler as scheduler_module
-    from scripts.med_copilot_execution import write_results
+    from scripts.experiment_runtime import scheduler as scheduler_module
+    from scripts.experiment_runtime.execution import write_results
     from scripts.med_copilot_config import EXECUTION_DEFAULTS, PATH_SETTINGS, ExperimentConfig
     from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result, reference_data_metadata
     from graphrag.config.models.language_model_config import LanguageModelConfig
@@ -983,6 +983,23 @@ class PreparationRecoveryTests(unittest.TestCase):
 
 
 class PreparationWorkerProtocolTests(unittest.TestCase):
+    def test_subprocess_uses_relocated_worker_entry_and_explicit_root(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = SimpleNamespace(stdin=StringIO(),
+                stdout=StringIO(json.dumps({"type": "ready", "metadata": {}}) + "\n"),
+                poll=Mock(return_value=0))
+            with patch.object(scheduler_module.subprocess, "Popen", return_value=process) as start:
+                worker = scheduler_module.PreparationWorker(root / "config.yaml", root, 0,
+                    EXECUTION_DEFAULTS, Mock(), Mock(), root)
+            try:
+                self.assertEqual(start.call_args.args[0], [sys.executable,
+                    str(root / "scripts/experiment_runtime/worker.py"), str(root / "config.yaml"),
+                    "--device", "cpu", "--threads", "2"])
+                self.assertEqual(start.call_args.kwargs["cwd"], root)
+            finally:
+                worker.close()
+
     def test_semantically_invalid_complete_frames_without_newline_remain_fatal(self):
         frames = ('{"type":"ready","metadata":{"bad":NaN}}',
                   '{"type":"ready","type":"ready","metadata":{}}',
@@ -1244,7 +1261,7 @@ class RunnerEntryTests(unittest.TestCase):
         }
         self.write()
         with patch("dotenv.load_dotenv", return_value=False):
-            self.namespace = runpy.run_path(str(ROOT / "scripts/run_experiments.py"))
+            self.namespace = runpy.run_path(str(ROOT / "run_experiments.py"))
         self.entry = self.namespace["main"]
         self.server = FakeServer()
 
@@ -1276,7 +1293,7 @@ class RunnerEntryTests(unittest.TestCase):
                     "ROOT": self.root, "PatientScorer": scorer, "generate_report": report,
                     "ManagedOllama": lambda *args, **kwargs: server,
                     "git_branch": lambda root: "speedup", "git_commit": lambda root: "offline-commit",
-                    "_sources": lambda: [{"file": "scripts/run_experiments.py", "sha256": "offline-source"}],
+                    "_sources": lambda: [{"file": "run_experiments.py", "sha256": "offline-source"}],
                 }):
             return self.entry(["--config", str(self.config), "--yes", *(extra or [])])
 
@@ -1295,7 +1312,7 @@ class RunnerEntryTests(unittest.TestCase):
                 expected = str(Path(value).relative_to(self.root)) if field in PATH_SETTINGS else value
                 self.assertEqual(metadata["experiment"][field], expected)
         self.assertEqual(metadata["experiment"]["config_sha256"], hashlib.sha256(self.config.read_bytes()).hexdigest())
-        self.assertEqual(metadata["execution_sources"], [{"file": "scripts/run_experiments.py", "sha256": "offline-source"}])
+        self.assertEqual(metadata["execution_sources"], [{"file": "run_experiments.py", "sha256": "offline-source"}])
         self.assertEqual(metadata["ollama_runtime"], self.server.metadata())
         self.assertEqual(metadata["schema_version"], 4)
         self.assertEqual(metadata["status"], "completed")
@@ -1312,6 +1329,48 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(self.saved()[2], records)
         self.assertEqual(len(self.saved()[1]["resumptions"]), 1)
         self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["standalone_stage_marker"], "judged later")
+
+    def test_root_entry_and_provenance_resolve_from_an_unrelated_working_directory(self):
+        caller = self.root / "unrelated-caller"
+        caller.mkdir()
+        previous = Path.cwd()
+        try:
+            os.chdir(caller)
+            with patch("dotenv.load_dotenv", return_value=False):
+                namespace = runpy.run_path(str(ROOT / "run_experiments.py"))
+            self.assertEqual(namespace["ROOT"], ROOT)
+            sources = namespace["_sources"]()
+            expected = {"run_experiments.py", *("scripts/experiment_runtime/" + name for name in
+                ("scheduler.py", "execution.py", "preparation.py", "worker.py", "worker_stream.py", "ollama.py"))}
+            self.assertEqual({source["file"] for source in sources}, expected)
+            for source in sources:
+                path = ROOT / source["file"]
+                self.assertTrue(path.is_file(), source["file"])
+                self.assertEqual(source["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(self.invoke(), 0)
+            self.assertEqual(Path.cwd(), caller.resolve())
+        finally:
+            os.chdir(previous)
+
+    def test_four_worker_pipeline_needs_no_pilot_artifacts_and_defers_all_plan_judging(self):
+        self.settings["execution"]["preparation_workers"] = 4
+        self.write()
+        self.assertFalse(list(self.root.rglob("pilot_speedup*")))
+        self.assertFalse(self.fixture.experiment.patient_input.with_suffix(".selection.json").exists())
+        self.assertEqual(self.invoke(), 0)
+        _, metadata, records = self.saved()
+        self.assertEqual(metadata["experiment"]["execution"]["preparation_workers"], 4)
+        self.assertEqual(len(metadata["preparation_runtime"]), 4)
+        self.assertEqual(self.fixture.closed_workers, 4)
+        self.assertNotIn("pilot_selection", metadata)
+        self.assertNotIn("plan_evaluation", metadata)
+        self.assertEqual(len(self.fixture.calls), len(records) * len(VARIANTS) * len(ALIASES))
+        for record in records:
+            for variant in record["variants"].values():
+                for output in variant["assessment_plans"].values():
+                    for entry in output["evaluation"]:
+                        self.assertEqual(entry["plan_correctness"]["status"], "pending")
+                        self.assertEqual(entry["plan_correctness"]["reason"], "deferred")
 
     def test_resume_blocks_even_comment_only_configuration_change_before_rewriting_artifacts(self):
         self.assertEqual(self.invoke(), 0)
@@ -1464,7 +1523,7 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(metadata["errors"][-1]["message"], "original generation failed")
 
     def test_readable_entry_has_top_level_imports_and_recognizable_stages(self):
-        source = (ROOT / "scripts/run_experiments.py").read_text()
+        source = (ROOT / "run_experiments.py").read_text()
         tree = ast.parse(source)
         self.assertNotIn("def _main(", source)
         self.assertIn("# Clinical evidence and exact prompts", source)
