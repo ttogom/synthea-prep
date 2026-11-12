@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from metric_doubles import SingletonMetricDouble
 import nltk
 from nltk.translate.meteor_score import single_meteor_score
 import numpy as np
@@ -99,7 +100,8 @@ class PatientScorerTests(unittest.TestCase):
         first, second, last = record["assessment_plans"].values()
         self.assertEqual(first["evaluation"][2]["plan"]["status"], "scored")
         self.assertEqual(second["evaluation"][0]["condition"]["status"], "interrupted")
-        self.assertNotIn("evaluation", last)
+        self.assertTrue(all(entry[field]["status"] == "pending" for entry in last["evaluation"]
+                            for field in ("condition", "plan")))
 
     def setUp(self):
         self.temporary = TemporaryDirectory()
@@ -130,6 +132,8 @@ class PatientScorerTests(unittest.TestCase):
         )
 
     def scorer(self, **kwargs):
+        kwargs.setdefault("metric_evaluator", SingletonMetricDouble(
+            lambda *args, **kw: Evaluator.evaluate_metrics(*args, **kw)))
         return PatientScorer(self.labels_path, self.patients, **kwargs)
 
     def result(self, patient_id="patient-a", **kwargs):
@@ -814,7 +818,9 @@ class VariantScoringTests(unittest.TestCase):
         self.assertEqual(record["components"], components)
         self.assertEqual(record["variants"]["new_first"]["assessment_plans"]["one"]["evaluation"][2]["plan"]["status"], "scored")
         self.assertEqual(record["variants"]["new_interrupted"]["assessment_plans"]["one"]["evaluation"][0]["condition"]["status"], "interrupted")
-        self.assertIsNone(record["variants"]["new_later"]["assessment_plans"]["one"]["evaluation"])
+        self.assertTrue(all(entry[field]["status"] == "pending" for entry in
+                            record["variants"]["new_later"]["assessment_plans"]["one"]["evaluation"]
+                            for field in ("condition", "plan")))
 
 
 JUDGE_MODELS = ("mini", "llama", "gemma", "healthcare")
@@ -1243,6 +1249,8 @@ class ResumeCommandTests(unittest.TestCase):
         namespace = runpy.run_path(str(RESUME_SCRIPT), run_name="resume_command")
         stdout, stderr = StringIO(), StringIO()
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics), \
+                patch("scripts.med_copilot_scoring.TextMetricEvaluator", side_effect=lambda: SingletonMetricDouble(
+                    lambda *args, **kw: Evaluator.evaluate_metrics(*args, **kw))), \
                 redirect_stderr(stderr), patch("sys.stdout", stdout):
             status = namespace["main"](list(argv) or [str(self.run_dir)], root=self.directory,
                                        models_factory=models_factory or (lambda *args, **kwargs: models))

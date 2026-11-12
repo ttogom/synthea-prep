@@ -1,4 +1,4 @@
-"""Score generated fields with the unchanged upstream MED-COPILOT evaluator."""
+"""Score generated fields with singleton lexical metrics and batched BERTScore."""
 
 import argparse
 import hashlib
@@ -10,17 +10,22 @@ import os
 from pathlib import Path
 from random import Random
 
+# Retain upstream's existing NLTK resource initialization, but do not invoke its
+# evaluator: the project adapter below owns metric computation and model reuse.
 from med_copilot.upstream.evaluate_metrics import Evaluator
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
+from scripts.med_copilot_metrics import (
+    BATCH_SIZE, BERT_SETTINGS, METRIC_NAMES, MetricPair, TextMetricEvaluator, resolved_device, validate_metrics,
+)
 from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges, diagnosis_entry, plan_entry
 from scripts.med_copilot_run_file import (
     RUN_FILE, RunFile, RunMetadataError, checkpoint, error_scope, pipeline_stage, record_error,
 )
 
 
-METRIC_NAMES = ("BLEU", "METEOR", "ROUGE-1", "ROUGE-2", "ROUGE-L", "BERTScore_F1")
 METRIC_PACKAGES = ("sacrebleu", "nltk", "rouge-score", "bert-score", "transformers", "torch")
 UPSTREAM_EVALUATOR = Path(__file__).resolve().parents[1] / "med_copilot/upstream/evaluate_metrics.py"
+METRIC_ADAPTER = Path(__file__).with_name("med_copilot_metrics.py")
 PATIENT_SAMPLING_SEED = 42
 
 
@@ -95,7 +100,7 @@ class PatientScorer:
     """
 
     def __init__(self, labels_path, patients, presenting_evidence_only=True, *, max_patients=None,
-                 exclude_none_recorded_plans=False):
+                 exclude_none_recorded_plans=False, metric_evaluator=None):
         if type(presenting_evidence_only) is not bool:
             raise TypeError("presenting_evidence_only must be a bool")
         if max_patients is not None and (type(max_patients) is not int or max_patients < 1):
@@ -183,13 +188,14 @@ class PatientScorer:
         self._labels = labels
         self._patients = {patient["id"]: patient for patient in self.patients}
         self.judges = None
+        self.metric_evaluator = metric_evaluator if metric_evaluator is not None else TextMetricEvaluator()
 
     def attach_judges(self, judges):
         """Also score diagnosis/Plan correctness (preliminary single-model midterm metric)."""
         self.judges = judges
 
     def metadata(self, root):
-        """Describe the label snapshot, cohort, and configured upstream defaults."""
+        """Describe the cohort, metric implementation, and effective metric settings."""
         versions = {}
         for name in METRIC_PACKAGES:
             try:
@@ -201,6 +207,15 @@ class PatientScorer:
             "labels_sha256": self._labels_sha256,
             "evaluator_path": _relative_path(UPSTREAM_EVALUATOR, root),
             "evaluator_sha256": hashlib.sha256(UPSTREAM_EVALUATOR.read_bytes()).hexdigest(),
+            "metric_implementation": {
+                "class": "TextMetricEvaluator", "api": "score_pairs",
+                "path": _relative_path(METRIC_ADAPTER, root),
+                "sha256": hashlib.sha256(METRIC_ADAPTER.read_bytes()).hexdigest(),
+                "scoring_path": _relative_path(Path(__file__), root),
+                "scoring_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                "upstream_evaluator_role": "semantic reference; evaluate_metrics not invoked",
+                "batching": "pending pairs across this scoring call; no cross-call buffer",
+            },
             "presenting_evidence_only": self.presenting_evidence_only,
             "max_patients": self.max_patients,
             "patient_sampling_seed": PATIENT_SAMPLING_SEED,
@@ -235,12 +250,15 @@ class PatientScorer:
                     "scale": "upstream score divided by 100",
                 },
                 "bert_score": {
-                    "model_type": "roberta-large", "num_layers": 17,
-                    "idf": False, "rescale_with_baseline": False,
-                    "use_fast_tokenizer": False, "batch_size": 64,
+                    **BERT_SETTINGS, "batch_size": BATCH_SIZE,
+                    "resolved_device": resolved_device(),
+                    "device_selection": "cuda if torch.cuda.is_available() else cpu; no MPS",
+                    "precision": "library default; no autocast or dtype conversion",
+                    "component": "per-pair F1; no batch mean",
+                    "truncation": "unchanged bert-score sent_encode/tokenizer model_max_length",
                     "expected_tokenizer_max_length": 512,
                     "model_revision": None,
-                    "model_revision_status": "not verified; upstream selects the model by name",
+                    "model_revision_status": "not verified; model selected by name without a pinned revision",
                 },
             },
         }
@@ -251,18 +269,51 @@ class PatientScorer:
                 or result["id"] not in self._selected_ids):
             raise ValueError("Result must name a selected input patient")
         if "variants" in result:
-            for variant in result["variants"].values():
-                self.score_result({"id": result["id"], "assessment_plans": variant["assessment_plans"]},
-                                  rescore=rescore)
+            outputs = [(variant, model, output) for variant, body in result["variants"].items()
+                       for model, output in body["assessment_plans"].items()
+                       if output["status"] == "completed"]
         elif "assessment_plans" in result:
-            for output in result["assessment_plans"].values():
-                if output["status"] == "completed":
-                    self._score_predictions(result["id"], output, rescore=rescore)
+            outputs = [(None, model, output) for model, output in result["assessment_plans"].items()
+                       if output["status"] == "completed"]
         else:
-            self._score_predictions(result["id"], result, rescore=rescore)
+            outputs = [(None, None, result)]
+        pending = []
+        for variant, model, output in outputs:
+            pending.extend(self._prepare_predictions(
+                result["id"], output, (result["id"], variant, model), rescore=rescore))
+        scores = iter(self.metric_evaluator.score_pairs([pair for pair, _, _ in pending]))
+        try:
+            for pair, evaluation, field in pending:
+                try:
+                    score = next(scores)
+                except Exception as exc:
+                    evaluation[field] = _empty_entry("error", _exception_data(exc))
+                    checkpoint()
+                    continue
+                except BaseException as exc:
+                    evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
+                    checkpoint()
+                    raise
+                try:
+                    if score.key != pair.key:
+                        raise ValueError("Metric result identity does not match its input pair")
+                    if score.error is not None:
+                        raise score.error
+                    values = validate_metrics(score.metrics)
+                    evaluation[field] = {"status": "scored", "metrics": values, "error": None}
+                except Exception as exc:
+                    evaluation[field] = _empty_entry("error", _exception_data(exc))
+                checkpoint()
+        finally:
+            # Release the evaluator's serialization lock even if a checkpoint fails.
+            close = getattr(scores, "close", None)
+            if close is not None:
+                close()
+        for _, _, output in outputs:
+            self._score_correctness(result["id"], output)
         return result
 
-    def _score_predictions(self, patient_id, result, *, rescore=False):
+    def _prepare_predictions(self, patient_id, result, identity, *, rescore=False):
         label = self._labels[patient_id]
         saved = result.get("evaluation") if not rescore else None
         if (not isinstance(saved, list) or len(saved) != 3
@@ -287,6 +338,7 @@ class PatientScorer:
             "plan": ", ".join(label["plan"]),
         }
         predictions = result.get("predictions")
+        pending = []
         for index, evaluation in enumerate(result["evaluation"]):
             for field in ("condition", "plan"):
                 if evaluation[field]["status"] == "scored":
@@ -323,26 +375,20 @@ class PatientScorer:
                     if not candidate.strip():
                         evaluation[field] = _empty_entry("missing_generation")
                         continue
-                    metrics = Evaluator.evaluate_metrics([reference], [candidate], lang="en")
-                    if not isinstance(metrics, dict) or set(metrics) != set(METRIC_NAMES):
-                        raise ValueError("Evaluator must return exactly the six upstream metric keys")
-                    values = {}
-                    for name in METRIC_NAMES:
-                        value = metrics[name]
-                        if isinstance(value, bool) or not isinstance(value, Real):
-                            raise ValueError(f"Evaluator metric {name} must be a finite real number")
-                        value = float(value)
-                        if not math.isfinite(value):
-                            raise ValueError(f"Evaluator metric {name} must be a finite real number")
-                        values[name] = value
-                    evaluation[field] = {"status": "scored", "metrics": values, "error": None}
+                    pending.append((MetricPair((*identity, index + 1, field), reference, candidate),
+                                    evaluation, field))
                 except Exception as exc:
                     evaluation[field] = _empty_entry("error", _exception_data(exc))
                 except BaseException as exc:
                     evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
                     raise
                 finally:
-                    checkpoint()
+                    if evaluation[field]["status"] != "pending":
+                        checkpoint()
+        return pending
+
+    def _score_correctness(self, patient_id, result):
+        label = self._labels[patient_id]
         if self.judges is not None:
             patient = self._patients[patient_id]
             for evaluation in result["evaluation"]:

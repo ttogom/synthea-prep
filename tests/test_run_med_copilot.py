@@ -36,6 +36,7 @@ import yaml
 
 from test_med_copilot_retrieval import FakeEncoder, load_retrieval_module
 from test_med_copilot_observability import ProviderHarness
+from metric_doubles import SingletonMetricDouble
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,7 @@ HELPERS = ROOT / "scripts" / "med_copilot_helpers.py"
 RETRIEVAL = ROOT / "scripts" / "med_copilot_retrieval.py"
 OBSERVABILITY = ROOT / "scripts" / "med_copilot_observability.py"
 SCORING = ROOT / "scripts" / "med_copilot_scoring.py"
+METRICS = ROOT / "scripts" / "med_copilot_metrics.py"
 MODELS = ROOT / "scripts" / "med_copilot_models.py"
 CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
@@ -383,6 +385,7 @@ class PipelineFixture:
         if SCORING.exists():
             (self.script.parent / SCORING.name).write_text(
                 SCORING.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.script.parent / METRICS.name).write_bytes(METRICS.read_bytes())
         (self.upstream / "evaluate_metrics.py").write_bytes(UPSTREAM_EVALUATOR.read_bytes())
         (self.script.parent / MODELS.name).write_bytes(MODELS.read_bytes())
         (self.script.parent / CONFIG.name).write_bytes(CONFIG.read_bytes())
@@ -414,6 +417,9 @@ class PipelineFixture:
         self.real_scoring = False
         self.scoring_calls = []
         self.scoring_reply = None
+        self.batch_metrics = False
+        self.bert_batches = []
+        self.bert_initializations = []
         self.metric_values = {name: (index + 1) / 10 for index, name in enumerate(METRIC_NAMES)}
         self.prompt_module = root / "med_copilot/prompts/diagnosis_plan.py"
         self.prompt_module.parent.mkdir(parents=True)
@@ -703,6 +709,29 @@ class PipelineFixture:
             if fixture.scoring_reply is not None:
                 return fixture.scoring_reply(references, candidates, lang)
             return fixture.metric_values.copy()
+
+        # Keep legacy per-field fault injection; dedicated batch integration tests
+        # below use the real adapter, mocking only lexical/BERT model runtimes.
+        metric_module = ModuleType("scripts.med_copilot_metrics")
+        metric_module.__dict__.update(runpy.run_path(str(self.script.parent / METRICS.name)))
+        real_metric_evaluator = metric_module.TextMetricEvaluator
+
+        class BertDouble:
+            def __init__(self, **settings):
+                fixture.bert_initializations.append(settings)
+
+            def score(self, candidates, references, **settings):
+                fixture.bert_batches.append((list(candidates), list(references), settings))
+                return None, None, [fixture.metric_values["BERTScore_F1"]] * len(candidates)
+
+        def metric_evaluator():
+            if not fixture.batch_metrics:
+                return SingletonMetricDouble(evaluate_metrics)
+            return real_metric_evaluator(bert_scorer_factory=BertDouble, lexical=lambda ref, cand: {
+                key: value for key, value in evaluate_metrics([ref], [cand]).items() if key != "BERTScore_F1"})
+
+        metric_module.TextMetricEvaluator = metric_evaluator
+        modules["scripts.med_copilot_metrics"] = metric_module
 
         modules["graphrag.config.models.language_model_config"].LanguageModelConfig = ModelConfig
         modules["graphrag.language_model.factory"].ModelFactory = SimpleNamespace(create_chat_model=create_chat_model)
@@ -5514,7 +5543,9 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(slots["gpt_4o_mini"]["evaluation"][2]["plan"]["status"], "scored")
         self.assertEqual(slots["llama"]["evaluation"][0]["condition"]["status"], "interrupted")
         self.assertEqual(row["variants"]["guidelines"]["assessment_plans"]["gpt_4o_mini"]["status"], "completed")
-        self.assertIsNone(row["variants"]["guidelines"]["assessment_plans"]["gpt_4o_mini"]["evaluation"])
+        self.assertTrue(all(entry[field]["status"] == "pending" for entry in
+                            row["variants"]["guidelines"]["assessment_plans"]["gpt_4o_mini"]["evaluation"]
+                            for field in ("condition", "plan")))
 
     def test_report_failure_preserves_finished_artifacts_and_is_explicit(self):
         runner = self.load_runner()
@@ -6224,6 +6255,98 @@ class RunnerResumeTests(unittest.TestCase):
     def invoke(self, runner, folder=None):
         with self.fixture.runtime():
             return runner["main"]([] if folder is None else ["--resume", str(folder)])
+
+    def test_real_metric_adapter_batches_full_matrix_and_reuses_one_model_across_patients(self):
+        f = self.fixture
+        f.batch_metrics = True
+        self.config["models"]["fourth"] = {**self.config["models"]["llama"], "model": "fourth-model"}
+        self.experiment["selected_models"] = ["gpt_4o_mini", "llama", "third", "fourth"]
+        self.experiment["plan_judge"] = "llama"
+        self.write_config()
+        f.write_patients([dict(id=name, subjective=name, objective="O") for name in ("FIRST", "LATER")])
+        f.write_labels([self.label(name) for name in ("FIRST", "LATER")])
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, metadata, records = self.saved()
+        self.assertEqual([len(call[0]) for call in f.bert_batches], [64, 32, 64, 32])
+        self.assertEqual(len(f.bert_initializations), 1)
+        self.assertEqual(len(f.scoring_calls), 192)
+        for record in records:
+            self.assertEqual(list(record), V4_RESULT_FIELDS)
+            for variant in record["variants"].values():
+                for slot in variant["assessment_plans"].values():
+                    for rank in slot["evaluation"]:
+                        for field in ("condition", "plan"):
+                            self.assertEqual(rank[field], {"status": "scored", "metrics": f.metric_values, "error": None})
+        implementation = metadata["evaluation"]["metric_implementation"]
+        self.assertEqual(implementation["sha256"], hashlib.sha256(METRICS.read_bytes()).hexdigest())
+        self.assertEqual(implementation["scoring_sha256"], hashlib.sha256(SCORING.read_bytes()).hexdigest())
+        self.assertTrue((folder / "results_summary.html").exists())
+
+    def test_real_batched_scoring_resume_does_not_repeat_completed_fields_or_generations(self):
+        f = self.fixture
+        f.batch_metrics = True
+        self.experiment["plan_judge"] = "llama"
+        self.write_config()
+        def interrupted(ref, candidate, lang):
+            if len(f.scoring_calls) == 4:
+                raise KeyboardInterrupt()
+            return f.metric_values.copy()
+        f.scoring_reply = interrupted
+        runner = self.load_runner()
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, [record] = self.saved()
+        saved = deepcopy(record["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]["evaluation"])
+        generation_count = len(f.calls)
+        f.scoring_reply = None
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        final = self.saved()[2][0]["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]["evaluation"]
+        self.assertEqual(final[0]["condition"], saved[0]["condition"])
+        self.assertEqual(final[0]["plan"], saved[0]["plan"])
+        self.assertEqual(final[1]["condition"], saved[1]["condition"])
+        self.assertEqual([len(call[0]) for call in f.bert_batches], [48, 45])
+        self.assertEqual(len(f.calls), generation_count)
+        counts = [len(calls) for calls in (f.calls, f.judge_calls, f.bert_batches, f.scoring_calls)]
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual([len(calls) for calls in (f.calls, f.judge_calls, f.bert_batches, f.scoring_calls)], counts)
+
+    def test_real_batch_judge_interruption_reuses_all_text_and_completed_judge_responses(self):
+        f = self.fixture
+        f.batch_metrics = True
+        self.experiment["plan_judge"] = "llama"
+        self.write_config()
+        def interrupted(request):
+            if len(f.judge_calls) == 2:
+                raise KeyboardInterrupt()
+        f.judge_reply = interrupted
+        runner = self.load_runner()
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, _ = self.saved()
+        first_request = deepcopy(f.judge_calls[0])
+        previous_calls = len(f.judge_calls)
+        generation_count = len(f.calls)
+        f.judge_reply = None
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertNotIn(first_request, f.judge_calls[previous_calls:])
+        self.assertEqual(len(f.calls), generation_count)
+        self.assertEqual([len(call[0]) for call in f.bert_batches], [48])
+        self.assertEqual(len(f.scoring_calls), 48)
+
+    def test_changed_metric_implementation_blocks_resume_before_touching_artifacts(self):
+        f = self.fixture
+        f.batch_metrics = True
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, metadata, _ = self.saved()
+        metadata["evaluation"]["metric_implementation"]["sha256"] = "old-adapter"
+        (folder / "run.json").write_text(json.dumps(metadata))
+        before = {path.name: path.read_bytes() for path in folder.iterdir()}
+        counts = [len(calls) for calls in (f.calls, f.judge_calls, f.bert_batches)]
+        self.assertEqual(self.invoke(runner, folder), "resume_error")
+        self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
+        self.assertEqual([len(calls) for calls in (f.calls, f.judge_calls, f.bert_batches)], counts)
 
     def interrupt_generation(self, runner, *, patients=("FIRST", "LATER")):
         fixture = self.fixture
