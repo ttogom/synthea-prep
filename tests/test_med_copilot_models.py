@@ -1,7 +1,9 @@
 """Offline tests using real upstream config/factory/completion wrappers, mocked transport."""
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
+from contextvars import copy_context
 from copy import deepcopy
 import hashlib
 import io
@@ -10,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from threading import Barrier, Lock
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -30,6 +33,7 @@ from med_copilot.prompts.diagnosis_plan import CONDITION_PLAN_RESPONSE_FORMAT
 from scripts.med_copilot_config import ExperimentConfig
 from scripts.med_copilot_helpers import new_patient_result
 from scripts.med_copilot_models import AssessmentPlanModels
+from scripts.med_copilot_run_file import RunMetadataError, error_scope
 
 
 def response(marker="condition", **overrides):
@@ -82,6 +86,117 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         result = new_patient_result("p", model_ids=models.model_ids)
         models.generate(self.messages, result)
         return models, result
+
+    def test_generate_one_routes_only_requested_alias_and_returns_its_owned_slot(self):
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        patient_status = result["status"]
+        sibling = deepcopy(result["assessment_plans"]["mini"])
+        output = result["assessment_plans"]["llama"]
+        self.assertIs(models.generate_one("llama", self.messages, output), output)
+        self.transport.assert_called_once()
+        self.assertEqual(self.transport.call_args.kwargs["model"], "groq/llama-3.3-70b-versatile")
+        self.assertEqual(output["status"], "completed")
+        self.assertEqual(result["assessment_plans"]["mini"], sibling)
+        self.assertEqual(result["status"], patient_status)  # The coordinator owns patient status.
+
+    def test_generate_one_rejects_unselected_alias_before_mutating_or_checkpointing(self):
+        models = self.load_models()
+        output = new_patient_result("p", model_ids=models.model_ids)["assessment_plans"]["mini"]
+        saved = deepcopy(output)
+        with patch("scripts.med_copilot_models.checkpoint") as checkpoint, \
+                self.assertRaisesRegex(ValueError, "not selected"):
+            models.generate_one("missing", self.messages, output)
+        self.transport.assert_not_called()
+        checkpoint.assert_not_called()
+        self.assertEqual(output, saved)
+
+    def test_generate_one_persists_received_reply_before_parser_runs(self):
+        models = self.load_models()
+        output = new_patient_result("p", model_ids=models.model_ids)["assessment_plans"]["mini"]
+        snapshots = []
+        owner = SimpleNamespace(checkpoint=lambda: snapshots.append(deepcopy(output)))
+        parse = models.generate_one.__func__.__globals__["parse_condition_plan"]
+
+        def checked_parse(content):
+            self.assertEqual(len(snapshots), 1)
+            self.assertTrue(snapshots[0]["_generation_reply_complete"])
+            self.assertEqual(snapshots[0]["assessment_plan_raw"], content)
+            self.assertEqual(len(snapshots[0]["model_responses"]), 1)
+            self.assertIsNone(snapshots[0]["predictions"])
+            return parse(content)
+
+        with error_scope(owner, patient_id="p"), \
+                patch("scripts.med_copilot_models.parse_condition_plan", side_effect=checked_parse):
+            models.generate_one("mini", self.messages, output)
+        self.assertEqual([snapshot["status"] for snapshot in snapshots], ["failed_incomplete", "completed"])
+        self.assertNotIn("_generation_reply_complete", snapshots[-1])
+
+    def test_generate_one_durable_reply_checkpoint_failure_stops_before_parse(self):
+        models = self.load_models()
+        output = new_patient_result("p", model_ids=models.model_ids)["assessment_plans"]["mini"]
+        with patch("scripts.med_copilot_models.checkpoint", side_effect=[RunMetadataError("disk full"), None]), \
+                patch("scripts.med_copilot_models.parse_condition_plan") as parse, \
+                self.assertRaisesRegex(RunMetadataError, "disk full"):
+            models.generate_one("mini", self.messages, output)
+        parse.assert_not_called()
+        self.assertTrue(output["_generation_reply_complete"])
+        self.assertEqual(output["status"], "failed_incomplete")
+        models.generate_one("mini", self.messages, output)
+        self.transport.assert_called_once()
+        self.assertEqual(output["status"], "completed")
+
+    def test_generate_one_overlaps_same_alias_requests_without_crossing_job_state(self):
+        models = self.load_models()
+        barrier = Barrier(2)
+        snapshots = {name: [] for name in ("FIRST", "SECOND")}
+        lock = Lock()
+        outputs = {name: new_patient_result(name, model_ids=models.model_ids)["assessment_plans"]["mini"]
+                   for name in snapshots}
+
+        def answer(**request):
+            marker = request["messages"][0]["content"]
+            barrier.wait(timeout=5)
+            return response(marker)
+
+        def save(name):
+            with lock:
+                snapshots[name].append(deepcopy(outputs[name]))
+
+        self.transport.side_effect = answer
+        futures = []
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            for name in snapshots:
+                owner = SimpleNamespace(checkpoint=lambda name=name: save(name))
+                with error_scope(owner, patient_id=name):
+                    futures.append(executor.submit(copy_context().run, models.generate_one, "mini",
+                                                   [{"role": "user", "content": name}], outputs[name]))
+            for future in futures:
+                future.result(timeout=10)
+        self.assertEqual(self.transport.call_count, 2)
+        for name, output in outputs.items():
+            self.assertEqual(output["predictions"][0]["condition"], name + "0")
+            self.assertEqual(len(output["model_responses"]), 1)
+            self.assertEqual(len(snapshots[name]), 2)
+            self.assertTrue(snapshots[name][0]["_generation_reply_complete"])
+            self.assertEqual(snapshots[name][-1], output)
+        self.assertEqual(models.metadata(self.root)["selected_models"], ["mini"])
+
+    def test_model_is_local_recognizes_loopback_endpoints_only(self):
+        for endpoint, expected in ((None, False), ("http://localhost:11434/v1", True),
+                                   ("http://127.0.0.1:8000/v1", True), ("http://127.0.0.2:8000/v1", True),
+                                   ("http://[::1]:11434/v1", True), ("https://api.example.com/v1", False),
+                                   ("http://192.168.1.2:11434/v1", False)):
+            with self.subTest(endpoint=endpoint):
+                if endpoint is None:
+                    self.data["models"]["mini"].pop("api_base", None)
+                else:
+                    self.data["models"]["mini"]["api_base"] = endpoint
+                self.write()
+                self.assertIs(self.load_models().model_is_local("mini"), expected)
+        with self.assertRaisesRegex(ValueError, "not selected"):
+            self.load_models().model_is_local("missing")
+        self.transport.assert_not_called()
 
     def test_resume_reuses_received_reply_after_interruption_during_local_parsing(self):
         models = self.load_models(["mini", "llama"])
@@ -175,8 +290,12 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         self.assertEqual(self.transport.call_args.kwargs["model"], "groq/llama-3.3-70b-versatile")
         self.assertEqual(completed, saved)
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(snapshots), 1)
-        self.assertEqual(snapshots[0]["assessment_plans"]["llama"]["status"], "completed")
+        self.assertEqual(len(snapshots), 2)
+        pending = snapshots[0]["assessment_plans"]["llama"]
+        self.assertEqual(pending["status"], "failed_incomplete")
+        self.assertTrue(pending["_generation_reply_complete"])
+        self.assertIsNone(pending["predictions"])
+        self.assertEqual(snapshots[1]["assessment_plans"]["llama"]["status"], "completed")
 
     def test_resume_preserves_completed_but_invalid_generation_without_requests(self):
         models = self.load_models()
@@ -201,7 +320,7 @@ class AssessmentPlanModelsTests(unittest.TestCase):
                 models.generate(self.messages, result)
         first = deepcopy(result["assessment_plans"]["mini"])
         self.assertEqual([snapshot["assessment_plans"]["llama"]["status"]
-                          for snapshot in snapshots], ["not_processed", "failed_incomplete"])
+                          for snapshot in snapshots], ["not_processed", "not_processed", "failed_incomplete"])
         self.assertEqual(result["assessment_plans"]["llama"]["error"]["type"], "KeyboardInterrupt")
         self.transport.reset_mock()
         self.transport.side_effect = None
@@ -210,7 +329,7 @@ class AssessmentPlanModelsTests(unittest.TestCase):
             models.generate(self.messages, result)
         self.transport.assert_called_once()
         self.assertEqual(self.transport.call_args.kwargs["model"], "groq/llama-3.3-70b-versatile")
-        checkpoint.assert_called_once_with()
+        self.assertEqual(checkpoint.call_count, 2)
         self.assertEqual(result["assessment_plans"]["mini"], first)
         self.assertIsNone(result["assessment_plans"]["llama"]["error"])
         self.assertEqual(result["assessment_plans"]["llama"]["predictions"][0]["condition"], "retried0")
@@ -224,9 +343,10 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         with patch("scripts.med_copilot_models.checkpoint", create=True,
                    side_effect=lambda: snapshots.append(deepcopy(result))):
             models.generate(self.messages, result)
-        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(len(snapshots), 3)
         self.assertEqual(snapshots[0]["assessment_plans"]["mini"]["error"]["type"], "RuntimeError")
-        self.assertEqual(snapshots[1]["assessment_plans"]["llama"]["status"], "completed")
+        self.assertTrue(snapshots[1]["assessment_plans"]["llama"]["_generation_reply_complete"])
+        self.assertEqual(snapshots[2]["assessment_plans"]["llama"]["status"], "completed")
 
     def test_checkpoint_write_failure_stops_before_requesting_another_model(self):
         models = self.load_models(["mini", "llama"])
@@ -236,7 +356,9 @@ class AssessmentPlanModelsTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "checkpoint is unwritable"):
                 models.generate(self.messages, result)
         self.transport.assert_called_once()
-        self.assertEqual(result["assessment_plans"]["mini"]["status"], "completed")
+        self.assertEqual(result["assessment_plans"]["mini"]["status"], "failed_incomplete")
+        self.assertTrue(result["assessment_plans"]["mini"]["_generation_reply_complete"])
+        self.assertIsNone(result["assessment_plans"]["mini"]["predictions"])
         self.assertEqual(result["assessment_plans"]["llama"]["status"], "not_processed")
 
     def test_retry_discards_failed_attempt_payload_and_scores_but_keeps_response_history(self):
@@ -268,7 +390,7 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         settings = {"temperature": experiment.temperature, "max_retries": experiment.max_retries}
         with patch.dict(os.environ, {"OPENAI_API_KEY": "offline-openai", "GROQ_API_KEY": "offline-groq"}):
             self.assertEqual(AssessmentPlanModels(path, experiment.selected_models, **settings).model_ids,
-                             ("gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b"))
+                             ("gpt_4o_mini", "ollama_gemma3_4b", "ollama_llama3_2_3b", "ollama_ministral_3_3b"))
             models = AssessmentPlanModels(path, ["gpt_4o_mini", "llama_3_3_70b", "llama_3_3_70b_local"],
                                           **settings)
             result = new_patient_result("p", model_ids=models.model_ids)

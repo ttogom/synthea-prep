@@ -38,6 +38,20 @@ PIPELINE_DEFAULTS = {
 }
 PATH_SETTINGS = ("patient_input", "patient_labels", "guidelines", "experiment_output",
                  "patient_corpus", "patient_retrieval_artifacts_dir")
+EXECUTION_DEFAULTS = {
+    "preparation_workers": 2,
+    "local_concurrency": 4,
+    "hosted_concurrency": 4,
+    "scoring_batch_patients": 8,
+    "overlap_scoring": True,
+    "cpu_threads": 2,
+    "encoder_device": "cpu",
+    "manage_ollama": False,
+    "ollama_host": "127.0.0.1:11435",
+    "ollama_parallel_slots": 4,
+    "ollama_context_length": 16384,
+    "ollama_judge_context_length": 8192,
+}
 
 
 def _finite_number(value):
@@ -79,6 +93,7 @@ class ExperimentConfig:
             "presenting_evidence_only": True,
             "exclude_none_recorded_plans": False,
             "variant_settings": {},
+            "execution": {},
             **PIPELINE_DEFAULTS,
         }
         if (not isinstance(data, dict) or not required <= set(data)
@@ -87,6 +102,29 @@ class ExperimentConfig:
                              "optional settings are " + ", ".join(defaults) + ". "
                              "Remove unknown settings from experiments/configs/experiment.yaml")
         data = {**defaults, **data}
+        execution = data["execution"]
+        if not isinstance(execution, dict) or set(execution) - set(EXECUTION_DEFAULTS):
+            raise ValueError("execution must contain only supported scheduling settings")
+        self.execution = {**EXECUTION_DEFAULTS, **execution}
+        for field in ("preparation_workers", "local_concurrency", "hosted_concurrency",
+                      "scoring_batch_patients", "cpu_threads", "ollama_parallel_slots"):
+            if type(self.execution[field]) is not int or not 1 <= self.execution[field] <= 64:
+                raise ValueError(f"execution.{field} must be an integer from 1 to 64")
+        for field in ("ollama_context_length", "ollama_judge_context_length"):
+            if type(self.execution[field]) is not int or not 512 <= self.execution[field] <= 262144:
+                raise ValueError(f"execution.{field} must be an integer from 512 to 262144")
+        for field in ("manage_ollama", "overlap_scoring"):
+            if type(self.execution[field]) is not bool:
+                raise ValueError(f"execution.{field} must be boolean")
+        if self.execution["encoder_device"] != "cpu":
+            raise ValueError("execution.encoder_device must be cpu to isolate Ollama GPU inference")
+        if not re.fullmatch(r"127\.0\.0\.1:[0-9]{1,5}", str(self.execution["ollama_host"])):
+            raise ValueError("execution.ollama_host must be a loopback address 127.0.0.1:PORT")
+        port = int(self.execution["ollama_host"].rsplit(":", 1)[1])
+        if not 1024 <= port <= 65535 or port == 11434:
+            raise ValueError("execution.ollama_host has an invalid port")
+        if self.execution["local_concurrency"] > self.execution["ollama_parallel_slots"]:
+            raise ValueError("execution.local_concurrency cannot exceed ollama_parallel_slots")
         variants = data["selected_variants"]
         if (not isinstance(variants, list) or not variants
                 or any(not isinstance(v, str) or not v.strip() or v == "not_recorded" or v not in VARIANTS for v in variants)
@@ -303,6 +341,7 @@ class ExperimentConfig:
             "presenting_evidence_only": self.presenting_evidence_only,
             "exclude_none_recorded_plans": self.exclude_none_recorded_plans,
             "variant_settings": deepcopy(self.variant_settings),
+            "execution": deepcopy(self.execution),
             **{field: (repo_path(getattr(self, field), root) if field in PATH_SETTINGS
                        else getattr(self, field)) for field in PIPELINE_DEFAULTS},
         }

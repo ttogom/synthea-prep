@@ -1,6 +1,7 @@
 """Assessment/Plan experiments using the vendored GraphRAG model implementation."""
 
 from copy import deepcopy
+from ipaddress import ip_address
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ from scripts.med_copilot_config import configured_model_credentials, read_yaml_c
 from scripts.med_copilot_helpers import (
     model_response_metadata, parse_condition_plan, record_error, redact_secrets, repo_path,
 )
-from scripts.med_copilot_run_file import checkpoint
+from scripts.med_copilot_run_file import RunMetadataError, checkpoint
 
 
 class AssessmentPlanModels:
@@ -106,59 +107,92 @@ class AssessmentPlanModels:
         }
 
     def generate(self, messages, result):
-        """Fill preallocated model results independently, retaining partial responses.
-
-        Use the upstream configured completion callable instead of chat(), which
-        parses JSON before returning and omits the provider response/usage.
-        No provider fallback, output repair, or automatic JSON-mode downgrade.
-        """
-        for model_id, model in self._models.items():
-            output = result["assessment_plans"][model_id]
-            if output["status"] == "completed":
-                continue
-            received = output.get("_generation_reply_complete") is True
-            output.update(status="failed_incomplete", error=None, predictions=None,
-                          evaluation=None)
-            if not received:
-                output["assessment_plan_raw"] = None
-            try:
-                if not received:
-                    mode = self._settings[model_id]["output_mode"]
-                    options = {}
-                    if mode != "prompt":
-                        options["response_format"] = (deepcopy(CONDITION_PLAN_RESPONSE_FORMAT)
-                                                      if mode == "json_schema" else {"type": "json_object"})
-                    response = model.completion(
-                        messages=deepcopy(messages), stream=False, drop_params=False, **options,
-                    )
-                    output["model_responses"].append(model_response_metadata(response))
-                    choice = response.choices[0]
-                    output["assessment_plan_raw"] = choice.message.content
-                    if getattr(choice.message, "refusal", None):
-                        raise ValueError("Assessment/Plan generation was refused")
-                    finish = getattr(choice, "finish_reason", None)
-                    if finish not in (None, "stop"):
-                        raise ValueError("Assessment/Plan generation did not complete")
-                    # If local parsing is interrupted, the existing checkpoint
-                    # retains a usable reply without charging for another call.
-                    output["_generation_reply_complete"] = True
-                content = output["assessment_plan_raw"]
-                output.update(parse_condition_plan(content))
-                output["status"] = "completed"
-                output.pop("_generation_reply_complete", None)
-            except Exception as exc:
-                output["error"] = self.error_metadata(exc)
-                record_error(exc)
-            except BaseException as exc:
-                output["error"] = {"type": type(exc).__name__, "message": "Generation interrupted"}
-                raise
-            finally:
-                checkpoint()
-            # BaseException propagates to ExperimentRun.stop, preserving this slot
-            # as failed and later models as not_processed.
+        """Compatibility loop: fill every selected model slot in configured order."""
+        for model_id in self.model_ids:
+            self.generate_one(model_id, messages, result["assessment_plans"][model_id])
         result["status"] = ("completed" if all(
             output["status"] == "completed" for output in result["assessment_plans"].values()
         ) else "failed_incomplete")
+
+    def model_is_local(self, model_id):
+        """Whether this selected alias points to a loopback inference server."""
+        if model_id not in self._models:
+            raise ValueError(f"Model alias is not selected: {model_id}")
+        endpoint = self._settings[model_id]["config"].get("api_base")
+        if not endpoint:
+            return False
+        hostname = urlsplit(endpoint).hostname
+        if hostname == "localhost":
+            return True
+        try:
+            return ip_address(hostname).is_loopback
+        except ValueError:
+            return False
+
+    def generate_one(self, model_id, messages, output):
+        """Fill one independently owned model slot, retaining received replies.
+
+        Use the upstream configured completion callable instead of chat(), which
+        parses JSON before returning and omits the provider response/usage.
+        A checkpoint owner in the caller's error_scope must commit the raw reply
+        before local parsing begins. The owner also records the final state.
+        Different jobs may call this concurrently with separate output objects.
+        """
+        if model_id not in self._models:
+            raise ValueError(f"Model alias is not selected: {model_id}")
+        if output["status"] == "completed":
+            return output
+        received = output.get("_generation_reply_complete") is True
+        output.update(status="failed_incomplete", error=None, predictions=None,
+                      evaluation=None)
+        if not received:
+            output["assessment_plan_raw"] = None
+        try:
+            if not received:
+                mode = self._settings[model_id]["output_mode"]
+                options = {}
+                if mode != "prompt":
+                    options["response_format"] = (deepcopy(CONDITION_PLAN_RESPONSE_FORMAT)
+                                                  if mode == "json_schema" else {"type": "json_object"})
+                response = self._models[model_id].completion(
+                    messages=deepcopy(messages), stream=False, drop_params=False, **options,
+                )
+                output["model_responses"].append(model_response_metadata(response))
+                choice = response.choices[0]
+                output["assessment_plan_raw"] = choice.message.content
+                if getattr(choice.message, "refusal", None):
+                    raise ValueError("Assessment/Plan generation was refused")
+                finish = getattr(choice, "finish_reason", None)
+                if finish not in (None, "stop"):
+                    raise ValueError("Assessment/Plan generation did not complete")
+                output["_generation_reply_complete"] = True
+                # The durable raw reply is sufficient to recover from a process
+                # dying during parsing, without sending the request again.
+                self._checkpoint_received()
+            output.update(parse_condition_plan(output["assessment_plan_raw"]))
+            output["status"] = "completed"
+            output.pop("_generation_reply_complete", None)
+        except RunMetadataError:
+            raise
+        except Exception as exc:
+            output["error"] = self.error_metadata(exc)
+            record_error(exc)
+        except BaseException as exc:
+            output["error"] = {"type": type(exc).__name__, "message": "Generation interrupted"}
+            raise
+        finally:
+            checkpoint()
+        return output
+
+    @staticmethod
+    def _checkpoint_received():
+        """A persistence failure must stop work rather than become a model error."""
+        try:
+            checkpoint()
+        except RunMetadataError:
+            raise
+        except Exception as exc:
+            raise RunMetadataError("Could not save received generation reply") from exc
 
     def judge(self, model_id, messages):
         """Send one correctness-judge request to a loaded model and return the response.

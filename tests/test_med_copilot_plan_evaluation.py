@@ -1,6 +1,7 @@
 """Offline regression tests for the independently resumable Plan-only stage."""
 
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
@@ -13,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 import nltk
+import yaml
 
 # Direct execution starts in tests/; project and vendored imports need these roots.
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,9 @@ with patch.object(nltk, "download", return_value=True):
     from scripts.med_copilot_judges import CorrectnessJudges, plan_entry
     from scripts.med_copilot_run_lock import RunLockError, exclusive_run_lock
     from scripts.med_copilot_scoring import PatientScorer
+    from scripts.med_copilot_helpers import GUIDELINE_TABLES, guideline_resource_files, sha256_bundle
+    with patch("dotenv.load_dotenv", return_value=False):
+        from scripts import judge_treatment_plans as command
 
 
 class FakeModels:
@@ -201,6 +206,41 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(len(second.requests), 9)
         self.assertTrue(all(messages[0]["content"].startswith("Grade whether") for _, messages in second.requests))
 
+    def test_guideline_chat_rate_change_allows_plan_only_resume_and_reuses_valid_scalar_cache(self):
+        directory = self.root / "guidelines"
+        (directory / "output").mkdir(parents=True)
+        path = directory / "settings.yaml"
+        settings = {"models": {"default_chat_model": {
+            "requests_per_minute": "auto", "tokens_per_minute": "auto"}}}
+        path.write_text(yaml.safe_dump(settings))
+        for name in GUIDELINE_TABLES:
+            (directory / "output" / (name + ".parquet")).write_text("offline " + name)
+        original_hash = sha256_bundle(guideline_resource_files(directory, path, directory / "output"))
+        self.metadata["experiment"]["guidelines"] = "guidelines"
+        self.metadata["reference_data"] = {"guidelines": {"directory": "guidelines", "sha256": original_hash}}
+        self.write()
+        original_results = (self.run_dir / "results.jsonl").read_bytes()
+        first = FakeModels()
+        with patch.object(stage, "_write_results", side_effect=OSError("export interrupted")), self.assertRaises(OSError):
+            self.run_stage(first)
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original_results)
+        cache = (self.run_dir / "judge_responses.jsonl").read_bytes()
+        settings["models"]["default_chat_model"].update(requests_per_minute=12, tokens_per_minute=200000)
+        path.write_text(yaml.safe_dump(settings))
+        self.assertNotEqual(sha256_bundle(guideline_resource_files(directory, path, directory / "output")), original_hash)
+        second = FakeModels()
+        judges = self.run_stage(second)
+        metadata, records = self.saved()
+        self.assertEqual(second.requests, [])
+        self.assertEqual(judges.cache_hits, len(first.requests))
+        self.assertEqual((self.run_dir / "judge_responses.jsonl").read_bytes(), cache)
+        self.assertEqual(metadata["experiment"], self.metadata["experiment"])
+        self.assertEqual(metadata["reference_data"], self.metadata["reference_data"])
+        self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
+        for before, after in zip(self.entries(self.records), self.entries(records)):
+            self.assertEqual({key: value for key, value in after.items() if key != "plan_correctness"},
+                             {key: value for key, value in before.items() if key != "plan_correctness"})
+
     def test_changed_prediction_invalidates_only_affected_plan(self):
         self.run_stage()
         self.metadata, self.records = self.saved()
@@ -274,6 +314,71 @@ class PlanStageTests(unittest.TestCase):
         for value in (True, 0, -1, 1.5, "2", 65):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.run_stage(concurrency=value)
+
+    def test_runtime_context_and_concurrency_preserve_experiment_and_archive_previous_stages(self):
+        self.metadata["experiment"]["execution"] = {"ollama_judge_context_length": 8192}
+        old_history = [{"status": "completed", "concurrency": 2, "context_length": 8192, "calls": 7}]
+        previous = {"status": "interrupted", "concurrency": 4, "calls": 5, "cache_hits": 3}
+        self.metadata.update(plan_evaluation_history=deepcopy(old_history), plan_evaluation=deepcopy(previous))
+        self.write()
+        self.run_stage(concurrency=8, context_length=4096)
+        metadata, _ = self.saved()
+        self.assertEqual(metadata["experiment"], self.metadata["experiment"])
+        self.assertEqual(metadata["plan_evaluation_history"],
+                         [*old_history, {**previous, "context_length": 8192}])
+        self.assertEqual(metadata["plan_evaluation"]["concurrency"], 8)
+        self.assertEqual(metadata["plan_evaluation"]["context_length"], 4096)
+        completed = deepcopy(metadata["plan_evaluation"])
+        contents = (self.run_dir / "results.jsonl").read_bytes()
+        second = FakeModels()
+        self.run_stage(second, concurrency=8, context_length=4096)
+        self.assertEqual(second.requests, [])
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), contents)
+        self.assertEqual(self.saved()[0]["plan_evaluation_history"][-1], completed)
+        self.assertEqual(len(self.saved()[0]["plan_evaluation_history"]), 3)
+
+    def test_invalid_runtime_context_is_rejected_before_artifact_changes(self):
+        original = (self.run_dir / "run.json").read_bytes()
+        for value in (True, 0, -1, 1, 511, 262145, 1.5, "4096"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "context_length"):
+                self.run_stage(context_length=value)
+            self.assertEqual((self.run_dir / "run.json").read_bytes(), original)
+            self.assertFalse((self.run_dir / "judge_responses.jsonl").exists())
+        for value in (512, 262144):
+            with self.subTest(context_boundary=value):
+                self.run_stage(context_length=value)
+                self.assertEqual(self.saved()[0]["plan_evaluation"]["context_length"], value)
+
+    def test_cli_runtime_overrides_reach_server_and_stage_and_restart_without_flags_reuses_them(self):
+        self.metadata["experiment"]["execution"] = {"ollama_judge_context_length": 8192}
+        self.write()
+        models = FakeModels()
+        with patch.object(command, "_prepare", return_value=(self.scorer, models, models)), \
+                patch.object(command, "ollama_for_saved_run", return_value=nullcontext()) as server, \
+                patch.object(command, "generate_report", return_value=self.run_dir / "report.html"):
+            self.assertEqual(command.main([str(self.run_dir), "--concurrency", "8", "--context-length", "4096"],
+                                          root=self.root), 0)
+            server.assert_called_once_with(self.run_dir.resolve(), concurrency=8, context_length=4096)
+            before = len(models.requests)
+            server.reset_mock()
+            self.assertEqual(command.main([str(self.run_dir)], root=self.root), 0)
+            server.assert_called_once_with(self.run_dir.resolve(), concurrency=8, context_length=4096)
+            self.assertEqual(len(models.requests), before)
+        metadata, _ = self.saved()
+        self.assertEqual(metadata["experiment"], self.metadata["experiment"])
+        self.assertEqual(metadata["plan_evaluation"]["context_length"], 4096)
+        self.assertEqual(metadata["plan_evaluation"]["concurrency"], 8)
+
+    def test_cli_invalid_runtime_override_does_not_start_server_or_rewrite_metadata(self):
+        original = (self.run_dir / "run.json").read_bytes()
+        for args in (("--concurrency", "0"), ("--context-length", "0"),
+                     ("--context-length", "511"), ("--context-length", "262145")):
+            with self.subTest(args=args), patch.object(command, "ollama_for_saved_run") as server, \
+                    patch.object(command, "_prepare") as prepare:
+                self.assertEqual(command.main([str(self.run_dir), *args], root=self.root), 1)
+                server.assert_not_called()
+                prepare.assert_not_called()
+                self.assertEqual((self.run_dir / "run.json").read_bytes(), original)
 
     def test_changed_input_labels_and_scorer_context_are_refused(self):
         self.scorer._patients[self.patients[0]["id"]]["subjective"] = "Changed S/O"

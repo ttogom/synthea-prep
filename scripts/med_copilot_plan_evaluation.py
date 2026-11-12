@@ -16,6 +16,7 @@ from pathlib import Path
 
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
+from scripts.med_copilot_ollama import plan_judge_settings
 from scripts.med_copilot_judges import (
     DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
     parse_action_judgement, parse_extras_judgement, plan_action_messages,
@@ -297,7 +298,7 @@ def _counts(records):
     return counts
 
 
-def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, _lock_held=False):
+def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None, _lock_held=False):
     """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
 
     models contains only the recorded judge. _lock_held is reserved for the CLI,
@@ -305,6 +306,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, _loc
     """
     if type(concurrency) is not int or not 1 <= concurrency <= 64:
         raise ValueError("plan_judge_concurrency must be an integer from 1 to 64")
+    if context_length is not None and (type(context_length) is not int or not 512 <= context_length <= 262144):
+        raise ValueError("Plan judge context_length must be an integer from 512 to 262144")
     run_dir = Path(run_dir).resolve()
     with nullcontext() if _lock_held else exclusive_run_lock(run_dir):
         metadata = _read_object((run_dir / RUN_FILE).read_text(encoding="utf-8"))
@@ -314,6 +317,16 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, _loc
         records = _records(run_dir, metadata, scorer)
         if judge not in models.model_ids:
             raise ValueError(f"Recorded Plan judge {judge} is unavailable; no Plan scores were changed")
+        previous_settings = plan_judge_settings(metadata)
+        settings = plan_judge_settings(metadata, concurrency=concurrency, context_length=context_length)
+        history = metadata.get("plan_evaluation_history", [])
+        if not isinstance(history, list):
+            raise ValueError("plan_evaluation_history must be a list")
+        if metadata.get("plan_evaluation"):
+            previous = {**metadata["plan_evaluation"]}
+            if previous.get("context_length") is None:
+                previous["context_length"] = previous_settings["context_length"]
+            history = [*history, previous]
         run_file = RunFile(run_dir, metadata)
         run_file.redact = models.redact
         judges = CorrectnessJudges(
@@ -324,12 +337,12 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, _loc
         )
         started = pacific_now().isoformat()
         stage = {"status": "running", "started_at": started, "finished_at": None,
-                 "judge_model": judge, "concurrency": concurrency,
+                 "judge_model": judge, **settings,
                  "responses_file": JUDGE_FILE, "calls": 0, "cache_hits": 0,
                  "implementation_file": str(Path(__file__).resolve().relative_to(Path(root).resolve()))
                  if Path(__file__).resolve().is_relative_to(Path(root).resolve()) else str(Path(__file__).resolve()),
                  "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
-        run_file.update(plan_evaluation=stage)
+        run_file.update(plan_evaluation=stage, plan_evaluation_history=history)
         interrupted = None
         changes = {"any": False}
         try:

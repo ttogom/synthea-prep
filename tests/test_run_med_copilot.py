@@ -54,6 +54,7 @@ STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
 JUDGES_MODULE = ROOT / "scripts/med_copilot_judges.py"
 RUN_LOCK_MODULE = ROOT / "scripts/med_copilot_run_lock.py"
+OLLAMA_MODULE = ROOT / "scripts/med_copilot_ollama.py"
 PLAN_EVALUATION_MODULE = ROOT / "scripts/med_copilot_plan_evaluation.py"
 PLAN_EVALUATION_COMMAND = ROOT / "scripts/judge_treatment_plans.py"
 # Plan judge prompts (per reference action, then unsupported extras); diagnoses use BioLORD.
@@ -401,6 +402,7 @@ class PipelineFixture:
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
         (self.script.parent / RUN_LOCK_MODULE.name).write_bytes(RUN_LOCK_MODULE.read_bytes())
+        (self.script.parent / OLLAMA_MODULE.name).write_bytes(OLLAMA_MODULE.read_bytes())
         (self.script.parent / PLAN_EVALUATION_MODULE.name).write_bytes(PLAN_EVALUATION_MODULE.read_bytes())
         (self.script.parent / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
         (self.script.parent / JUDGES_MODULE.name).write_bytes(JUDGES_MODULE.read_bytes())
@@ -679,7 +681,8 @@ class PipelineFixture:
 
         class ModelConfig:
             model_fields = {"type", "model", "model_provider", "temperature", "max_retries",
-                            "retry_strategy", "api_base", "n", "api_key"}
+                            "retry_strategy", "api_base", "n", "api_key", "max_tokens", "max_completion_tokens",
+                            "request_timeout"}
 
             def __init__(self, **settings):
                 self.settings = settings
@@ -818,6 +821,7 @@ class PipelineFixture:
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
                              "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
                              "scripts.med_copilot_run_lock", "scripts.med_copilot_plan_evaluation",
+                             "scripts.med_copilot_ollama",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
@@ -1242,7 +1246,9 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             "selected_models": ["gpt_4o_mini"], "temperature": 1, "max_retries": 3, "max_patients": None,
             "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_so.jsonl",
             "patient_labels": "experiments/input/test_labels.jsonl", "presenting_evidence_only": True,
-            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
+            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"],
+            "execution": runner_config_metadata(self.fixture)["execution"], **PIPELINE_DEFAULTS,
+            "plan_judge": "ollama_qwen2_5_14b_speedup", "plan_judge_concurrency": 8,
         })
         self.assertEqual(old_path.read_text(), "OBSOLETE_CONFIG_DO_NOT_LOAD")
         self.assert_outputs()
@@ -4916,7 +4922,8 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
             "selected_models": ["gpt_4o_mini", "llama"], "temperature": 0.25, "max_retries": 6, "max_patients": None,
             "selected_variants": ["patient_retrieval_guidelines"], "patient_input": "experiments/input/test_so.jsonl",
             "patient_labels": "experiments/input/test_labels.jsonl", "presenting_evidence_only": True,
-            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"], **PIPELINE_DEFAULTS,
+            "exclude_none_recorded_plans": False, "variant_settings": runner_config_metadata(self.fixture)["variant_settings"],
+            "execution": runner_config_metadata(self.fixture)["execution"], **PIPELINE_DEFAULTS,
         })
         self.assertEqual(run["assessment_plan_models"]["config_sha256"],
                          hashlib.sha256(self.fixture.model_config.read_bytes()).hexdigest())
@@ -4938,8 +4945,8 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         fixture.write_patients([{"id": name, "subjective": name, "objective": "O"}
                                 for name in ("FIRST", "OUTSIDE_LIMIT")])
         fixture.write_labels([self.label(name) for name in ("FIRST", "OUTSIDE_LIMIT")])
-        expected = {"gpt_4o_mini": "gpt-4o-mini", "ollama_healthcare": "Jayasimma/healthcare:latest",
-                    "ollama_llama3": "llama3:latest", "ollama_gemma2_2b": "gemma2:2b"}
+        expected = {"gpt_4o_mini": "gpt-4o-mini", "ollama_gemma3_4b": "gemma3:4b",
+                    "ollama_llama3_2_3b": "llama3.2:3b", "ollama_ministral_3_3b": "ministral-3:3b"}
         # Only the shared stages/GPT have a key; no Groq or Ollama key is supplied.
         self.assertEqual(set(fixture.environment), {"OPENAI_API_KEY", "GRAPHRAG_API_KEY"})
         status, run, [record] = self.execute()
@@ -4968,7 +4975,8 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
             self.assertEqual(record["assessment_plans"][alias]["status"], "completed")
             if alias.startswith("ollama_"):
                 self.assertIsNone(settings["api_key_env"])
-                self.assertEqual(settings["config"]["api_base"], "http://localhost:11434/v1")
+                self.assertEqual(settings["config"]["api_base"], "http://127.0.0.1:11435/v1")
+                self.assertEqual(settings["config"]["max_tokens"], 768)
                 self.assertIn(f"{alias} (openai/{tag})", fixture.stdout.getvalue())
         self.assertEqual(fixture.stdout.getvalue().count("API key not required (unauthenticated endpoint)"), 3)
         self.assertNotIn("test-key", json.dumps(run) + fixture.stdout.getvalue())
@@ -5702,7 +5710,7 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(correctness["rank_weighting"]["weights"], {"1": 1.0, "2": 0.5, "3": 1 / 3})
         judge_alias = correctness["plan"]["judge_model"]
         # Plan selection is recorded without loading it in the generation process.
-        self.assertEqual(judge_alias, "ollama_qwen2_5_14b")
+        self.assertEqual(judge_alias, "ollama_qwen2_5_14b_speedup")
         self.assertNotIn(judge_alias, self.experiment["selected_models"])
         self.assertIn(judge_alias, self.config["models"])
         self.assertEqual(correctness["selected_models"], [])
@@ -5804,7 +5812,8 @@ class PipelineConfigurationIntegrationTests(FailedRunAssertions, unittest.TestCa
         self.assertIs(graph["streaming"], False)
         for field, value in self.experiment.items():
             self.assertEqual(run["experiment"][field], value, field)
-        self.assertEqual(len(run["experiment"]), len(self.experiment) + 3 + int("variant_settings" not in self.experiment))
+        self.assertEqual(len(run["experiment"]), len(self.experiment) + 3
+                         + int("variant_settings" not in self.experiment) + int("execution" not in self.experiment))
         self.assertEqual(run["reference_data"]["patient_retrieval"]["corpus_file"], "references café/patients.json")
         self.assertEqual(run["reference_data"]["patient_retrieval"]["artifacts_directory"], "cache café")
         self.assertEqual(run["reference_data"]["guidelines"]["directory"], "guidelines café")

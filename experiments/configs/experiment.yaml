@@ -37,13 +37,28 @@ guideline_verbose: false  # Enable GraphRAG diagnostic logging.
 # Final conditions and plans — model definitions/credential variable names are in condition_plan_models.yaml.
 selected_models:  # Model aliases, in execution order; tokens stay in .env/the environment.
   - gpt_4o_mini
-  - ollama_healthcare
-  - ollama_llama3
-  - ollama_gemma2_2b
-plan_judge: ollama_qwen2_5_14b  # Registry alias for Plan correctness; reused if also a generator.
-plan_judge_concurrency: 2  # Maximum concurrent Plan requests in judge_treatment_plans.py; the runner defers Plans.
+  - ollama_gemma3_4b
+  - ollama_llama3_2_3b
+  - ollama_ministral_3_3b
+plan_judge: ollama_qwen2_5_14b_speedup  # Same Qwen weights on the experiment-owned server.
+plan_judge_concurrency: 8  # Initial separate Plan-stage concurrency; recorded stage runtime can be overridden.
 temperature: 1  # Shared temperature for final model calls.
 max_retries: 3  # Shared upstream retry setting for final model calls.
+
+# Scheduling for scripts/run_experiments.py. The original runner remains serial.
+execution:
+  preparation_workers: 2
+  local_concurrency: 4
+  hosted_concurrency: 4
+  scoring_batch_patients: 8
+  overlap_scoring: true
+  cpu_threads: 2
+  encoder_device: cpu
+  manage_ollama: true
+  ollama_host: 127.0.0.1:11435  # Isolated from the GUI/server on 11434.
+  ollama_parallel_slots: 4
+  ollama_context_length: 16384
+  ollama_judge_context_length: 4096
 
 # Results.
 experiment_output: experiments/output  # Parent directory for timestamped runs and the HTML report.

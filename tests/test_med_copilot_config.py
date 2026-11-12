@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.med_copilot_config import (
-    PATH_SETTINGS, PIPELINE_DEFAULTS, ExperimentConfig, configured_model_credentials, confirm_experiment, read_yaml_config,
+    EXECUTION_DEFAULTS, PATH_SETTINGS, PIPELINE_DEFAULTS, ExperimentConfig, configured_model_credentials, confirm_experiment, read_yaml_config,
 )
 from scripts.med_copilot_variants import COMPONENTS, VARIANTS, ComponentSpec, Parameter, VariantSpec
 from med_copilot.prompts.diagnosis_plan import VARIANT_TEMPLATES
@@ -52,7 +52,7 @@ class ExperimentConfigTests(unittest.TestCase):
     def test_shipped_experiment_is_the_only_source_of_selection_temperature_and_retries(self):
         path = ROOT / "experiments/configs/experiment.yaml"
         config = ExperimentConfig(path)
-        self.assertEqual(config.selected_models, ["gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b"])
+        self.assertEqual(config.selected_models, ["gpt_4o_mini", "ollama_gemma3_4b", "ollama_llama3_2_3b", "ollama_ministral_3_3b"])
         self.assertEqual(config.temperature, 1)
         self.assertEqual(config.max_retries, 3)
         self.assertEqual(config.max_patients, yaml.safe_load(path.read_text())["max_patients"])
@@ -88,6 +88,7 @@ class ExperimentConfigTests(unittest.TestCase):
             "config_sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
             "model_config": "configs/condition_plan_models.yaml", "selected_models": ["llama", "mini"],
             "temperature": 0.35, "max_retries": 5, "max_patients": None,
+            "execution": deepcopy(EXECUTION_DEFAULTS),
             "variant_settings": {"patient_retrieval_guidelines": deepcopy(DEFAULT_COMPONENT_SETTINGS)},
             **{key: str(ROOT / value) if key in PATH_SETTINGS else value for key, value in PIPELINE_DEFAULTS.items()},
             **{key: metadata[key] for key in ("selected_variants", "patient_input", "patient_labels",
@@ -103,14 +104,14 @@ class ExperimentConfigTests(unittest.TestCase):
     def test_shipped_ollama_entries_match_downloaded_tags_and_need_no_provider_keys(self):
         config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
         registry, _ = read_yaml_config(config.model_config)
-        expected = {"ollama_healthcare": "Jayasimma/healthcare:latest",
-                    "ollama_llama3": "llama3:latest", "ollama_gemma2_2b": "gemma2:2b"}
+        expected = {"ollama_gemma3_4b": "gemma3:4b",
+                    "ollama_llama3_2_3b": "llama3.2:3b", "ollama_ministral_3_3b": "ministral-3:3b"}
         self.assertEqual(config.selected_models, ["gpt_4o_mini", *expected])
         for alias, tag in expected.items():
             with self.subTest(model=alias):
                 self.assertEqual(registry["models"][alias], {
                     "type": "chat", "model_provider": "openai", "model": tag,
-                    "api_base": "http://localhost:11434/v1", "output_mode": "json_schema",
+                    "api_base": "http://127.0.0.1:11435/v1", "output_mode": "json_schema", "max_tokens": 768,
                 })
         with patch.dict(os.environ, {}, clear=True):
             credentials = configured_model_credentials(registry["models"], list(expected))
@@ -123,6 +124,66 @@ class ExperimentConfigTests(unittest.TestCase):
             config = ExperimentConfig(self.path)
             self.assertEqual(config.model_config, self.path.with_name("condition_plan_models.yaml"))
             self.assertEqual(Path.cwd(), caller)
+
+    def test_execution_defaults_and_partial_overrides_are_all_saved_independently(self):
+        self.data["execution"] = {"local_concurrency": 2, "cpu_threads": 3, "overlap_scoring": False}
+        self.write()
+        config = ExperimentConfig(self.path)
+        expected = {**EXECUTION_DEFAULTS, **self.data["execution"]}
+        self.assertEqual(config.execution, expected)
+        metadata = config.metadata(self.root)
+        self.assertEqual(metadata["execution"], expected)
+        metadata["execution"]["cpu_threads"] = 64
+        self.assertEqual(config.metadata(self.root)["execution"], expected)
+        self.assertEqual(config.execution, expected)
+
+    def test_execution_bounded_integer_settings_reject_booleans_and_invalid_ranges(self):
+        fields = ("preparation_workers", "local_concurrency", "hosted_concurrency",
+                  "scoring_batch_patients", "cpu_threads", "ollama_parallel_slots")
+        for field in fields:
+            for value in (0, -1, 65, True, None, "2", 2.0):
+                with self.subTest(field=field, value=value):
+                    self.data["execution"] = {field: value}
+                    self.write()
+                    with self.assertRaisesRegex(ValueError, field):
+                        ExperimentConfig(self.path)
+        for value in (1, 64):
+            self.data["execution"] = {field: value for field in fields}
+            self.write()
+            self.assertEqual(ExperimentConfig(self.path).execution["local_concurrency"], value)
+
+    def test_execution_rejects_unknown_settings_gpu_ownership_and_invalid_flags(self):
+        cases = [(None, "execution"), ([], "execution"), ({"unknown": 1}, "execution"),
+                 ({"encoder_device": "mps"}, "encoder_device"),
+                 ({"local_concurrency": 5, "ollama_parallel_slots": 4}, "local_concurrency")]
+        cases.extend(({field: value}, field) for field in ("manage_ollama", "overlap_scoring")
+                     for value in (0, 1, "true", None))
+        for execution, field in cases:
+            with self.subTest(execution=execution):
+                self.data["execution"] = execution
+                self.write()
+                with self.assertRaisesRegex(ValueError, field):
+                    ExperimentConfig(self.path)
+
+    def test_execution_context_and_host_validation_preserve_safe_boundaries(self):
+        for field in ("ollama_context_length", "ollama_judge_context_length"):
+            for value in (511, 262145, True, None, "8192", 8192.0):
+                with self.subTest(context=value, field=field):
+                    self.data["execution"] = {field: value}
+                    self.write()
+                    with self.assertRaisesRegex(ValueError, field):
+                        ExperimentConfig(self.path)
+        for host in ("0.0.0.0:11435", "127.0.0.1:0", "127.0.0.1:1023", "127.0.0.1:11434",
+                     "127.0.0.1:65536", "remote:11435", None):
+            with self.subTest(host=host):
+                self.data["execution"] = {"ollama_host": host}
+                self.write()
+                with self.assertRaisesRegex(ValueError, "ollama_host"):
+                    ExperimentConfig(self.path)
+        for context in (512, 262144):
+            self.data["execution"] = {"ollama_context_length": context, "ollama_host": "127.0.0.1:65535"}
+            self.write()
+            self.assertEqual(ExperimentConfig(self.path).metadata(self.root)["execution"]["ollama_context_length"], context)
 
     def test_constructor_rejects_selection_and_registry_override_arguments(self):
         for override in ({"selected_models": ["other"]}, {"model_config": "other.yaml"}):
@@ -779,7 +840,7 @@ class PipelineSettingsTests(unittest.TestCase):
         for field, value in expected.items():
             self.assertEqual(config.metadata(ROOT)[field], value)
             self.assertEqual(getattr(config, field), ROOT / value if field in PATH_SETTINGS else value)
-        self.assertEqual(len(config.metadata(ROOT)), 29)  # Effective settings and three provenance fields.
+        self.assertEqual(len(config.metadata(ROOT)), 30)  # Effective settings and three provenance fields.
 
     def test_paths_resolve_from_repo_root_and_absolute_paths_are_preserved_from_other_cwd(self):
         for field in PATH_SETTINGS:
