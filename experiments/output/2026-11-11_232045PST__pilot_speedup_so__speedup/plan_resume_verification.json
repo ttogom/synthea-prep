@@ -1,0 +1,15 @@
+{
+  "generation_evidence_prompts_text_and_diagnosis_preserved": true,
+  "previous_scored_plans_preserved": 922,
+  "previous_cache_prefix_preserved": true,
+  "previous_valid_requests_repeated": 0,
+  "original_experiment_metadata_preserved": true,
+  "history_stages": 1,
+  "final_plan_counts": {
+    "scored": 3033,
+    "unavailable": 13,
+    "pending": 0,
+    "error": 26,
+    "interrupted": 0
+  }
+}

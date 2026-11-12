@@ -1,0 +1,117 @@
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:56:27Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Causes and Guidelines for Sore Throat Symptoms
+- **Common Causes**: The combination of sore throat, runny/stuffy nose, difficulty swallowing, fatigue, body aches, swollen lymph nodes, swollen tonsils, cough, and fever is often associated with:
+  - Viral infections (e.g., influenza, common cold)
+  - Bacterial infections (e.g., streptococcal pharyngitis)
+- **Distinguishing Criteria**:
+  - **Centor Criteria**: Evaluates the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Assesses severity and need for antibiotics based on:
+    - Fever in the past 24 hours
+    - Purulence (tonsillar exudate)
+    - Attend rapidly (within 3 days)
+    - Severely inflamed tonsils
+    - Age (younger than 15 years)
+- **Investigations**: Rapid antigen detection tests (RADTs) or throat cultures may be recommended to confirm streptococcal infection.
+
+## Diagnostic Tests for Fever and Swollen Lymph Nodes
+- **Recommended Tests**:
+  - **Throat Swab**: To test for streptococcal bacteria.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection (e.g., elevated white blood cell count).
+  - **Monospot Test**: To rule out infectious mononucleosis, especially if fatigue and lymphadenopathy are prominent.
+- **Imaging**: Ultrasound may be considered if there is suspicion of an abscess.
+
+## Medications for Sore Throat and Fever
+- **First-Line Medications**:
+  - **Analgesics**: Paracetamol (acetaminophen) or ibuprofen for pain relief.
+    - **Dosage**: 
+      - Paracetamol: 500-1000 mg every 4-6 hours (max 4g/day).
+      - Ibuprofen: 200-400 mg every 6-8 hours (max 1200 mg/day over-the-counter).
+- **Alternative Medications**:
+  - **Throat Lozenges**: For symptomatic relief.
+  - **Topical Anesthetics**: Benzocaine lozenges may provide localized pain relief.
+  - **Antibiotics**: If bacterial infection is confirmed (e.g., penicillin or amoxicillin).
+
+## Patient Education for Recovery and Symptom Management
+- **Hydration**: Encourage increased fluid intake to prevent dehydration.
+- **Rest**: Advise adequate rest to support the immune system.
+- **Nutrition**: Suggest small, nutritious meals to manage decreased appetite.
+- **Symptomatic Relief**: Recommend warm saltwater gargles for throat discomfort and humidifiers to ease breathing.
+- **Monitoring Symptoms**: Educate on recognizing worsening symptoms that may require medical attention, such as difficulty breathing or persistent high fever.
+prompt is used!
+{"label": "D_repeat_w0", "index": 7, "seconds": 18.681887332997576, "ok": true}
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:56:45Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).
+- **Guidelines**: The NICE guidelines on urinary tract infections (UTIs) provide a framework for diagnosis and management.
+- **Diagnostic Criteria**:
+  - **Symptoms**: Presence of dysuria, frequency, and suprapubic pain increases the likelihood of a UTI.
+  - **Urine Testing**: Urine culture and microscopy are essential to confirm the diagnosis and identify the causative organism.
+  - **Referral**: Infants and young children with suspected UTIs should be referred for specialist care, especially if they present with fever or other concerning symptoms.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Urine Characteristics**: The presence of cloudy, brown urine with an ammoniacal odor, low pH (5.4), high specific gravity (1), and positive tests for protein, glucose, ketones, and bilirubin suggests possible renal impairment or metabolic issues.
+- **Guidelines**: The NICE guidelines recommend specific diagnostic tests for evaluating kidney function and metabolic conditions.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify any infectious agents.
+  - **Blood Tests**: Including renal function tests (creatinine, urea) and metabolic panels to assess for underlying conditions such as diabetes or liver dysfunction.
+  - **Imaging**: Consider ultrasound if structural abnormalities are suspected.
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **Pain Management**: For patients with chronic kidney disease (CKD) stage 4 experiencing pain, the NICE guidelines recommend a careful approach to medication.
+- **First-Line Options**:
+  - **Acetaminophen**: Generally considered safe for pain relief in CKD.
+- **Alternative Options**:
+  - **Nonsteroidal Anti-Inflammatory Drugs (NSAIDs)**: Use with caution due to potential renal effects.
+  - **Opioids**: May be considered for severe pain, but require careful monitoring and dosage adjustments.
+- **Consultation**: Referral to a pain management specialist may be beneficial for complex cases.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Managing Increased Urination**: The NICE guidelines emphasize the importance of patient education in managing symptoms associated with CKD.
+- **Recommended Advice**:
+  - **Fluid Management**: Educate patients on appropriate fluid intake to manage urinary symptoms without causing overload.
+  - **Dietary Modifications**: Low-protein diets may help reduce kidney workload and manage symptoms.
+  - **Monitoring Symptoms**: Encourage patients to keep track of their urinary patterns and report any significant changes.
+  - **Regular Follow-Up**: Stress the importance of regular check-ups to monitor kidney function and adjust management plans as necessary.
+{"label": "D_repeat_w0", "index": 0, "seconds": 9.196939708999707, "ok": true}

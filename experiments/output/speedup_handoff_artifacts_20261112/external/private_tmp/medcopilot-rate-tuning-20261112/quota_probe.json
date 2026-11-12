@@ -1,0 +1,282 @@
+{
+  "label": "quota_probe",
+  "rpm": 6,
+  "tpm": 100000,
+  "prefilled": false,
+  "wall_seconds": 9.087722708005458,
+  "rows": [
+    {
+      "patient_id": "cystitis_c60576a7-1b1f-ea39-6557-f28df9d9f9cc",
+      "index": 0,
+      "seconds": 9.085252874996513,
+      "answer": "### Urgent Desire to Urinate: Guidelines and Investigations\n- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).\n- **Guidelines**: The NICE guidelines on urinary tract infections (NG224) provide a framework for assessing these symptoms.\n- **Investigations**:\n  - **Urine Testing**: Essential for confirming UTI; includes microscopy and culture.\n  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.\n  - **Referral**: For infants under 3 months with suspected UTI, refer to pediatric specialist care.\n\n### Cloudy, Brown Urine: Diagnostic Recommendations\n- **Guidelines**: The NICE guidelines on urinary tract infections and chronic kidney disease provide recommendations for diagnostic tests.\n- **Recommended Tests**:\n  - **Urine Culture**: To identify causative organisms.\n  - **Microscopy**: To assess for crystals, cells, or bacteria.\n  - **Further Investigations**: Consider metabolic assessments if indicated by urine findings (e.g., proteinuria, glucosuria, ketonuria).\n  - **Imaging**: If obstruction or anatomical abnormalities are suspected.\n\n### Chronic Kidney Disease Stage 4: Pain Management Guidelines\n- **First-Line Options**: The NICE guidelines recommend:\n  - **Paracetamol**: As a first-line analgesic for managing pain.\n- **Alternative Options**:\n  - **Non-Steroidal Anti-Inflammatory Drugs (NSAIDs)**: Use with caution due to potential renal effects.\n  - **Opioids**: May be considered for severe pain, but require careful monitoring.\n- **Considerations**: Assess renal function and adjust dosages accordingly.\n\n### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice\n- **Guidelines**: NICE guidelines on chronic kidney disease management emphasize patient education.\n- **Recommended Advice**:\n  - **Fluid Management**: Educate on appropriate fluid intake to manage urination symptoms.\n  - **Dietary Modifications**: Low-protein diet may help reduce kidney workload.\n  - **Monitoring Symptoms**: Encourage patients to track changes in urination and report any significant changes.\n  - **Regular Follow-Up**: Importance of regular check-ups to monitor kidney function and adjust management plans as needed.",
+      "query_sha256": "e94455de4cd8182306edf36c972c4a7696ab0f3fa5ec634373d9595e63331c56",
+      "events": [
+        {
+          "type": "http",
+          "path": "/v1/embeddings",
+          "status": 200,
+          "headers_seconds": 0.6652225000070757,
+          "rate_headers": {
+            "x-ratelimit-limit-requests": "5000",
+            "x-ratelimit-limit-tokens": "1000000",
+            "x-ratelimit-remaining-requests": "4999",
+            "x-ratelimit-remaining-tokens": "999735",
+            "x-ratelimit-reset-requests": "12ms",
+            "x-ratelimit-reset-tokens": "15ms"
+          },
+          "request_sha256": "d8b68c89f90bdc36c03fde1c535c30a58d16c0f8a8aaa54067b77131fde5a2aa",
+          "model": "text-embedding-3-small",
+          "max_tokens": null,
+          "max_completion_tokens": null,
+          "input_tokens_text_estimate": 216,
+          "finish_reasons": [],
+          "usage": null,
+          "seconds": 0.6657597910016193
+        },
+        {
+          "type": "rpm_wait",
+          "seconds": 1.1416996130719781e-05,
+          "input_tokens": 10720,
+          "post_tokens": 0
+        },
+        {
+          "type": "tpm_wait",
+          "seconds": 3.0000010156072676e-06,
+          "input_tokens": 10720,
+          "post_tokens": 0
+        },
+        {
+          "type": "http",
+          "path": "/v1/chat/completions",
+          "status": 200,
+          "headers_seconds": 1.419194083995535,
+          "rate_headers": {
+            "x-ratelimit-limit-requests": "5000",
+            "x-ratelimit-limit-tokens": "2000000",
+            "x-ratelimit-remaining-requests": "4999",
+            "x-ratelimit-remaining-tokens": "1988842",
+            "x-ratelimit-reset-requests": "12ms",
+            "x-ratelimit-reset-tokens": "334ms"
+          },
+          "request_sha256": "44d939551473e1da0149dd226fb37d3424ed8d4f9a3908d0cc9c607c9346eeff",
+          "model": "gpt-4o-mini",
+          "max_tokens": null,
+          "max_completion_tokens": null,
+          "input_tokens_text_estimate": 10731,
+          "finish_reasons": [
+            "stop"
+          ],
+          "usage": null,
+          "seconds": 7.105049499994493
+        }
+      ],
+      "context": {
+        "reports": [
+          {
+            "id": "21",
+            "title": "NICE Guidelines and Public Health Initiatives",
+            "content": "# NICE Guidelines and Public Health Initiatives\n\nThe community is centered around the NICE guidelines, which provide a framework for public health initiatives, including antimicrobial stewardship, management of sepsis, and various health conditions. Key entities such as local authority public health teams, antibiotics, and sepsis are interconnected through their roles in healthcare delivery and public health management.\n\n## NICE Guidelines as a cornerstone of public health\n\nThe NICE guidelines serve as a foundational framework for public health initiatives, particularly in the context of antimicrobial stewardship and the management of various health conditions. These guidelines are designed to improve patient outcomes and standardize care practices across the UK. They address a wide range of health issues, including mental health, chronic diseases, and infectious diseases, ensuring that healthcare providers have access to evidence-based recommendations. The implementation of these guidelines by local authority public health teams is crucial for enhancing the quality of care and addressing public health challenges effectively [Data: Entities (17, 14469); Relationships (28105)].\n\n## The critical role of antibiotics in managing sepsis\n\nAntibiotics are essential in the treatment of sepsis, a life-threatening condition that arises from the body's extreme response to infection. The timely administration of antibiotics is crucial for halting the progression of sepsis and preventing organ failure. The NICE guidelines emphasize the importance of using antibiotics appropriately to manage sepsis effectively, particularly in high-risk patients. This relationship highlights the need for healthcare providers to adhere to guidelines to improve patient outcomes and reduce mortality associated with sepsis [Data: Entities (2, 4); Relationships (33)].\n\n## Antimicrobial resistance as a public health challenge\n\nAntimicrobial resistance (AMR) poses a significant public health challenge, complicating the treatment of infections and increasing healthcare costs. The NICE guidelines address AMR by promoting responsible prescribing practices and emphasizing the importance of antimicrobial stewardship. By encouraging healthcare providers to reserve antibiotics for cases where they are truly necessary, the guidelines aim to mitigate the risks associated with AMR and ensure the continued effectiveness of these critical medications [Data: Entities (88, 2); Relationships (116)].\n\n## The relationship between urinary tract infections and sepsis\n\nUrinary tract infections (UTIs) can escalate into sepsis if not adequately treated, particularly in vulnerable populations such as infants and young children. The NICE guidelines provide recommendations for the management of UTIs, emphasizing the importance of early detection and intervention to prevent complications. This relationship underscores the need for healthcare providers to be vigilant in monitoring and treating UTIs to avoid the progression to sepsis, thereby improving patient outcomes [Data: Entities (1137, 4); Relationships (1553)].\n\n## NICE guidelines on fetal monitoring during labor\n\nThe NICE guidelines outline procedures and recommendations for fetal monitoring during labor, ensuring the safety and well-being of both the mother and the fetus. These guidelines emphasize the importance of timely intervention in cases of complications, such as intrapartum hemorrhage, which can pose significant risks during labor. By adhering to these guidelines, healthcare providers can enhance maternal and fetal outcomes, highlighting the critical role of evidence-based practices in obstetric care [Data: Entities (12415, 18134); Relationships (23290, 37556)].\n\n## Public health initiatives and local authority involvement\n\nLocal authority public health teams play a vital role in implementing NICE guidelines and public health initiatives. Their responsibilities include promoting health education, managing infectious diseases, and ensuring that healthcare services meet the needs of the population. By actively engaging in public health strategies, these teams contribute to improving health outcomes and addressing health disparities within communities [Data: Entities (14469); Relationships (28105)].\n\n## The importance of patient involvement in healthcare decisions\n\nThe NICE guidelines emphasize the significance of patient involvement in healthcare decisions, particularly regarding treatment options and preferences. By encouraging shared decision-making, healthcare providers can enhance patient engagement and satisfaction, ultimately leading to better health outcomes. This approach aligns with the broader goal of improving healthcare delivery and ensuring that patients receive care that is tailored to their individual needs [Data: Entities (6341); Relationships (10648)].\n\n## Guidelines for managing chronic conditions\n\nThe NICE guidelines provide comprehensive recommendations for managing chronic conditions, including multimorbidity, diabetes, and respiratory diseases. These guidelines aim to improve care coordination and patient outcomes for individuals dealing with multiple health issues. By offering structured recommendations, the guidelines ensure that healthcare providers can deliver effective and integrated care tailored to the complex needs of patients with chronic illnesses [Data: Entities (17, 539); Relationships (319)]."
+          }
+        ],
+        "relationships": [
+          {
+            "id": "4932",
+            "source": "ACUTE KIDNEY INJURY",
+            "target": "SCREENING QUESTIONS",
+            "description": "Screening questions help identify patients at risk for acute kidney injury, guiding further testing and management decisions.",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "33441",
+            "source": "FEVER",
+            "target": "URINE TESTING",
+            "description": "Urine testing is a crucial diagnostic tool used to identify urinary tract infections (UTIs) as a potential cause of fever, particularly in infants and children. The presence of fever in these young patients often prompts healthcare providers to consider various underlying conditions, with UTIs being a common concern. \n\nIn infants, urine testing is specifically performed to rule out UTIs when fever is present. This is important because UTIs can lead to serious complications if not diagnosed and treated promptly. Similarly, for children exhibiting fever, urine testing is recommended to check for the presence of urinary tract infections. By conducting these tests, healthcare professionals can ensure that appropriate treatment is initiated, thereby addressing the fever's underlying cause effectively.\n\nOverall, urine testing serves as a vital step in the evaluation of fever in both infants and children, helping to confirm or exclude urinary tract infections as a significant health issue.",
+            "weight": "18.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "32781",
+            "source": "URINARY INCONTINENCE",
+            "target": "URINE TESTING",
+            "description": "Urine testing is performed to identify infections or other abnormalities that may contribute to urinary incontinence",
+            "weight": "9.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "33046",
+            "source": "GUIDELINE COMMITTEE",
+            "target": "2019 RECOMMENDATION",
+            "description": "The guideline committee developed the 2019 recommendation based on evidence to standardize the management of stress urinary incontinence",
+            "weight": "9.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "1547",
+            "source": "URINARY TRACT INFECTION (UTI)",
+            "target": "URINE TESTING",
+            "description": "Urine testing is a key diagnostic procedure for confirming urinary tract infections",
+            "weight": "10.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "47493",
+            "source": "ACTIVE SURVEILLANCE",
+            "target": "2019 RECOMMENDATION",
+            "description": "The 2019 recommendation updated guidelines regarding the use of active surveillance for certain prostate cancer classifications",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "49056",
+            "source": "PUBERTAL DEVELOPMENT",
+            "target": "SCREENING QUESTIONS",
+            "description": "Screening questions are used to assess pubertal development in young people, particularly those with health conditions",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "1564",
+            "source": "BORIC ACID",
+            "target": "URINE TESTING",
+            "description": "Boric acid is used to preserve urine samples that are to be tested for infections, ensuring sample integrity",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "49385",
+            "source": "REAGENT STRIPS",
+            "target": "2014 GUIDELINE",
+            "description": "The 2014 guideline includes recommendations about the use of reagent strips for detecting proteinuria and hematuria in adults.",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "33047",
+            "source": "2019 RECOMMENDATION",
+            "target": "2006 GUIDELINE",
+            "description": "The 2019 recommendation retained elements from the 2006 guideline, indicating continuity in treatment approaches for stress urinary incontinence",
+            "weight": "1.0",
+            "links": "1",
+            "in_context": true
+          },
+          {
+            "id": "31018",
+            "source": "METABOLIC ASSESSMENT",
+            "target": "CLINICAL GUIDANCE",
+            "description": "Clinical guidance often includes recommendations for metabolic assessments in patients with kidney stones.",
+            "weight": "8.0",
+            "links": "1",
+            "in_context": true
+          }
+        ],
+        "claims": [],
+        "entities": [
+          {
+            "id": "11485",
+            "entity": "2014 GUIDELINE",
+            "description": "The \"2014 GUIDELINE\" encompasses two distinct sets of recommendations relevant to clinical practice. Firstly, it addresses the use of reagent strips for detecting proteinuria and hematuria in adults, building upon earlier guidelines that established protocols for these diagnostic tests. This aspect of the guideline emphasizes the importance of accurate detection of these conditions, which are critical indicators of kidney health and potential underlying diseases.\n\nSecondly, the 2014 guideline also pertains to the diagnosis and management of atrial fibrillation, a common cardiac arrhythmia. This section of the guideline reflects updates made to previous recommendations, which were later revised in 2021. The focus here is on improving patient outcomes through effective management strategies for atrial fibrillation, including risk assessment, treatment options, and monitoring protocols.\n\nIn summary, the 2014 guideline serves as a foundational document that integrates essential recommendations for both renal health through the detection of proteinuria and hematuria, as well as for the management of atrial fibrillation, ensuring that healthcare providers have access to updated and evidence-based practices in these critical areas of patient care.",
+            "number of relationships": "1",
+            "in_context": true
+          },
+          {
+            "id": "15777",
+            "entity": "CLINICAL GUIDANCE",
+            "description": "Recommendations based on clinical evidence aimed at improving patient care and outcomes, particularly in the management of kidney stones.",
+            "number of relationships": "1",
+            "in_context": true
+          },
+          {
+            "id": "3262",
+            "entity": "SCREENING QUESTIONS",
+            "description": "Screening questions are inquiries made to assess a patient's history and risk factors for conditions like acute kidney injury, guiding clinical decision-making.",
+            "number of relationships": "2",
+            "in_context": true
+          },
+          {
+            "id": "1134",
+            "entity": "URINE TESTING",
+            "description": "Urine testing is a diagnostic procedure that involves the analysis of urine samples to detect various substances and cells, which is essential for diagnosing a range of medical conditions. This testing is particularly important in identifying signs of infection, such as urinary tract infections (UTIs), and other related health issues. \n\nThe procedure is commonly employed to analyze urine for the presence of blood, glucose, and indicators of infection, making it a crucial tool in the diagnosis of urinary incontinence and other urinary disorders. In children, urine testing serves a similar purpose, helping to identify infections or other medical conditions that may affect their health.\n\nOverall, urine testing plays a vital role in the medical field by providing valuable insights into a patient's health status, particularly concerning urinary tract infections and related conditions.",
+            "number of relationships": "4",
+            "in_context": true
+          },
+          {
+            "id": "16531",
+            "entity": "2019 RECOMMENDATION",
+            "description": "The \"2019 RECOMMENDATION\" encompasses updated clinical guidelines that address two significant areas of healthcare: the treatment of stress urinary incontinence and the management of prostate cancer. \n\nFirstly, the recommendation highlights the importance of pelvic floor muscle training as a first-line treatment for stress urinary incontinence. This approach is based on the latest evidence, which supports the effectiveness of pelvic floor exercises in improving symptoms and enhancing the quality of life for individuals affected by this condition. The emphasis on non-invasive treatment options reflects a growing trend in clinical practice to prioritize conservative management strategies before considering more invasive procedures.\n\nSecondly, the 2019 recommendation also provides updated guidelines for the treatment of prostate cancer, with a particular focus on the management of intermediate and high-risk patient groups. These guidelines aim to ensure that patients receive tailored treatment plans that are informed by the latest research and clinical findings. The recommendations likely include a range of therapeutic options, including active surveillance, surgery, radiation therapy, and hormonal treatments, depending on the specific risk profile of the patient.\n\nIn summary, the \"2019 RECOMMENDATION\" serves as a crucial resource for healthcare professionals, offering evidence-based guidance for the management of both stress urinary incontinence and prostate cancer, thereby enhancing patient care and treatment outcomes in these areas.",
+            "number of relationships": "3",
+            "in_context": true
+          },
+          {
+            "id": "1137",
+            "entity": "URINARY TRACT INFECTION",
+            "description": "A urinary tract infection (UTI) is an infection that can affect any part of the urinary system, which includes the kidneys, ureters, bladder, and urethra. UTIs are commonly caused by bacteria and can lead to a variety of symptoms, including painful urination (dysuria), frequent urges to urinate, and discomfort. In children, particularly those under 16 years of age, UTIs can present with non-specific symptoms and may lead to serious health complications if left untreated. Symptoms in children may also include fever, which can be a significant indicator of infection.\n\nUTIs are particularly concerning in infants and young children due to the risk of serious illness. In these populations, the infections may be investigated further, especially in cases of faltering growth or when other underlying health issues are suspected. The infections can also occur in postmenopausal women and may recur frequently, leading to significant discomfort and health concerns.\n\nIn addition to the common symptoms of pain and frequent urination, UTIs can complicate the diagnosis of other conditions, including cancer. They may also be associated with the use of catheters, which can exacerbate the risk of infection. UTIs can occur post-surgery, especially in patients who have undergone invasive procedures, and may require specific diagnostic tests to confirm the presence of an infection.\n\nOverall, UTIs are a prevalent health issue that can affect individuals of all ages, with particular attention needed for vulnerable populations such as infants, children, and postmenopausal women. Prompt diagnosis and treatment are essential to prevent complications and ensure effective management of the infection.",
+            "number of relationships": "151",
+            "in_context": true
+          },
+          {
+            "id": "41",
+            "entity": "URINARY TRACT INFECTION (UTI)",
+            "description": "A urinary tract infection (UTI) is an infection that can occur in any part of the urinary system, which includes the bladder, urethra, and kidneys. UTIs are commonly caused by bacteria and can lead to a range of symptoms, including painful urination, increased urgency and frequency of urination, and, in some cases, urinary incontinence. \n\nThe infection can affect various components of the urinary system, and if left untreated, it may result in complications such as acute pyelonephritis, which is a severe kidney infection. UTIs are typically diagnosed through urine culture and susceptibility testing, which helps determine the most effective antibiotic treatment. \n\nOverall, UTIs are a prevalent health issue that can significantly impact an individual's quality of life due to the discomfort and urgency they cause. Prompt diagnosis and treatment are essential to prevent complications and ensure effective management of the infection.",
+            "number of relationships": "45",
+            "in_context": true
+          },
+          {
+            "id": "1131",
+            "entity": "TABLE 1",
+            "description": "Table 1 serves as a multifaceted reference tool within the document, encompassing two distinct areas of medical concern: urinary tract infections (UTIs) and age-related macular degeneration (AMD). \n\nIn the context of urinary tract infections, Table 1 is designed to assist healthcare professionals by listing various symptoms and signs that are associated with UTIs. This information is crucial for guiding diagnosis, as it helps clinicians identify the likelihood of a UTI being present based on the symptoms exhibited by patients. The table not only enumerates symptoms that increase the likelihood of a UTI but also includes signs that may decrease this likelihood, thereby providing a comprehensive overview for effective clinical assessment.\n\nAdditionally, Table 1 is utilized to classify age-related macular degeneration, a significant condition affecting vision in older adults. In this capacity, the table outlines various criteria and definitions pertinent to the classification of AMD, aiding healthcare professionals in understanding the different stages and types of this condition. This classification is essential for determining appropriate treatment options and managing patient care effectively.\n\nOverall, Table 1 is an essential resource that integrates critical information for both urinary tract infections and age-related macular degeneration, thereby supporting healthcare professionals in their diagnostic and treatment efforts across these two important areas of health.",
+            "number of relationships": "6",
+            "in_context": true
+          },
+          {
+            "id": "7809",
+            "entity": "NICE GUIDELINE ON ACUTE PYELONEPHRITIS",
+            "description": "The NICE guideline on acute pyelonephritis provides recommendations for the treatment of severe urinary tract infections that may involve the kidneys, including antibiotic choices.",
+            "number of relationships": "1",
+            "in_context": true
+          },
+          {
+            "id": "1",
+            "entity": "NICE GUIDELINES",
+            "description": "The NICE Guidelines, developed by the National Institute for Health and Care Excellence (NICE), are a comprehensive set of evidence-based recommendations aimed at enhancing health and social care practices across the UK. These guidelines are designed to improve healthcare quality, ensure effective treatment protocols, and ultimately enhance patient outcomes across various medical fields.\n\nCovering a broad spectrum of topics, the NICE Guidelines address areas such as mental health, chronic conditions, maternal and child health, and specific medical procedures. They provide healthcare professionals with frameworks for making informed decisions about patient care, emphasizing the importance of individual preferences and adherence to professional standards. Key areas addressed include the management of mental health issues in children and young people, substance misuse prevention, and the treatment of conditions such as diabetes, hypertension, and sepsis.\n\nThe guidelines also focus on vulnerable populations, including individuals with learning disabilities, those experiencing homelessness, and looked-after children, aiming to reduce health inequalities and improve service delivery for these groups. They provide strategies for managing complex conditions, such as coexisting severe mental illness and substance misuse, and emphasize community engagement.\n\nSpecific protocols for diagnosing and managing a range of medical conditions are included, such as cardiovascular diseases, infections, and cancers. The NICE Guidelines address the management of conditions like obesity, dysphagia, and mental health disorders, ensuring that healthcare providers have access to the latest evidence-based practices. They also provide recommendations for antimicrobial prescribing, smoking cessation, and strategies to improve vaccination uptake.\n\nIn addition to clinical practices, the NICE Guidelines emphasize the importance of patient experience and shared decision-making in healthcare. They focus on communication principles that enhance care delivery and include recommendations for improving health and social care services, particularly in mental wellbeing at work and the management of chronic pain conditions. The guidelines also provide evidence-based recommendations for the assessment and management of various health conditions, including thyroid diseases, ADHD, chronic obstructive pulmonary disease (COPD), myalgic encephalomyelitis/chronic fatigue syndrome (ME/CFS), and child maltreatment.\n\nFurthermore, the NICE Guidelines offer recommendations for the management of specific conditions such as prostatitis, rheumatoid arthritis, ulcerative colitis, and heart valve diseases in adults. They also address the diagnosis and management of hypertension in pregnancy and provide guidance on the prevention and non-surgical management of pelvic floor dysfunction.\n\nOverall, the NICE Guidelines serve as a vital resource for healthcare professionals in the UK, promoting high-quality care and improving health outcomes for all individuals. By integrating evidence-based recommendations into clinical practice, NICE aims to enhance the overall effectiveness of health and social care services, ensuring they meet the diverse needs of the population.",
+            "number of relationships": "461",
+            "in_context": true
+          }
+        ],
+        "sources": [
+          {
+            "id": "4903",
+            "text": " t he CKD-EPI cr eatinine equation \nfor adult s of African-Caribbean or African f amily origin has been r emoved fr om t he \nguideline. Only a small number of centr es in t he UK curr ently use cystatin-c equations \nregularly , so most should not be aff ected by the removal of t he cystatin-c \nrecommendations. \nReturn t o recommendations \nInvestig ations f or pr otein uria \nRecommendations 1 .1.10 to 1.1.14 \nWhy the c ommi ttee made the r ecommenda tions \nFor childr en and y oung people wit h CKD , there was no e vidence f or the accuracy of \nmeasuring albumin:cr eatinine ratio (A CR) compar ed wit h protein:cr eatinine ratio (PCR) t o \nquantify pr oteinuria. The committ ee discussed t he recommendations f or adult s and agr eed \nthat, o verall, t hese fit w ell wit h curr ent practice and can be r ecommended f or childr en and \nyoung people as w ell. \nThe committ ee discussed t he eGFR t hreshold r ecommended f or quantifying urinar y \nalbumin or urinar y protein loss in adult s wit hout diabet es. The y agr eed t hat t his threshold \nis not appr opriat e for childr en and y oung people because an y reduction in GFR in t his \npopulation w ould pr ompt measuring pr oteinuria. Ther efore, for childr en and y oung people \nthey set t he threshold f or cr eatinine as abo ve the upper limit of t he age-appr opriat e \nreference range. \nThe committ ee agr eed t o mak e a recommendation f or resear ch to identify t he eff ect of \nmeasuring pr oteinuria wit h ACR compar ed wit h PCR on t he timing of tr eatment changes in \nchildr en and y oung people wit h CKD and t he consequences of t he dela y in tr eatment Chronic kidne y disease: assessment and management (NG203)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 60\nof 78\nchanges on diff erent le vels of pr oteinuria . \nHow the r ecommenda tions mig ht affect practice \nThe r ecommendations ar e in line wit h curr ent practice, so no additional r esour ces should \nbe needed. \nReturn t o recommendations \nReagent strips f or pr otein uria and haema turia \nRecommendations 1 .1.15 to 1.1.16 \nWhy the c ommi ttee made the r ecommenda tions \nThe e vidence sho wed that r eagent strips w ere less useful t o rule out t han t o rule in \nproteinuria. The committ ee highlight ed that ruling out pr oteinuria wit h confidence was t he \nmain goal when using r eagent strips. Ther efore, they agr eed t hat r eagent strips should not \nbe used t o identify pr oteinuria in childr en and y oung people. The e vidence was not \nreview ed for adult s and so t he committ ee agr eed t o retain t he 2014 r ecommendation not \nto use r eagent strips t o identify pr oteinuria in adult s unless t he strips ar e capable of \nspecifically measuring albumin at lo w concentrations and e xpressing t he result as an A CR. \nThe committ ee also highlight ed that t hese t ests are commonly used in clinical practice and \nagreed t o mak e a fur ther r ecommendation f or fur ther in vestigations in adult s, childr en and \nyoung people wit h an incidental finding of une xplained pr oteinuria on r eagent strips. \nFurther t esting is needed t o confirm CKD b y identifying ot her mark ers of kidne y damage \n(such as A CR or glomerular filtration rat e). \nTher e was limit ed evidence on t he accuracy of r eagent strips f or albuminuria, so t he \ncommitt ee did not f eel able t o mak e recommendations. Ther e were only 2 studies, and \nonly 1 sho wed that r eagent strips could be useful. \nTher e was no e vidence on t he accuracy of r eagent strips f or haematuria in childr en and \nyoung people. The 2014 guideline (which did not co ver childr en and y oung people) \nrecommended r eagent strips f or det ecting haematuria in adult s. The committ ee agr eed t o \nextend t his recommendation t o childr en and y oung people, because t he evidence f or \nadult s is lik ely to be applicable t o this population. Chronic kidne y disease: assessment and management (NG203)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 61 of\n78\nHow the r ecommenda tions mig ht affect practice \nThe r ecommendations ar e in line wit h curr ent"
+          },
+          {
+            "id": "2031",
+            "text": "Paroxysmal a trial fi brilla tion \nEpisodes of atrial fibrillation t hat st op wit hin 7  days, usually wit hin 48  hours, wit hout an y \ntreatment. Atrial fibrillation: diagnosis and management (NG196)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 26 of\n47\nRecommenda tions f or research \nAs par t of t he 2021  updat e, the guideline committ ee made 4  new r esear ch \nrecommendations (mark ed [2021] ). Resear ch recommendations r etained fr om t he \n2014  guideline ar e labelled [2014] . \nKey recommenda tions f or research \n1 Tests to diagnose per sisten t atrial fi brilla tion \nWhat is t he diagnostic accuracy of k ey inde x tests (such as t he Kar diaMobile hear t \nmonit or (Aliv eCor), MyDiagnostik, Micr olife BP monit ors, iPhone plet hysmograph y and \npulse palpation) compar ed wit h the gold standar d of 12-lead ECG in people wit h risk \nfactors f or or sympt oms of atrial fibrillation? [2021] \nFor a shor t explanation of wh y the committ ee made t he recommendation f or resear ch, \nsee t he rationale on det ection and diagnosis . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  B: \naccuracy of t ests for det ection . \n2 Tests to diagnose par oxysmal a trial fi brilla tion \nWhat is t he diagnostic accuracy of k ey inde x tests compar ed wit h the gold standar d of \nprolonged ambulat ory monit oring in people suspect ed of ha ving par oxysmal atrial \nfibrillation? [2021] \nFor a shor t explanation of wh y the committ ee made t he recommendation f or resear ch, \nsee t he rationale on det ection and diagnosis . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  B: \naccuracy of t ests for det ection . Atrial fibrillation: diagnosis and management (NG196)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 27 of\n47\n3 Stopping an ticoagula tion af ter ab lation \nWhat is t he clinical and cost eff ectiv eness of st opping anticoagulation in people whose \natrial fibrillation has r esolv ed aft er ablation? [2021] \nFor a shor t explanation of wh y the committ ee made t he recommendation f or resear ch, \nsee t he rationale on st opping anticoagulation . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  H: \ndiscontinuing anticoagulation in people whose atrial fibrillation has r esolv ed. \n4 Stopping an ticoagula tion af ter r esolution o f postoper ative atrial \nfibrilla tion \nWhat is t he clinical and cost eff ectiv eness of st opping anticoagulation in people whose \npostoperativ e atrial fibrillation aft er car diac sur gery has r esolv ed? [2021] \nFor a shor t explanation of wh y the committ ee made t he recommendation f or resear ch, \nsee t he rationale on st opping anticoagulation . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview  H: \ndiscontinuing anticoagulation in people whose atrial fibrillation has r esolv ed. \n5 Cogni tive beha viour al ther apy for pe ople wi th atrial fi brilla tion \nWhat is t he clinical and cost eff ectiv eness of cognitiv e beha vioural t herap y compar ed wit h \nusual car e for people wit h newly diagnosed atrial fibrillation? [2014] \nOther r ecommenda tions f or research \n6 Ra te-control drug tr eatmen t for pe ople ag ed 75 and o ver wi th \natrial fi brilla tion \nWhat is t he comparativ e eff ectiv eness of t he 3 main drug classes used f or rat e contr ol Atrial fibrillation: diagnosis and management (NG196)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 28 of\n47\n(beta-block ers, calcium-channel block ers and digo xin) in people aged 7 5 and o ver wit h \natrial fibrillation in contr olling sympt oms, impr oving quality of lif e and r educing morbidity \nand mor tality? [2014] \n7 Stroke risk assessmen t \nCan r outine data fr om UK primar y car e databases clarify str oke risk in people wit h atrial \nfibrillation accor ding t"
+          },
+          {
+            "id": "3042",
+            "text": " hese conditions w ould be diagnosed wit h a 2 4-hour urine \ntest. This suggest s that understanding underlying metabolic diseases can lead t o \nprevention of st one r ecurr ence. Ho wever, no e vidence f or 24-hour urine t esting was \nidentified, so t he committ ee agr eed t hat t hey could not mak e a practice r ecommendation. \nThey agr eed t o mak e a recommendation f or resear ch on t he clinical and cost eff ectiv eness \nof a full metabolic in vestigation  to inform futur e guidance. \nNo e vidence was f ound on st one analysis or blood t ests in people who ha ve or ha ve had \nrenal or ur eteric st ones. It is not clear which t ests are most useful and whet her t ests \nshould be off ered to all people wit h a st one or just t hose at high risk of st one r ecurr ence. \nHowever, the committ ee also consider ed the high pr evalence of primar y \nhyperparat hyroidism in people wit h renal st ones and not ed that t his could be identified \nwith serum calcium t esting, which is an ine xpensiv e test. Ther efore, the committ ee agr eed \nthat serum calcium should be measur ed for adult s and st one analysis consider ed. \nThe committ ee agr eed t hat curr ent practice f or childr en and y oung people is v ariable. All \npaediatric patient s should ha ve a metabolic assessment. The natur e of t his assessment \nvaries nationally . Referral t o a paediatric nephr ologist or ur ologist wit h exper tise in t esting \nfor metabolic conditions should be consider ed. Renal and ur eteric st ones: assessment and management (NG118)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 31 of\n36\nHow the r ecommenda tions mig ht affect practice \nCurrent practice is v aried wit h a full range of metabolic t ests being done in some ar eas \nand f ewer tests in ot hers. Ther efore, the recommendations ma y mean a change in practice \nfor some pr oviders. Ho wever, the committ ee agr eed t hat e xisting centr es should ha ve the \nresour ces t o cope wit h an incr eased demand f or st one analysis, which is r elativ ely easy t o \ndo and is not ur gent. \nReturn t o recommendations \nFrequenc y of follow-up imag ing \nWhy the c ommi ttee made the r ecommenda tion f or research \nNo e vidence was f ound on t he optimum fr equency of imaging in people who ha ve or ha ve \nhad r enal or ur eteric st ones. The committ ee agr eed t hat t here is v ariation in curr ent \npractice, wit h frequency oft en depending on f actors such as whet her t he person has had \n1 stone or r ecurr ent st ones. The committ ee was not able t o mak e a recommendation f or \npractice because t heir e xperience diff ered, but t hey did agr ee to mak e a recommendation \nfor resear ch on t he fr equency of f ollow-up imaging  to inform futur e guidance. \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview J: \nimaging f or follow-up . \nPreventing r ecurr ence \nRecommendations 1 .8.1 to 1.8.5 \nWhy the c ommi ttee made the r ecommenda tions \nDiet and lif estyle advice \nSome e vidence sho wed a benefit of a high wat er intak e in r educing st one r ecurr ence in \nadult s. Limit ed evidence fr om a single study in adult s sho wed a benefit of lemon juice in \nterms of urine calcium and pH but no diff erence in urine o xalat e. Lemon juice is high in \ncitrat e leading t o higher concentrations of citrat e in urine. This ma y stop calcium fr om Renal and ur eteric st ones: assessment and management (NG118)\n\u00a9 NICE 2025 . All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 32 of\n36\nbinding t o other st one constituent s and so pr event st one f ormation and r ecurr ence. The \ncommitt ee agr eed t o recommend a high wat er intak e and t he addition of lemon juice t o \nwater. Evidence sho wed a benefit of a voiding carbonat ed drinks in t erms of st one \nrecurr ence, and so t he committ ee agr eed t o recommend t hat t hese should be a voided. \nEvidence on diet was mix ed but t he committ ee agr eed t hat a normal calcium intak e and a \nlow salt intak e ma y help t o prevent st one r ecurr ence. Evidence on a voiding a high pr otein \ndiet was inconclusiv e, but t he committ ee ackno w"
+          },
+          {
+            "id": "468",
+            "text": "ple wi th no ob vious acu te \nillness \n1.1.3 Be awar e that in adult s, childr en and y oung people wit h chr onic kidne y disease \nand no ob vious acut e illness, a rise in serum cr eatinine ma y indicat e acut e kidne y \ninjury rat her t han a w orsening of t heir chr onic disease. [2013] \n1.1.4 Ensur e that acut e kidne y injur y is consider ed when an adult, child or y oung Acut e kidne y injur y: prevention, det ection and management (NG148)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 7 of\n31\nperson pr esent s wit h an illness wit h no clear acut e component and has an y of t he \nfollowing: \n\u2022 chronic kidne y disease, especially stage 3B, 4 or 5 as sho wn in table  1, or \nurological disease \n\u2022 new onset or significant w orsening of ur ological sympt oms \n\u2022 sympt oms suggesting complications of acut e kidne y injur y \n\u2022 sympt oms or signs of a multi-syst em disease aff ecting t he kidne ys and ot her \norgan syst ems (f or example, signs or sympt oms of acut e kidne y injur y, plus a \npurpuric rash). [2013] \nAssessing risk f actors in adul ts ha ving iodine-base d contrast \nmedia \n1.1.5 Discuss t he benefit s and risks of t ests or tr eatment s that use iodine-based \ncontrast media wit h the person, and t heir f amily members and car ers if \nappr opriat e. Follow the recommendations in t he NICE guideline on shar ed \ndecision making . [202 4] \n1.1.6 Be awar e that t here is a small but incr eased risk of acut e kidne y injur y associat ed \nwith an eGFR less t han 30  ml/min/1 .73 m2\n. [202 4] \nEmer gency depar tment and ur gent inpatient settings \n1.1.7 Do not dela y the use of iodine-based contrast media in an emer gency if t he risk \nof dela ying t he contrast media is lik ely to be clinically significant. [202 4] \nOutpatient, non-ur gent inpatient and community settings \n1.1.8 Before requesting a non-ur gent iodine-based contrast media CT scan, assess \nwhet her t he person has pr e-existing kidne y disease.  [202 4] Acut e kidne y injur y: prevention, det ection and management (NG148)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 8 of\n31\n1.1.9 If available, use an eGFR measur ement fr om t he past 6  mont hs to suppor t \ndecision making about t he use of iodine-based contrast media. If t he person has \nbeen acut ely unw ell or clinically unstable since t heir last eGFR t est, consider \nusing a mor e recent eGFR. [202 4] \n1.1.10 If no eGFR is a vailable fr om t he past 6 mont hs, ask t he person, or t heir f amily \nmembers and car ers if appr opriat e, the following scr eening questions: \n\u2022 do they have kidne y disease or a kidne y transplant? \n\u2022 have they seen or ar e waiting t o see a kidne y specialist, or a kidne y sur geon \nor ur ologist? \n\u2022 do they have sympt oms of acut e illness lik ely to cause acut e kidne y injur y \nsuch as diarrhoea, v omiting, f ever, hypovolaemia, inf ection or difficulty \npassing urine? [202 4] \n1.1.11 If the scr eening questions indicat e a hist ory of kidne y disease or acut e illness t o \nsuggest t hat acut e kidne y injur y is lik ely, consider an eGFR t est t o suppor t \ndecision making. [202 4] \n1.1.12 If the scr eening questions do not indicat e a hist ory of kidne y disease and t he \nperson is clinically stable, consider pr oceeding wit h iodine-based contrast media \nCT scan wit hout t he need f or fur ther blood t ests bef ore the scan. [202 4] \nFor a shor t explanation of wh y the committ ee made t hese r ecommendations and ho w \nthey might aff ect practice, see t he rationale and impact section on assessing risk \nfactors in adult s having iodine-based contrast media . \nFull details of t he evidence and t he committ ee's discussion ar e in evidence r eview B: \nrisk pr ediction t ools and eGFR f or the pr ediction of iodine"
+          },
+          {
+            "id": "141",
+            "text": "Recommenda tions \nPeople ha ve the right t o be in volved in discussions and mak e informed decisions \nabout t heir car e, as described in NICE's inf ormation on making decisions about y our \ncare. \nMaking decisions using NICE guidelines  explains ho w we use w ords to sho w the \nstrengt h (or cer tainty) of our r ecommendations, and has inf ormation about \nprescribing medicines (including off -label use), pr ofessional guidelines, standar ds \nand laws (including on consent and mental capacity), and saf eguar ding. \n1.1 D iagnosis \nSymptoms and signs \n1.1.1 Test t he urine of babies, childr en and y oung people who ha ve sympt oms and \nsigns t hat incr ease t he lik elihood t hat a urinar y tract inf ection (UTI) is pr esent \n(see table 1 and t he explanation of ho w to use t he table beneat h it). [2022] \n1.1.2 Consider t esting t he urine of babies, childr en and y oung people if t hey are unw ell \nand t here is a suspicion of a UTI but none of t he signs or sympt oms list ed in table \n1 are present. [2022] \n1.1.3 Refer babies under 3  mont hs wit h a suspect ed UTI (see table  1 and \nrecommendation 1 .1.2) to paediatric specialist car e, and: \n\u2022 send a urine sample f or ur gent micr oscop y and cultur e \n\u2022 manage in line wit h the sections on management b y the non-paediatric \npractitioner  and management b y the paediatric specialist in t he NICE \nguideline on f ever in under  5s: assessment and initial management . [2017 , \namended 2022] \n1.1.4 Do not r outinely t est t he urine of babies, childr en and y oung people 3  mont hs and Urinar y tract inf ection in under 16s: diagnosis and management (NG22 4)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 5 of\n31\nover who ha ve sympt oms and signs t hat suggest an inf ection ot her t han a UTI. If \nthey remain unw ell and t here is diagnostic uncer tainty , consider urine t esting. \n[2022] \nTable 1 Sympt oms and signs t hat incr ease or decr ease t he lik elihood t hat a UTI is \npresent \nSympt oms and signs t hat incr ease t he lik elihood t hat a urinar y \ntract inf ection (UTI) is pr esent Sympt oms and signs t hat decr ease t he lik elihood \nthat a UTI is pr esent \n\u2022 Painful urination ( dysuria) \n\u2022 More frequent urination \n\u2022 New bedw etting \n\u2022 Foul smelling (malodor ous) urine \n\u2022 Dark er urine \n\u2022 Cloudy urine \n\u2022 Frank haematuria (visible blood in urine) \n\u2022 Reduced fluid intak e \n\u2022 Fever \n\u2022 Shivering \n\u2022 Abdominal pain \n\u2022 Loin t enderness or suprapubic t enderness \n\u2022 Capillar y refill longer t han 3  seconds \n\u2022 Previous hist ory of confirmed urinar y tract \ninfection \u2022 Absence of painful urination \n(dysuria) \n\u2022 Napp y rash \n\u2022 Breathing difficulties \n\u2022 Abnormal chest sounds \n\u2022 Abnormal ear e xamination \n\u2022 Fever wit h kno wn alt ernativ e \ncause \nWhen using t he table, be awar e that: \n\u2022 The sympt oms and signs in t his table should be used t o inform a decision about \nwhet her urine collection and t esting is necessar y. Urinar y tract inf ection in under 16s: diagnosis and management (NG22 4)\n\u00a9 NICE 202 4. All right s reserved. Subject t o Notice of right s (https://www .nice.or g.uk/t erms-and-\nconditions#notice-of -right s).Page 6 of\n31\n\u2022 It is not an e xhaustiv e list of sympt oms or signs and should be used as a guide \nalongside clinical judgement. \n\u2022 The pr esence or absence of a single sympt om or sign in isolation in eit her column \nshould not necessarily be used t o decide whet her or not t o test for UTI. \n\u2022 Multiple sympt oms and signs will pr obably incr ease t he lik elihood t hat t here is a UTI. \n\u2022 It ma y be useful t o consider alt ernativ e diagnoses wher e the sympt oms and signs \ndecr ease t he lik elihood t hat a UTI is pr esent. \n1.1.5 For babies or childr en under  5 wit h fever with no ob vious cause wher e a UTI is no \nlonger suspect ed, see t he NICE guideline on f ever in under 5s: assessment and \ninitial management . [2022] \n1.1.6 Paediatric specialist s should consult t he section on management b y the \npaediatric specialist in"
+          }
+        ]
+      },
+      "answer_nonempty": true
+    }
+  ]
+}

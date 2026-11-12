@@ -1,0 +1,9 @@
+Add recoverable concurrent MED-COPILOT experiment runtime
+
+Prepare evidence in isolated CPU workers, checkpoint independent jobs durably,
+and schedule bounded local model passes alongside hosted requests and scoring.
+Recover unexpected preparation worker exits from committed state with bounded
+replacements while retaining strict configuration and provenance checks.
+
+Keep separate Plan judging resumable with recorded runtime overrides. Include
+model settings, numeric guideline limits, and offline regression coverage.

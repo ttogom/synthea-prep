@@ -1,0 +1,265 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:22:19Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).
+- **Guidelines**: The NICE guidelines on urinary tract infections (NG224) provide a framework for assessing these symptoms.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI; includes microscopy and culture.
+  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.
+  - **Referral**: Consider referral to specialist care for infants or young children under 3 months with suspected UTI.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Findings**: Cloudy, brown urine with an ammoniacal odor, low pH, high specific gravity, and presence of protein, glucose, ketones, and bilirubin suggests possible renal or metabolic issues.
+- **Guidelines**: The NICE guidelines recommend specific diagnostic tests for these findings.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify any infectious agents.
+  - **Metabolic Assessment**: Consider further metabolic investigations to assess for conditions like diabetes or liver dysfunction.
+  - **Imaging**: If indicated, imaging studies may be warranted to evaluate renal structure.
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **First-Line Options**: The NICE guidelines on chronic kidney disease (NG203) recommend:
+  - **Analgesics**: Paracetamol is typically the first-line medication for managing pain.
+- **Alternative Options**: If pain persists, consider:
+  - **Non-steroidal anti-inflammatory drugs (NSAIDs)**: Use cautiously due to potential renal effects.
+  - **Referral to Pain Management Services**: For comprehensive pain management strategies.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Guidelines**: The NICE guidelines emphasize the importance of patient education in managing chronic kidney disease.
+- **Recommendations**:
+  - **Fluid Management**: Educate on appropriate fluid intake to manage urination symptoms.
+  - **Dietary Advice**: Discuss dietary modifications to reduce kidney workload, such as limiting protein and sodium intake.
+  - **Monitoring Symptoms**: Encourage patients to monitor their symptoms and report any significant changes to their healthcare provider.
+  - **Regular Follow-Up**: Stress the importance of regular follow-up appointments to manage CKD effectively.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:22:36Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Difficulty Swallowing, Swollen Lymph Nodes, and Fever
+
+- **Possible Causes**: 
+  - **Streptococcal Pharyngitis**: Commonly associated with swollen tonsils, fever, and lymphadenopathy.
+  - **Viral Pharyngitis**: Often presents similarly but may include additional respiratory symptoms.
+  - **Mononucleosis**: Characterized by severe fatigue, swollen lymph nodes, and tonsillar enlargement.
+
+- **Guidelines and Criteria**:
+  - **Centor Criteria**: Used to assess the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **Investigations**: Rapid antigen detection tests or throat cultures may be performed to confirm streptococcal infection.
+
+### Fatigue, Runny/Stuffy Nose, and Body Aches
+
+- **Guidelines for Diagnostic Tests**:
+  - **Common Cold vs. Influenza**: Guidelines recommend differentiating between these conditions based on symptom severity and duration.
+  - **Diagnostic Tests**:
+    - **Rapid Influenza Diagnostic Tests (RIDTs)**: Recommended for patients with high suspicion of influenza.
+    - **Viral Panel Testing**: May be considered if symptoms persist or worsen, to rule out other viral infections.
+
+### Sore Throat, Decreased Appetite, and Cough
+
+- **Management Recommendations**:
+  - **First-Line Medications**:
+    - **Analgesics**: Acetaminophen or ibuprofen for pain relief.
+    - **Throat Lozenges**: To soothe sore throat symptoms.
+  - **Alternative Medications**:
+    - **Antihistamines**: If post-nasal drip from chronic sinusitis is contributing to cough.
+    - **Corticosteroids**: May be considered for severe inflammation in chronic sinusitis cases.
+
+### Swollen Lymph Nodes and Fever
+
+- **Patient Education and Lifestyle Advice**:
+  - **Hydration**: Encourage increased fluid intake to help with recovery.
+  - **Rest**: Emphasize the importance of adequate rest to support the immune system.
+  - **Symptom Monitoring**: Advise patients to monitor symptoms and seek medical attention if they worsen or do not improve within a few days.
+  - **Nutritional Support**: Suggest small, nutritious meals to manage decreased appetite and support recovery.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:23:34Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Potential Causes and Distinguishing Criteria
+- **Common Causes**:
+  - **Urinary Tract Infection (UTI)**: Most prevalent cause of dysuria and increased urinary frequency in pregnant women.
+  - **Asymptomatic Bacteriuria**: Presence of bacteria without symptoms can lead to complications if untreated.
+  - **Bladder Irritation**: Can be caused by dietary factors or infections.
+  
+- **Distinguishing Criteria**:
+  - **Urinalysis**: Essential for detecting bacteria, blood, or protein in urine.
+  - **Symptoms Duration**: Acute onset may suggest infection, while chronic symptoms could indicate other issues.
+  - **Fever or Chills**: Presence may indicate a more severe infection like pyelonephritis.
+  - **Previous History**: Past UTIs or urinary issues can provide context for current symptoms.
+
+### Recommended Diagnostic Tests
+- **Urinalysis**: 
+  - First-line test to identify the presence of bacteria, leukocytes, and nitrites.
+- **Urine Culture**: 
+  - Recommended if urinalysis indicates infection to determine the specific bacteria and antibiotic sensitivity.
+- **Ultrasound**: 
+  - Considered if there are recurrent infections or complications suspected, such as hydronephrosis.
+
+### Recommended Medications for Symptomatic Relief
+- **First-Line Medications**:
+  - **Phenazopyridine**: Provides symptomatic relief for dysuria but should be used cautiously and not as a long-term solution.
+  
+- **Alternative Medications**:
+  - **Acetaminophen**: For pain relief, as it is generally considered safe during pregnancy.
+  - **Antibiotics**: If a UTI is confirmed, appropriate antibiotics (e.g., nitrofurantoin or amoxicillin) should be prescribed based on culture results.
+
+### Patient Education and Lifestyle Advice
+- **Hydration**: Encourage increased fluid intake to help flush out bacteria.
+- **Hygiene Practices**: Advise proper wiping techniques (front to back) and urinating after intercourse to reduce UTI risk.
+- **Dietary Modifications**: Suggest avoiding bladder irritants such as caffeine, alcohol, and spicy foods.
+- **Monitoring Symptoms**: Educate on the importance of reporting any worsening symptoms or new signs such as fever or flank pain.
+- **Regular Check-Ups**: Emphasize the importance of routine prenatal visits for monitoring urinary health and overall pregnancy well-being.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:24:35Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes of Sore Throat and Associated Criteria
+For a patient with difficulty swallowing, swollen tonsils, sore throat, swollen lymph nodes, and fever, consider the following potential causes:
+
+- **Streptococcal Pharyngitis**:
+  - **Centor Criteria**: Fever, absence of cough, swollen and tender anterior cervical lymph nodes, tonsillar swelling or exudate.
+  - **Diagnostic Tests**: Rapid antigen detection tests or throat culture.
+
+- **Viral Pharyngitis**:
+  - Often presents similarly but may include additional symptoms like cough or conjunctivitis.
+  - Typically self-limiting; supportive care is the mainstay.
+
+- **Mononucleosis (EBV)**:
+  - Symptoms include severe fatigue, swollen lymph nodes, and splenomegaly.
+  - Diagnosis confirmed by heterophile antibody test (Monospot) or specific EBV serology.
+
+- **Tonsillitis**:
+  - Can be viral or bacterial; presents with similar symptoms.
+  - Examination may reveal tonsillar enlargement and exudate.
+
+### Guidelines for Evaluating Respiratory Symptoms
+For a patient with body aches, runny/stuffy nose, cough, and fatigue, the following guidelines recommend appropriate diagnostic tests:
+
+- **NICE Guidelines**:
+  - **Assessment**: Clinical history and physical examination to rule out serious conditions.
+  - **Diagnostic Tests**: Consider testing for influenza or COVID-19 if symptoms are severe or persistent.
+  - **Management**: Symptomatic treatment with analgesics and decongestants; antibiotics are not indicated unless bacterial infection is suspected.
+
+### Recommended Treatments for Sore Throat Symptoms
+For a patient with fever, sore throat, difficulty swallowing, and decreased appetite, the following first-line and alternative medications are recommended:
+
+- **First-line Treatments**:
+  - **Analgesics**: Paracetamol or ibuprofen for pain relief and fever reduction.
+  - **Throat Lozenges**: May provide symptomatic relief.
+
+- **Alternative Treatments**:
+  - **Antibiotics**: If streptococcal infection is confirmed or highly suspected (e.g., penicillin or amoxicillin).
+  - **Corticosteroids**: Consider for severe swelling or difficulty swallowing.
+
+### Lifestyle Advice and Long-term Management Plans
+For a patient with fatigue, swollen lymph nodes, and difficulty swallowing, guidelines suggest the following lifestyle advice and long-term management plans:
+
+- **Lifestyle Modifications**:
+  - **Hydration**: Encourage adequate fluid intake to prevent dehydration.
+  - **Rest**: Emphasize the importance of rest to aid recovery.
+
+- **Long-term Management**:
+  - **Regular Monitoring**: Follow-up appointments to assess symptom progression and response to treatment.
+  - **Education**: Inform about recognizing signs of complications or worsening symptoms.
+  - **Supportive Care**: Consider referral to specialists if symptoms persist or worsen, particularly for conditions like chronic fatigue syndrome or recurrent infections.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:25:38Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Dyspnea and Associated Symptoms
+- **Potential Causes**: The guidelines suggest considering heart failure, chronic obstructive pulmonary disease (COPD), pneumonia, and pulmonary embolism as potential causes for dyspnea, orthopnea, edema, and paroxysmal dyspnea.
+- **Diagnostic Criteria/Investigations**:
+  - **Chest X-ray**: To assess for heart failure, pneumonia, or other lung pathology.
+  - **Echocardiogram**: To evaluate cardiac function and structure.
+  - **Pulmonary Function Tests**: To assess for COPD or restrictive lung disease.
+  - **BNP Levels**: Elevated levels may indicate heart failure.
+  - **CT Pulmonary Angiography**: If pulmonary embolism is suspected.
+
+### Rales and Ischemic Heart Disease
+- **Next Steps for Evaluation**:
+  - **Chest X-ray**: To check for pulmonary congestion or other abnormalities.
+  - **Echocardiogram**: To assess cardiac function and rule out heart failure.
+  - **Spirometry**: To evaluate for any obstructive or restrictive lung disease.
+- **Management Recommendations**:
+  - **Diuretics**: If heart failure is confirmed to manage fluid overload.
+  - **Bronchodilators**: If COPD or asthma is suspected.
+  - **Cardiology Referral**: For further evaluation of ischemic heart disease.
+
+### HIV Management with Low CD4+ Count
+- **Management Strategies**:
+  - **Initiate Antiretroviral Therapy (ART)**: Immediate initiation is recommended for patients with a CD4+ count below 200/uL.
+  - **Consider Opportunistic Infection Prophylaxis**: Given the CD4+ count of 118/uL, prophylaxis for Pneumocystis pneumonia (PCP) should be considered.
+  - **Regular Monitoring**: Monitor viral load and CD4+ count every 3-6 months after starting ART.
+
+### Chronic Hepatitis C and Impaired Renal Function
+- **Treatment Recommendations**:
+  - **Direct-Acting Antivirals (DAAs)**: Preferred for hepatitis C treatment, but dosage adjustments may be necessary due to renal impairment.
+  - **Monitoring**: Regularly monitor renal function and adjust medications accordingly.
+  - **Consultation with a Specialist**: Referral to a hepatologist or infectious disease specialist is advisable for complex cases, especially with renal impairment. 
+
+These guidelines provide a structured approach to evaluating and managing the conditions presented in each scenario, ensuring that patient care is evidence-based and tailored to individual needs.

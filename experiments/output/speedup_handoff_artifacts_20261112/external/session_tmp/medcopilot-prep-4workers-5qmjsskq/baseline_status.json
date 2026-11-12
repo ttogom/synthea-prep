@@ -1,0 +1,58 @@
+{
+  "status": "completed",
+  "wall_seconds_including_loading": 110.8979514169987,
+  "workers": [
+    {
+      "worker": 0,
+      "initialization_seconds": 30.25273337499675,
+      "completed": [
+        {
+          "patient_id": "cystitis_c60576a7-1b1f-ea39-6557-f28df9d9f9cc",
+          "seconds": 17.06532958400203
+        },
+        {
+          "patient_id": "viral_pharyngitis_540f8b50-afd6-83eb-a8a0-3a2b6acd2ddd",
+          "seconds": 14.40801916700002
+        },
+        {
+          "patient_id": "cystitis_c282c89b-fb2d-bac0-ed0e-632aa6bffd0a",
+          "seconds": 14.954077250004048
+        },
+        {
+          "patient_id": "strep_throat_afece5f2-e855-0dd1-f682-a0205c64c421",
+          "seconds": 13.621274999997695
+        },
+        {
+          "patient_id": "heart_failure_49e076ea-735a-23a4-4c14-2713788f8689",
+          "seconds": 16.637308583995036
+        }
+      ]
+    },
+    {
+      "worker": 1,
+      "initialization_seconds": 30.253796208002314,
+      "completed": [
+        {
+          "patient_id": "viral_pharyngitis_b7a8c96f-9b8b-0dd5-b92d-750340f7128c",
+          "seconds": 15.094051500003843
+        },
+        {
+          "patient_id": "hypertension_a070f250-1eb8-ebc8-9dd1-24ffc668b927",
+          "seconds": 15.733959124998364
+        },
+        {
+          "patient_id": "cystitis_7d2fd4fe-55a3-74fe-bc5e-60628832135d",
+          "seconds": 13.21480908299418
+        },
+        {
+          "patient_id": "viral_pharyngitis_8e620ba9-7d8f-95cf-402d-0ad61d60594f",
+          "seconds": 15.443090916000074
+        },
+        {
+          "patient_id": "strep_throat_48877f57-4e3a-72bb-c7d1-b71e8132fab3",
+          "seconds": 13.397531375005201
+        }
+      ]
+    }
+  ]
+}

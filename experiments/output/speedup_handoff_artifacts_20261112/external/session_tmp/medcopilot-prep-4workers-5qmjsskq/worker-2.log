@@ -1,0 +1,116 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:42Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Guidelines for Urinary Symptoms
+- **Symptoms**: Urgent desire to urinate, suprapubic pain, increased frequency, dysuria.
+- **Associated Guidelines**: NICE guidelines on urinary tract infections (UTIs) emphasize the importance of urine testing in patients with these symptoms.
+- **Distinguishing Criteria**:
+  - **Increased Likelihood of UTI**: Presence of dysuria, frequency, and suprapubic pain.
+  - **Decreased Likelihood of UTI**: Absence of fever, known alternative causes (e.g., recent surgery, other infections).
+  - **Further Testing**: Urine culture and sensitivity testing to confirm UTI and guide antibiotic treatment.
+
+### Diagnostic Tests for Urine Abnormalities
+- **Findings**: Cloudy urine, brown color, ammoniacal odor, proteinuria (260.4 mg/dL), glucosuria (0.7 mg/dL), ketonuria (7 mg/dL), bilirubin (0.9 mg/dL).
+- **Recommended Tests**:
+  - **Urine Culture**: To identify any infectious agents.
+  - **24-Hour Urine Collection**: To assess total protein excretion and evaluate kidney function.
+  - **Blood Tests**: Including renal function tests (creatinine, electrolytes) and liver function tests (to assess bilirubin levels).
+  - **Imaging Studies**: Ultrasound of the kidneys and bladder to evaluate for structural abnormalities.
+
+### Management of Chronic Kidney Disease Stage 4
+- **First-Line Treatments**:
+  - **ACE Inhibitors or ARBs**: To manage hypertension and reduce proteinuria.
+  - **Diuretics**: For fluid management if edema is present.
+- **Alternative Treatments**:
+  - **Sodium-glucose cotransporter-2 (SGLT2) Inhibitors**: May be considered for renal protection.
+  - **Phosphate Binders**: To manage hyperphosphatemia.
+  - **Erythropoiesis-Stimulating Agents**: If anemia is present.
+
+### Long-Term Management for Increased Urination and Proteinuria
+- **Lifestyle Advice**:
+  - **Fluid Management**: Encourage adequate hydration while monitoring fluid intake to avoid overload.
+  - **Dietary Modifications**: Low-sodium diet to manage blood pressure and reduce kidney workload.
+  - **Regular Monitoring**: Routine follow-up for kidney function and protein levels.
+- **Patient Education**:
+  - **Understanding CKD**: Educate about the progression of kidney disease and the importance of adherence to treatment.
+  - **Symptom Awareness**: Teach patients to recognize signs of worsening kidney function or complications.
+- **Long-Term Management Plans**:
+  - **Referral to Nephrology**: For specialized care and potential preparation for dialysis or transplant.
+  - **Medication Adherence**: Emphasize the importance of taking prescribed medications consistently.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:56Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes Associated with Symptoms of Difficulty Swallowing, Swollen Lymph Nodes, and Sore Throat
+
+- **Common Causes**:
+  - **Viral Pharyngitis**: Often presents with sore throat and may include symptoms like cough and runny nose.
+  - **Streptococcal Pharyngitis**: Characterized by severe sore throat, swollen tonsils, and tender anterior cervical lymphadenopathy.
+  - **Mononucleosis**: Caused by Epstein-Barr virus, presenting with severe sore throat, swollen lymph nodes, and fatigue.
+
+- **Differentiating Criteria**:
+  - **Centor Criteria**: 
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: 
+    - Fever in the last 24 hours
+    - Purulence (pus on tonsils)
+    - Attend rapidly (within 3 days of symptom onset)
+    - Severe symptoms
+  - **Investigations**: Rapid antigen tests for Group A beta-hemolytic streptococcus (GABHS) can help confirm streptococcal infection.
+
+### Recommended Diagnostic Tests for Further Evaluation
+
+- **Throat Swab**: To test for streptococcal infection or other pathogens.
+- **Complete Blood Count (CBC)**: To assess for signs of infection or other hematological issues.
+- **Monospot Test**: To check for infectious mononucleosis.
+- **Imaging**: Ultrasound or CT scan may be indicated if there is suspicion of abscess formation or other complications.
+
+### Recommended Medications for Fatigue, Body Aches, and Fever
+
+- **First-Line Medications**:
+  - **Acetaminophen or Ibuprofen**: For symptomatic relief of fever and body aches.
+  
+- **Alternative Medications**:
+  - **Nasal Decongestants**: If sinus congestion is contributing to symptoms.
+  - **Antihistamines**: If allergic rhinitis is suspected as a contributing factor.
+
+### Lifestyle Advice for Managing Runny/Stuffy Nose and Cough
+
+- **Hydration**: Encourage increased fluid intake to help thin mucus.
+- **Humidifiers**: Use to add moisture to the air, which can ease nasal congestion.
+- **Saline Nasal Sprays**: To help relieve nasal congestion and dryness.
+- **Rest**: Emphasize the importance of adequate rest to support recovery.
+- **Avoid Irritants**: Advise avoiding smoke and strong odors that can exacerbate symptoms. 
+
+These recommendations align with guidelines aimed at managing upper respiratory symptoms effectively while considering the patient's specific clinical presentation.

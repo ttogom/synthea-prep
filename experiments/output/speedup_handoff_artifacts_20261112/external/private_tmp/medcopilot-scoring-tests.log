@@ -1,0 +1,29 @@
+Matplotlib created a temporary cache directory at /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/matplotlib-u6wes7bh because the default path (/Users/rasikaramanan/.matplotlib) is not a writable directory; it is highly recommended to set the MPLCONFIGDIR environment variable to a writable directory, in particular to speed up the import of Matplotlib and to better support multiprocessing.
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/rasikaramanan/.cache/fontconfig
+	/Users/rasikaramanan/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/rasikaramanan/.cache/fontconfig
+	/Users/rasikaramanan/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/rasikaramanan/.cache/fontconfig
+	/Users/rasikaramanan/.fontconfig
+
+Fontconfig error: No writable cache directories
+	/opt/homebrew/var/cache/fontconfig
+	/Users/rasikaramanan/.cache/fontconfig
+	/Users/rasikaramanan/.fontconfig
+Matplotlib is building the font cache; this may take a moment.
+.............................................................[92m12:28:47 - LiteLLM:WARNING[0m: get_model_cost_map.py:271 - LiteLLM: Failed to fetch remote model cost map from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 8] nodename nor servname provided, or not known. Falling back to local backup.
+WARNING:LiteLLM:LiteLLM: Failed to fetch remote model cost map from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 8] nodename nor servname provided, or not known. Falling back to local backup.
+......................
+----------------------------------------------------------------------
+Ran 83 tests in 1.849s
+
+OK

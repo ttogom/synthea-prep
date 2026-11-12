@@ -1,0 +1,121 @@
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:56:27Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Dyspnea and Associated Symptoms
+- **Potential Causes**: The guidelines suggest considering heart failure, chronic obstructive pulmonary disease (COPD), pneumonia, and pulmonary embolism as potential causes for dyspnea, orthopnea, edema, and paroxysmal dyspnea.
+- **Diagnostic Criteria/Investigations**:
+  - **Echocardiogram**: To assess cardiac function and rule out heart failure.
+  - **Chest X-ray**: To evaluate for pulmonary congestion or other lung pathology.
+  - **Pulmonary Function Tests**: To assess for obstructive or restrictive lung disease.
+  - **BNP Levels**: Elevated levels may indicate heart failure.
+  - **D-dimer**: To rule out pulmonary embolism if clinically indicated.
+
+## Rales and Ischemic Heart Disease
+- **Next Steps for Evaluation**:
+  - **Chest X-ray**: To check for pulmonary edema or other lung issues.
+  - **Echocardiogram**: To evaluate cardiac function and structure.
+  - **Consideration of Cardiac Stress Testing**: To assess for ischemia if symptoms suggest cardiac involvement.
+- **Management Recommendations**:
+  - **Diuretics**: If heart failure is suspected to manage fluid overload.
+  - **ACE Inhibitors or Beta-blockers**: For heart failure management if indicated.
+  - **Referral to Cardiology**: For further evaluation and management of ischemic heart disease.
+
+## HIV Management with Low CD4+ Count
+- **Management Strategies**:
+  - **Initiation of Antiretroviral Therapy (ART)**: Recommended regardless of CD4+ count, especially with a CD4+ count of 118/uL.
+  - **Monitoring**: Regular follow-up of viral load and CD4+ count to assess treatment efficacy.
+  - **Consideration of Opportunistic Infection Prophylaxis**: Given the low CD4+ count, prophylaxis for infections such as Pneumocystis jirovecii pneumonia (PCP) may be warranted.
+
+## Chronic Hepatitis C and Impaired Renal Function
+- **Treatment Recommendations**:
+  - **Direct-Acting Antivirals (DAAs)**: Preferred for hepatitis C treatment, but dosage adjustments may be necessary due to renal impairment.
+  - **Monitoring**: Regular assessment of renal function and potential side effects of medications.
+  - **Consultation with a Hepatologist**: Recommended for complex cases, especially with renal impairment, to tailor treatment plans effectively.
+prompt is used!
+{"label": "D_repeat_w1", "index": 8, "seconds": 17.55594562499755, "ok": true}
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:56:44Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+## Causes and Guidelines for Difficulty Swallowing, Swollen Lymph Nodes, Swollen Tonsils, and Fever
+
+- **Potential Causes**:
+  - **Streptococcal Pharyngitis**: Commonly associated with swollen tonsils, fever, and lymphadenopathy.
+  - **Viral Pharyngitis**: Often presents similarly but may include additional respiratory symptoms.
+  - **Mononucleosis**: Characterized by severe lymphadenopathy and fatigue, often with fever and sore throat.
+
+- **Distinguishing Criteria**:
+  - **Centor Criteria**: Evaluates the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **Investigations**:
+    - Rapid antigen detection tests for streptococcus.
+    - Throat culture for confirmation.
+    - Monospot test for mononucleosis.
+
+## Diagnostic Tests for Fatigue, Runny/Stuffy Nose, and Body Aches
+
+- **Guidelines for Diagnostic Tests**:
+  - **NICE Guidelines** recommend considering:
+    - **Complete Blood Count (CBC)**: To check for anemia or infection.
+    - **Influenza Testing**: If flu is suspected based on symptoms and seasonality.
+    - **Allergy Testing**: If allergic rhinitis is suspected due to nasal symptoms.
+  - **Additional Considerations**:
+    - **Thyroid Function Tests**: If fatigue persists without clear cause.
+    - **Chest X-ray**: If respiratory symptoms are significant.
+
+## Management of Sore Throat, Decreased Appetite, and Cough with Chronic Sinusitis
+
+- **First-Line Medications**:
+  - **Analgesics**: Paracetamol or ibuprofen for pain relief.
+  - **Throat Lozenges**: To soothe sore throat symptoms.
+
+- **Alternative Medications**:
+  - **Antihistamines**: If allergic rhinitis is contributing to symptoms.
+  - **Nasal Corticosteroids**: For managing chronic sinusitis and associated nasal congestion.
+  - **Decongestants**: May help relieve nasal obstruction.
+
+## Patient Education and Lifestyle Advice for Swollen Lymph Nodes and Fever
+
+- **Guidelines for Managing Symptoms**:
+  - **Hydration**: Encourage increased fluid intake to stay hydrated.
+  - **Rest**: Importance of adequate rest to support recovery.
+  - **Symptom Monitoring**: Advise patients to monitor for worsening symptoms or prolonged fever.
+  - **Pain Management**: Use of over-the-counter pain relievers as needed.
+  - **Follow-Up**: Recommend follow-up if symptoms persist beyond a few days or worsen.
+{"label": "D_repeat_w1", "index": 2, "seconds": 8.218483208998805, "ok": true}

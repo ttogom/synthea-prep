@@ -1,0 +1,157 @@
+{
+  "patient_id": "strep_throat_48877f57-4e3a-72bb-c7d1-b71e8132fab3",
+  "worker_pid": 48156,
+  "total_seconds": 56.35884229200019,
+  "stages": {
+    "keyword_extraction": 2.249788332999742,
+    "patient_retrieval_reranking_attribution": 0.9266753339979914,
+    "guideline_question_generation": 2.038564458998735,
+    "guideline_retrieval": 51.137374666999676,
+    "prompt_assembly_saving_other_overhead": 0.006439499004045501
+  },
+  "diagnostics": {
+    "http": 5.521865706999961,
+    "checkpoint_ack": 0.007411041995510459,
+    "keywords": 2.249788332999742,
+    "patient_search": 2.431752124997729,
+    "attribution": 0.18059925000125077,
+    "patient_rerank": 0.7447115420000046,
+    "guideline_questions": 2.038564458998735,
+    "graphrag_setup:load_config": 0.007326208004087675,
+    "graphrag_setup:_resolve_output_files": 0.09838141700311098,
+    "limiter_total": 42.96394112500275,
+    "limiter_rpm": 42.963900457994896,
+    "limiter_tpm": 1.9874998542945832e-05,
+    "graphrag": 51.137374666999676,
+    "prompt_assembly": 1.5458004781976342e-05
+  },
+  "events": [
+    {
+      "name": "http",
+      "seconds": 2.247354250001081,
+      "stage": "keywords",
+      "host": "api.openai.com",
+      "path": "/v1/chat/completions",
+      "stream": false,
+      "status": 200
+    },
+    {
+      "name": "checkpoint_ack",
+      "seconds": 0.0011428750003688037,
+      "stage": "checkpoint_ack"
+    },
+    {
+      "name": "keywords",
+      "seconds": 2.249788332999742,
+      "stage": "keywords"
+    },
+    {
+      "name": "patient_search",
+      "seconds": 2.431752124997729,
+      "stage": "patient_search"
+    },
+    {
+      "name": "attribution",
+      "seconds": 0.18059925000125077,
+      "stage": "attribution"
+    },
+    {
+      "name": "patient_rerank",
+      "seconds": 0.7447115420000046,
+      "stage": "patient_rerank"
+    },
+    {
+      "name": "checkpoint_ack",
+      "seconds": 0.00070525000046473,
+      "stage": "checkpoint_ack"
+    },
+    {
+      "name": "http",
+      "seconds": 2.034383082995191,
+      "stage": "guideline_questions",
+      "host": "api.openai.com",
+      "path": "/v1/chat/completions",
+      "stream": false,
+      "status": 200
+    },
+    {
+      "name": "checkpoint_ack",
+      "seconds": 0.002260499997646548,
+      "stage": "checkpoint_ack"
+    },
+    {
+      "name": "guideline_questions",
+      "seconds": 2.038564458998735,
+      "stage": "guideline_questions"
+    },
+    {
+      "name": "graphrag_setup:load_config",
+      "seconds": 0.007326208004087675,
+      "stage": "graphrag_setup:load_config"
+    },
+    {
+      "name": "graphrag_setup:_resolve_output_files",
+      "seconds": 0.09838141700311098,
+      "stage": "graphrag_setup:_resolve_output_files"
+    },
+    {
+      "name": "limiter_total",
+      "seconds": 1.0667004971764982e-05,
+      "stage": "graphrag"
+    },
+    {
+      "name": "http",
+      "seconds": 0.6428633329996956,
+      "stage": "graphrag",
+      "host": "api.openai.com",
+      "path": "/v1/embeddings",
+      "stream": false,
+      "status": 200
+    },
+    {
+      "name": "limiter_rpm",
+      "seconds": 42.963900457994896,
+      "stage": "graphrag"
+    },
+    {
+      "name": "limiter_tpm",
+      "seconds": 1.9874998542945832e-05,
+      "stage": "graphrag"
+    },
+    {
+      "name": "limiter_total",
+      "seconds": 42.963930457997776,
+      "stage": "graphrag"
+    },
+    {
+      "name": "http",
+      "seconds": 0.5972650410039932,
+      "stage": "graphrag",
+      "host": "api.openai.com",
+      "path": "/v1/chat/completions",
+      "stream": true,
+      "status": 200
+    },
+    {
+      "name": "graphrag",
+      "seconds": 51.137374666999676,
+      "stage": "graphrag"
+    },
+    {
+      "name": "checkpoint_ack",
+      "seconds": 0.00200162499822909,
+      "stage": "checkpoint_ack"
+    },
+    {
+      "name": "prompt_assembly",
+      "seconds": 1.5458004781976342e-05,
+      "stage": "prompt_assembly"
+    },
+    {
+      "name": "checkpoint_ack",
+      "seconds": 0.0013007919988012873,
+      "stage": "checkpoint_ack"
+    }
+  ],
+  "error_type": null
+}

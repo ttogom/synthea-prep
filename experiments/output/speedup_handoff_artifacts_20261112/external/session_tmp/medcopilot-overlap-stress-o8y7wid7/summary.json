@@ -1,0 +1,403 @@
+{
+  "status": "completed",
+  "elapsed_seconds": 58.45426354200026,
+  "preparation": {
+    "patients": 8,
+    "workers": 4,
+    "mean_service_seconds": 15.589496989749932,
+    "all_successful": true,
+    "preserved_prompts_and_rankings": true
+  },
+  "generation": {
+    "model": "gemma3:4b",
+    "parallel_slots": 4,
+    "context_per_slot": 16384,
+    "max_output_tokens": 768,
+    "requests": 4,
+    "all_valid": true,
+    "all_four_simultaneously_in_flight": true,
+    "request_seconds": [
+      4.844922709002276,
+      5.305794291998609,
+      5.085229958000127,
+      5.096580833000189
+    ],
+    "token_usage": [
+      {
+        "prompt_tokens": 2731,
+        "completion_tokens": 125,
+        "total_tokens": 2856
+      },
+      {
+        "prompt_tokens": 2425,
+        "completion_tokens": 175,
+        "total_tokens": 2600
+      },
+      {
+        "prompt_tokens": 2487,
+        "completion_tokens": 147,
+        "total_tokens": 2634
+      },
+      {
+        "prompt_tokens": 2313,
+        "completion_tokens": 151,
+        "total_tokens": 2464
+      }
+    ],
+    "generation_active_span_seconds": 5.306877083996369
+  },
+  "memory": {
+    "samples": 29,
+    "compressed_start_gib": 1.1501617431640625,
+    "compressed_peak_gib": 10.915206909179688,
+    "new_swapout_pages": 0,
+    "swapin_pages": 231,
+    "swap_used_change_mib": -8.0,
+    "pageout_pages": 49,
+    "min_reported_memory_pressure_free_percent": 42,
+    "worker_rss_peak_gib": 8.609451293945312
+  },
+  "other_servers_before": {
+    "11434": {
+      "models": []
+    },
+    "11435": {
+      "unavailable": "URLError"
+    }
+  },
+  "other_servers_after": {
+    "11434": {
+      "models": []
+    },
+    "11435": {
+      "unavailable": "URLError"
+    }
+  },
+  "http_preparation": [
+    {
+      "stage": "keywords",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 8
+    },
+    {
+      "stage": "guideline_questions",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 9
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/embeddings",
+      "status": 200,
+      "count": 8
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 8
+    }
+  ],
+  "errors": 0,
+  "scoring_or_judging_calls": 0,
+  "observations": [
+    {
+      "elapsed_seconds": 0.0,
+      "memory_pressure_free_percent": 85,
+      "compression_gib": 1.1501617431640625,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641843,
+      "pageouts": 29098,
+      "worker_rss_gib": 0.0
+    },
+    {
+      "elapsed_seconds": 2.0134047910032677,
+      "memory_pressure_free_percent": 69,
+      "compression_gib": 1.147216796875,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641915,
+      "pageouts": 29098,
+      "worker_rss_gib": 0.6527862548828125
+    },
+    {
+      "elapsed_seconds": 4.042182208002487,
+      "memory_pressure_free_percent": 69,
+      "compression_gib": 1.385894775390625,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641923,
+      "pageouts": 29102,
+      "worker_rss_gib": 2.9907989501953125
+    },
+    {
+      "elapsed_seconds": 6.1777474580012495,
+      "memory_pressure_free_percent": 61,
+      "compression_gib": 4.2970733642578125,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641947,
+      "pageouts": 29122,
+      "worker_rss_gib": 5.3919830322265625
+    },
+    {
+      "elapsed_seconds": 8.246623500002897,
+      "memory_pressure_free_percent": 56,
+      "compression_gib": 5.9355010986328125,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641959,
+      "pageouts": 29125,
+      "worker_rss_gib": 6.595947265625
+    },
+    {
+      "elapsed_seconds": 10.284021666004264,
+      "memory_pressure_free_percent": 55,
+      "compression_gib": 6.646881103515625,
+      "swap_used_mib": 6610.75,
+      "swapouts": 16709957,
+      "swapins": 11641963,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.1555328369140625
+    },
+    {
+      "elapsed_seconds": 12.304795415999251,
+      "memory_pressure_free_percent": 55,
+      "compression_gib": 6.6036224365234375,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11641971,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.66851806640625
+    },
+    {
+      "elapsed_seconds": 14.328755458001979,
+      "memory_pressure_free_percent": 54,
+      "compression_gib": 6.589111328125,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11641975,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.66851806640625
+    },
+    {
+      "elapsed_seconds": 16.348609790999035,
+      "memory_pressure_free_percent": 55,
+      "compression_gib": 6.5415191650390625,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11641979,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.66851806640625
+    },
+    {
+      "elapsed_seconds": 18.377177958005632,
+      "memory_pressure_free_percent": 54,
+      "compression_gib": 6.9345245361328125,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11641991,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.334930419921875
+    },
+    {
+      "elapsed_seconds": 20.401330790999054,
+      "memory_pressure_free_percent": 54,
+      "compression_gib": 6.8937835693359375,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11641995,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.334930419921875
+    },
+    {
+      "elapsed_seconds": 22.426839666004525,
+      "memory_pressure_free_percent": 54,
+      "compression_gib": 6.799652099609375,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642007,
+      "pageouts": 29125,
+      "worker_rss_gib": 7.75244140625
+    },
+    {
+      "elapsed_seconds": 24.45030695800233,
+      "memory_pressure_free_percent": 50,
+      "compression_gib": 8.123626708984375,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642007,
+      "pageouts": 29125,
+      "worker_rss_gib": 8.609451293945312
+    },
+    {
+      "elapsed_seconds": 26.476527500002703,
+      "memory_pressure_free_percent": 47,
+      "compression_gib": 9.156021118164062,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642015,
+      "pageouts": 29125,
+      "worker_rss_gib": 6.698089599609375
+    },
+    {
+      "elapsed_seconds": 28.66567045800184,
+      "memory_pressure_free_percent": 45,
+      "compression_gib": 9.640426635742188,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642027,
+      "pageouts": 29130,
+      "worker_rss_gib": 4.922271728515625
+    },
+    {
+      "elapsed_seconds": 30.71711625000171,
+      "memory_pressure_free_percent": 47,
+      "compression_gib": 9.109024047851562,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642027,
+      "pageouts": 29130,
+      "worker_rss_gib": 5.544219970703125
+    },
+    {
+      "elapsed_seconds": 32.74125733300025,
+      "memory_pressure_free_percent": 45,
+      "compression_gib": 9.814376831054688,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642027,
+      "pageouts": 29132,
+      "worker_rss_gib": 5.25982666015625
+    },
+    {
+      "elapsed_seconds": 34.78574387499975,
+      "memory_pressure_free_percent": 42,
+      "compression_gib": 10.544235229492188,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642067,
+      "pageouts": 29132,
+      "worker_rss_gib": 5.8810577392578125
+    },
+    {
+      "elapsed_seconds": 36.8168193330057,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.663589477539062,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642070,
+      "pageouts": 29132,
+      "worker_rss_gib": 5.6739349365234375
+    },
+    {
+      "elapsed_seconds": 38.85890270800155,
+      "memory_pressure_free_percent": 42,
+      "compression_gib": 10.776962280273438,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642070,
+      "pageouts": 29142,
+      "worker_rss_gib": 5.5669708251953125
+    },
+    {
+      "elapsed_seconds": 40.8818710830019,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.774215698242188,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642070,
+      "pageouts": 29142,
+      "worker_rss_gib": 5.5670166015625
+    },
+    {
+      "elapsed_seconds": 42.92092479100393,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.689041137695312,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642070,
+      "pageouts": 29142,
+      "worker_rss_gib": 5.4451751708984375
+    },
+    {
+      "elapsed_seconds": 44.96626745800313,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.551773071289062,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29143,
+      "worker_rss_gib": 6.186798095703125
+    },
+    {
+      "elapsed_seconds": 46.99678741599928,
+      "memory_pressure_free_percent": 42,
+      "compression_gib": 10.915206909179688,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29144,
+      "worker_rss_gib": 7.240264892578125
+    },
+    {
+      "elapsed_seconds": 49.04326404099993,
+      "memory_pressure_free_percent": 42,
+      "compression_gib": 10.80438232421875,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29147,
+      "worker_rss_gib": 7.5847015380859375
+    },
+    {
+      "elapsed_seconds": 51.08193937499891,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.800186157226562,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29147,
+      "worker_rss_gib": 7.4833984375
+    },
+    {
+      "elapsed_seconds": 53.12692970799981,
+      "memory_pressure_free_percent": 43,
+      "compression_gib": 10.809417724609375,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29147,
+      "worker_rss_gib": 7.4114990234375
+    },
+    {
+      "elapsed_seconds": 55.1706502080051,
+      "memory_pressure_free_percent": 45,
+      "compression_gib": 9.843154907226562,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29147,
+      "worker_rss_gib": 5.61102294921875
+    },
+    {
+      "elapsed_seconds": 57.1995913330029,
+      "memory_pressure_free_percent": 48,
+      "compression_gib": 8.674423217773438,
+      "swap_used_mib": 6602.75,
+      "swapouts": 16709957,
+      "swapins": 11642074,
+      "pageouts": 29147,
+      "worker_rss_gib": 3.7111663818359375
+    }
+  ],
+  "limitations": [
+    "Short snapshot, not a long-run memory leak test.",
+    "Four generation requests overlapped the beginning of preparation for approximately five seconds. The loaded model, four configured context slots, and associated allocations remained resident throughout preparation. Continuous generation for the full preparation period was not tested.",
+    "System memory readings include unrelated applications and background work; the experiment does not attribute all compression to the tested workers.",
+    "Large compression increase means passing cannot be interpreted as abundant uncompressed RAM headroom.",
+    "Existing FNLLM sequential event-loop reuse warnings were observed; no failures occurred."
+  ]
+}

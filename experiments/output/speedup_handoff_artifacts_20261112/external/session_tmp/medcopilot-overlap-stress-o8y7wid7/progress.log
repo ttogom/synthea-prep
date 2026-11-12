@@ -1,0 +1,19 @@
+{"other_servers_before": {"11434": {"models": []}, "11435": {"unavailable": "URLError"}}}
+{"model_loaded": true, "ps": {"models": [{"name": "gemma3:4b", "model": "gemma3:4b", "size": 3427658628, "digest": "68ceab7e468a31c988b44d5a4984a0e21f58c4f7158c6ce29c1804babac38df7", "details": {"parent_model": "", "format": "gguf", "family": "gemma3", "families": ["gemma3", "clip"], "parameter_size": "3.9B", "quantization_level": "Q4_K_M"}, "expires_at": "2319-02-22T01:30:15.074211807-08:00", "size_vram": 3427658628, "context_length": 16384, "runner": "llamacpp"}]}}
+{"worker": 3, "loading_and_initialization_seconds": 22.898120124998968}
+{"worker": 0, "loading_and_initialization_seconds": 22.89866166700085}
+{"worker": 1, "loading_and_initialization_seconds": 23.047720249996928}
+{"worker": 2, "loading_and_initialization_seconds": 23.047684666998975}
+{"generation_completed": 1, "seconds": 4.844922709002276, "valid": true}
+{"generation_completed": 2, "seconds": 5.305794291998609, "valid": true}
+{"generation_completed": 3, "seconds": 5.085229958000127, "valid": true}
+{"generation_completed": 4, "seconds": 5.096580833000189, "valid": true}
+{"worker": 3, "completed_jobs_in_worker": 1, "seconds": 16.620494875001896}
+{"worker": 0, "completed_jobs_in_worker": 1, "seconds": 17.699018250001245}
+{"worker": 2, "completed_jobs_in_worker": 1, "seconds": 17.936705833002634}
+{"worker": 1, "completed_jobs_in_worker": 1, "seconds": 17.98209954200138}
+{"worker": 3, "completed_jobs_in_worker": 2, "seconds": 12.533811000001151}
+{"worker": 2, "completed_jobs_in_worker": 2, "seconds": 13.127872040997318}
+{"worker": 1, "completed_jobs_in_worker": 2, "seconds": 13.992098749993602}
+{"worker": 0, "completed_jobs_in_worker": 2, "seconds": 14.826836500003992}
+{"status": "completed", "wall_seconds_including_loading": 56.88678779100155}

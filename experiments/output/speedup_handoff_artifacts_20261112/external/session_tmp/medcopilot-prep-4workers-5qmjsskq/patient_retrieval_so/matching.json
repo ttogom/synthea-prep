@@ -1,0 +1,16 @@
+{
+  "identity": {
+    "representation": "SO",
+    "text_format": "labeled-so-v1",
+    "model": "emilyalsentzer/Bio_ClinicalBERT",
+    "model_revision": "d5892b39a4adaed74b92212a44081509db72f87b",
+    "max_seq_length": 512,
+    "record_count": 3354,
+    "matching_text_sha256": "1a3c45fb730df81cf96b52648eedd4e0f3fc56d3b45f90a0b86bb813a81f5bfd"
+  },
+  "dimension": 768,
+  "sha256": {
+    "embeddings.npy": "3ed051c8e4a175194ce182848901a60310c7842767ed42beaf0b2cb6e2560fd6",
+    "index.faiss": "ee1e8075cb8e331b19f9ac7ff28cb6163a0e25bf3deed01b07d058b3aab2f795"
+  }
+}

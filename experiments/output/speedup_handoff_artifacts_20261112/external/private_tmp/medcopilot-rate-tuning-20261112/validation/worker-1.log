@@ -1,0 +1,281 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:58:15Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Causes Associated with Symptoms and Recommended Criteria
+
+- **Common Causes**:
+  - **Streptococcal Pharyngitis**: Characterized by sore throat, fever, swollen tonsils, and lymph nodes.
+  - **Viral Pharyngitis**: Often presents similarly but may include cough and is typically associated with upper respiratory infections.
+  - **Mononucleosis**: Can cause severe sore throat, swollen lymph nodes, and fatigue.
+
+- **Recommended Criteria**:
+  - **Centor Criteria**: Used to assess the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **Investigations**:
+    - Rapid antigen detection tests for streptococcal infection.
+    - Throat culture if rapid tests are negative but suspicion remains high.
+
+## Diagnostic Tests for Underlying Causes
+
+- **Recommended Tests**:
+  - **Throat Swab**: For rapid antigen testing or culture to identify streptococcal infection.
+  - **Complete Blood Count (CBC)**: To check for signs of infection or anemia.
+  - **Monospot Test**: If mononucleosis is suspected based on clinical presentation.
+  - **Imaging**: Consider ultrasound of the neck if there is concern for abscess formation in the lymph nodes.
+
+## Management Strategies for Fatigue and Anemia
+
+- **First-Line Medications**:
+  - **Iron Supplements**: If anemia is due to iron deficiency.
+  - **Vitamin B12 or Folate**: If anemia is due to deficiencies in these vitamins.
+
+- **Alternative Management Strategies**:
+  - **Erythropoiesis-Stimulating Agents**: In cases of anemia related to chronic disease.
+  - **Lifestyle Modifications**: Encourage a balanced diet rich in iron and vitamins, and consider addressing underlying causes of fatigue.
+
+## Patient Education and Lifestyle Advice
+
+- **Tailored Advice**:
+  - **Symptom Management**: Encourage hydration, rest, and over-the-counter pain relievers for sore throat and fever.
+  - **Social Support**: Address social isolation by encouraging connections with friends or support groups, which can help alleviate stress.
+  - **Stress Management Techniques**: Introduce relaxation techniques such as mindfulness or gentle exercise to improve overall well-being.
+  - **Follow-Up**: Emphasize the importance of follow-up appointments to monitor symptoms and adjust management as needed.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:58:31Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+## Diagnostic Tests for Chronic Pain and Stress
+- **Guidelines for Chronic Pain Evaluation**:
+  - Comprehensive assessment is essential, including:
+    - **Physical Examination**: To identify any musculoskeletal issues.
+    - **Imaging Studies**: MRI or CT scans may be recommended if there are red flags (e.g., neurological deficits, significant trauma).
+    - **Psychological Assessment**: To evaluate stress and its impact on pain perception.
+  - **NICE Guidelines** emphasize a multidisciplinary approach, integrating physical and psychological evaluations to tailor management strategies effectively.
+
+## Management Strategies for Elevated Blood Pressure
+- **Guidelines for Blood Pressure Management**:
+  - For a reading of **148/97 mmHg** (Stage 1 Hypertension):
+    - **Lifestyle Modifications**:
+      - Encourage dietary changes (DASH diet).
+      - Promote regular physical activity.
+      - Advise weight loss if overweight.
+      - Limit alcohol intake and reduce sodium consumption.
+    - **Pharmacological Interventions**:
+      - Initiate antihypertensive medication if lifestyle changes are insufficient after a few months.
+      - First-line options may include ACE inhibitors, calcium channel blockers, or thiazide diuretics, depending on patient-specific factors.
+
+## Long-term Management for Chronic Pain Post-Brain Injury
+- **Guidelines for Chronic Pain Management**:
+  - Emphasize a **multimodal approach**:
+    - **Medication Management**: Consider analgesics, anticonvulsants, or antidepressants for neuropathic pain.
+    - **Physical Therapy**: Tailored exercise programs to improve function and reduce pain.
+    - **Psychological Support**: Cognitive-behavioral therapy (CBT) to address pain-related stress and coping strategies.
+    - **Interventional Procedures**: Options like nerve blocks or spinal cord stimulation may be considered for refractory pain.
+
+## Patient Education for Coping with Violence and Limited Social Contact
+- **Guidelines for Enhancing Coping Strategies**:
+  - **Education on Safety**: Teach strategies for personal safety and recognizing potentially violent situations.
+  - **Social Support**:
+    - Encourage participation in community groups or support networks to reduce isolation.
+    - Promote communication with trusted friends or family members about feelings and experiences.
+  - **Coping Strategies**:
+    - Introduce stress management techniques such as mindfulness, relaxation exercises, or journaling.
+    - Recommend professional counseling or therapy to develop coping mechanisms and resilience in the face of environmental stressors.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:58:45Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Urgent Urination Symptoms and Guidelines
+- **Symptoms**: Urgent desire to urinate, suprapubic pain, increased frequency, and dysuria are indicative of a **urinary tract infection (UTI)**.
+- **Guidelines**: The NICE guidelines recommend urine testing for patients with symptoms that increase the likelihood of a UTI.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI; includes dipstick tests for leukocytes and nitrites.
+  - **Symptoms and Signs Table**: Helps assess the likelihood of UTI based on the presence of symptoms like dysuria and loin tenderness.
+
+### Anemia Evaluation
+- **Current Findings**: Hemoglobin of 9.4 g/dL and hematocrit of 26% indicate significant anemia.
+- **Recommended Tests**:
+  - **Full Blood Count (FBC)**: To assess red blood cell indices and reticulocyte count.
+  - **Iron Studies**: To evaluate iron deficiency.
+  - **Vitamin B12 and Folate Levels**: To rule out deficiencies.
+  - **Peripheral Blood Smear**: To identify morphological abnormalities in red blood cells.
+  - **Bone Marrow Biopsy**: Considered if other tests do not clarify the cause.
+
+### Medication Recommendations for UTI Symptoms
+- **First-Line Medications**:
+  - **Antibiotics**: Nitrofurantoin or trimethoprim are commonly prescribed for uncomplicated UTIs.
+- **Alternative Options**:
+  - **Phenazopyridine**: Can be used for symptomatic relief of dysuria.
+  - **Pelvic Floor Muscle Training**: Recommended for stress urinary incontinence if applicable.
+- **Considerations**: Ensure urine culture is performed to guide antibiotic therapy based on susceptibility.
+
+### Long-Term Management of Anemia
+- **Management Plans**:
+  - **Iron Supplementation**: If iron deficiency is confirmed, oral iron supplements are typically recommended.
+  - **Dietary Modifications**: Increase intake of iron-rich foods (e.g., red meat, leafy greens) and vitamin C to enhance absorption.
+  - **Monitoring**: Regular follow-up with blood tests to monitor hemoglobin levels and adjust treatment as necessary.
+- **Lifestyle Modifications**:
+  - **Avoidance of Tea/Coffee**: Limit intake around meals as they can inhibit iron absorption.
+  - **Education**: Inform patients about the importance of adherence to supplementation and dietary changes.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:58:58Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Differential Diagnoses for Sore Throat Symptoms
+- **Common Differential Diagnoses**:
+  - Viral pharyngitis (most common cause)
+  - Streptococcal pharyngitis (Group A beta-hemolytic streptococcus)
+  - Infectious mononucleosis
+  - Peritonsillar abscess
+  - Allergic rhinitis
+
+- **Guidelines and Criteria**:
+  - **Centor Criteria**: Assesses likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Evaluates severity and need for antibiotics:
+    - Fever in the last 24 hours
+    - Purulence (pus on tonsils)
+    - Attend rapidly (within 3 days)
+    - Severely inflamed tonsils
+    - Age 15 or younger
+  - **Investigations**: Rapid antigen tests for GABHS can confirm streptococcal infection.
+
+### Diagnostic Tests for Runny/Stuffy Nose and Associated Symptoms
+- **Recommended Diagnostic Tests**:
+  - **Clinical Assessment**: Focus on symptom duration and severity.
+  - **Throat Swab**: To test for streptococcal infection if sore throat is present.
+  - **Nasal Swab**: For viral testing if influenza or other viral infections are suspected.
+  - **Blood Tests**: Consider if systemic symptoms persist or worsen (e.g., complete blood count for leukocytosis).
+
+### Treatment Options for Difficulty Swallowing and Swollen Tonsils
+- **First-Line Treatment**:
+  - **Antibiotics**: If bacterial infection is confirmed (e.g., phenoxymethylpenicillin):
+    - Dosage: 500 mg four times daily for 10 days.
+  
+- **Alternative Treatment Options**:
+  - **Analgesics**: Paracetamol or ibuprofen for pain relief.
+  - **Medicated Lozenges**: Containing benzocaine or hexylresorcinol for symptomatic relief.
+  - **Throat Sprays**: Chlorhexidine plus benzydamine (if available) for pain reduction.
+
+### Long-Term Management for Swollen Lymph Nodes and Sore Throat Post-Bronchitis
+- **Management Plans**:
+  - **Lifestyle Modifications**:
+    - Encourage hydration and humidification of air.
+    - Avoid irritants (smoking, strong odors).
+    - Promote good hand hygiene to prevent infections.
+  
+- **Preventive Strategies**:
+  - **Vaccinations**: Ensure up-to-date vaccinations (e.g., influenza).
+  - **Regular Follow-Up**: Monitor for recurrent symptoms and consider referral to an ENT specialist if complications arise.
+  - **Education**: Teach patients about recognizing early signs of complications or recurrent infections.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:59:13Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes and Guidelines for Symptoms
+
+- **Combination of Symptoms**: The patient presents with difficulty swallowing, body aches, runny/stuffy nose, fatigue, swollen lymph nodes, swollen tonsils, decreased appetite, cough, sore throat, and fever.
+- **Potential Causes**:
+  - **Viral Infections**: Common cold or influenza, which can cause upper respiratory symptoms and systemic effects.
+  - **Bacterial Infections**: Streptococcal pharyngitis (strep throat) is a significant concern, especially with swollen tonsils and lymphadenopathy.
+- **Guidelines and Criteria**:
+  - **Centor Criteria**: Used to assess the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Another scoring system that evaluates sore throat severity and helps determine the need for antibiotics.
+- **Investigations**: Throat swabs for rapid antigen detection tests or cultures to confirm streptococcal infection.
+
+### Initial Diagnostic Tests for Fever and Sore Throat
+
+- **Symptoms**: Fever of 38.4°C, sore throat, and swollen tonsils.
+- **Guidelines Recommend**:
+  - **Throat Swab**: To test for streptococcal infection using rapid antigen tests or culture.
+  - **Consideration of Other Tests**: If symptoms persist or worsen, additional tests may include complete blood count (CBC) to assess for leukocytosis or other infections.
+
+### Management of Otitis Media
+
+- **Ongoing Issues**: For a patient with recurrent otitis media.
+- **First-Line Medications**:
+  - **Analgesics**: Acetaminophen or ibuprofen for pain relief.
+  - **Antibiotics**: Amoxicillin is typically the first-line antibiotic if bacterial infection is suspected.
+- **Alternative Medications**:
+  - **Watchful Waiting**: In cases of mild symptoms, especially in older children, antibiotics may not be immediately necessary.
+  - **Topical Analgesics**: Ear drops containing analgesics may provide symptomatic relief.
+
+### Patient Education for Fatigue and Acute Respiratory Symptoms
+
+- **Symptoms**: Fatigue, decreased appetite, body aches alongside acute respiratory symptoms.
+- **Guidelines Suggest**:
+  - **Rest and Hydration**: Emphasize the importance of adequate rest and fluid intake to support recovery.
+  - **Nutrition**: Encourage a balanced diet to improve energy levels and overall health.
+  - **Symptomatic Relief**: Use over-the-counter medications for pain and fever management.
+  - **Monitoring Symptoms**: Advise patients to seek medical attention if symptoms worsen or do not improve within a few days.

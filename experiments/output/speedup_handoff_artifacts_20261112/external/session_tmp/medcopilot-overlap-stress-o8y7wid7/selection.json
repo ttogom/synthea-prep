@@ -1,0 +1,32 @@
+{
+  "preparation": "Eight longest S/O cases from existing ten-case profiling set",
+  "preparation_patient_ids": [
+    "heart_failure_49e076ea-735a-23a4-4c14-2713788f8689",
+    "cystitis_c60576a7-1b1f-ea39-6557-f28df9d9f9cc",
+    "cystitis_7d2fd4fe-55a3-74fe-bc5e-60628832135d",
+    "hypertension_a070f250-1eb8-ebc8-9dd1-24ffc668b927",
+    "strep_throat_afece5f2-e855-0dd1-f682-a0205c64c421",
+    "viral_pharyngitis_540f8b50-afd6-83eb-a8a0-3a2b6acd2ddd",
+    "viral_pharyngitis_b7a8c96f-9b8b-0dd5-b92d-750340f7128c",
+    "cystitis_c282c89b-fb2d-bac0-ed0e-632aa6bffd0a"
+  ],
+  "generation": "Four largest saved guideline-containing prompts across the 64-patient pilot",
+  "generation_sizes_characters": [
+    9596,
+    9429,
+    9305,
+    9100
+  ],
+  "settings": {
+    "preparation_workers": 4,
+    "cpu_threads_per_worker": 2,
+    "RPM_per_worker": 12,
+    "TPM_per_worker": 200000,
+    "model": "gemma3:4b",
+    "parallel_slots": 4,
+    "context_per_slot": 16384,
+    "max_output_tokens": 768,
+    "temperature": 1,
+    "isolated_port": 11437
+  }
+}

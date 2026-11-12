@@ -1,0 +1,136 @@
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:55:00Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).
+- **Guidelines**: The NICE guidelines on urinary tract infections (UTIs) provide a framework for assessing these symptoms.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI diagnosis through culture and microscopy.
+  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.
+  - **Referral**: For infants under 3 months with suspected UTI, refer to pediatric specialist care.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Guidelines**: The NICE guidelines on urine testing and chronic kidney disease (CKD) provide recommendations for evaluating abnormal urine findings.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify specific pathogens causing infection.
+  - **Microscopy**: To assess for crystals, cells, or casts that may indicate underlying conditions.
+  - **Further Investigations**: Consider metabolic assessments if indicated by urine composition (e.g., protein, glucose, ketones).
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **First-Line Options**: The NICE guidelines recommend:
+  - **Paracetamol**: As a first-line analgesic for managing pain in CKD patients.
+- **Alternative Options**:
+  - **Non-Steroidal Anti-Inflammatory Drugs (NSAIDs)**: Generally avoided due to renal risks but may be considered in specific cases with caution.
+  - **Opioids**: May be used for severe pain, with careful monitoring of renal function and side effects.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Guidelines**: NICE guidelines emphasize the importance of patient education in managing CKD symptoms.
+- **Recommendations**:
+  - **Fluid Management**: Educate on appropriate fluid intake to manage urination frequency.
+  - **Dietary Modifications**: Advise on a renal-friendly diet, potentially low in protein and sodium, to alleviate symptoms.
+  - **Monitoring Symptoms**: Encourage patients to track changes in urination patterns and report any significant changes to their healthcare provider.
+prompt is used!
+{"label": "B_w0", "index": 0, "seconds": 19.5693414999987, "ok": true}
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:55:18Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes Associated with Urinary Symptoms
+
+The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is highly suggestive of a **urinary tract infection (UTI)**. Other potential causes include:
+
+- **Cystitis (Lower UTI)**:
+  - Symptoms: Painful urination (dysuria), urgency, frequency.
+  - Distinguishing Features: Typically presents without systemic symptoms like fever.
+
+- **Acute Pyelonephritis**:
+  - Symptoms: Similar to UTI but may include fever and flank pain.
+  - Distinguishing Features: Presence of systemic symptoms and possible loin tenderness.
+
+- **Bladder Stones**:
+  - Symptoms: Similar urinary symptoms, may include hematuria.
+  - Distinguishing Features: History of recurrent urinary issues or imaging findings.
+
+- **Prostatitis (in males)**:
+  - Symptoms: Urinary urgency, pain, and possibly fever.
+  - Distinguishing Features: Perineal pain and systemic symptoms.
+
+### Recommended Diagnostic Tests
+
+For a patient presenting with the aforementioned urinary symptoms, the following diagnostic tests are recommended:
+
+- **Urine Testing**:
+  - **Urine Culture**: Essential for diagnosing UTI and determining antibiotic susceptibility.
+  - **Dipstick Test**: Can provide rapid results for nitrites and leukocyte esterase.
+
+- **Imaging Studies** (if indicated):
+  - **Ultrasound or CT Scan**: To rule out anatomical abnormalities or stones if symptoms persist or recur.
+
+- **Consideration of Referral**:
+  - Referral to a urologist may be warranted if there are recurrent infections or complications.
+
+### Treatment Options for Anemia
+
+For a patient presenting with anemia (hemoglobin 9.4 g/dL) and a history of prior anemia, the following treatment options should be considered:
+
+- **First-Line Treatment**:
+  - **Iron Supplementation**: Oral iron (ferrous sulfate) is commonly used to treat iron deficiency anemia.
+  - **Dietary Modifications**: Increase intake of iron-rich foods (red meat, leafy greens, legumes).
+
+- **Alternative Treatments**:
+  - **Intravenous Iron**: Considered if oral iron is not tolerated or if rapid correction is needed.
+  - **Erythropoiesis-Stimulating Agents (ESAs)**: May be considered in specific cases, particularly in chronic kidney disease.
+
+### Long-Term Management for Chronic Sinusitis
+
+For a patient presenting with chronic sinusitis, the following lifestyle advice and management plans are recommended:
+
+- **Nasal Irrigation**:
+  - Regular saline nasal irrigation can help clear mucus and allergens.
+
+- **Avoidance of Triggers**:
+  - Identify and avoid allergens or irritants that may exacerbate symptoms.
+
+- **Medication Management**:
+  - **Intranasal Corticosteroids**: Recommended for reducing inflammation.
+  - **Antihistamines**: If allergies are a contributing factor.
+
+- **Surgery Consideration**:
+  - Referral for surgical evaluation may be necessary if symptoms are refractory to medical management.
+
+- **Patient Education**:
+  - Educate patients on the importance of adherence to treatment and recognizing symptom exacerbation.
+{"label": "B_w0", "index": 5, "seconds": 9.271407583000837, "ok": true}

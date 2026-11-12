@@ -1,0 +1,186 @@
+{
+  "patients": 8,
+  "strata": {
+    "low": 2,
+    "moderate_low": 2,
+    "moderate_high": 2,
+    "high": 2
+  },
+  "workers": 4,
+  "settings": {
+    "requests_per_minute_per_worker": 12,
+    "tokens_per_minute_per_worker": 200000
+  },
+  "two_worker_baseline": {
+    "matched_service_sum_seconds": 121.39476454300893,
+    "matched_mean_patient_seconds": 15.174345567876117,
+    "reconstructed_processing_wall_seconds": 61.73193233499478,
+    "reconstructed_total_wall_including_startup_seconds": 91.98466570999153,
+    "worker_service_sums_seconds": {
+      "0": 61.73193233499478,
+      "1": 59.66863291600748
+    },
+    "initialization_seconds": [
+      30.25273337499675,
+      30.253796208002314
+    ]
+  },
+  "four_worker_run": {
+    "matched_service_sum_seconds": 118.8298927089927,
+    "matched_mean_patient_seconds": 14.853736588624088,
+    "measured_processing_wall_seconds": 32.12037104200135,
+    "measured_total_wall_including_startup_seconds": 53.52601062499889,
+    "initialization_seconds": [
+      21.403624541999307,
+      21.322697249997873,
+      21.402445958003227,
+      21.305936083001143
+    ]
+  },
+  "speedup": {
+    "processing_wall": 1.921893500366875,
+    "startup_inclusive_wall": 1.7185040438457568,
+    "concurrency_normalized_service_throughput": 2.0431687982803695,
+    "mean_patient_latency_new_over_old": 0.9788716437346231
+  },
+  "stages": {
+    "keyword_extraction": {
+      "two_worker_mean_seconds": 2.8288154636256877,
+      "four_worker_mean_seconds": 3.294234213249183
+    },
+    "patient_retrieval_reranking_attribution": {
+      "two_worker_mean_seconds": 1.6813552497496858,
+      "four_worker_mean_seconds": 0.969148031750592
+    },
+    "guideline_question_generation": {
+      "two_worker_mean_seconds": 2.180352109377054,
+      "four_worker_mean_seconds": 1.9027411196257162
+    },
+    "guideline_retrieval": {
+      "two_worker_mean_seconds": 8.471875833125523,
+      "four_worker_mean_seconds": 8.681252343749293
+    },
+    "prompt_assembly_saving_other_overhead": {
+      "two_worker_mean_seconds": 0.011946911998165888,
+      "four_worker_mean_seconds": 0.006360880249303591
+    }
+  },
+  "per_case": [
+    {
+      "patient_id": "strep_throat_48877f57-4e3a-72bb-c7d1-b71e8132fab3",
+      "stratum": "low",
+      "two_worker_seconds": 13.39664187499875,
+      "four_worker_seconds": 13.407885749998968,
+      "ratio_new_over_old": 1.0008393054845486
+    },
+    {
+      "patient_id": "hypertension_a070f250-1eb8-ebc8-9dd1-24ffc668b927",
+      "stratum": "high",
+      "two_worker_seconds": 15.733418750001874,
+      "four_worker_seconds": 15.8994548749979,
+      "ratio_new_over_old": 1.0105530862449081
+    },
+    {
+      "patient_id": "strep_throat_afece5f2-e855-0dd1-f682-a0205c64c421",
+      "stratum": "moderate_high",
+      "two_worker_seconds": 13.620579583999643,
+      "four_worker_seconds": 12.994460750000144,
+      "ratio_new_over_old": 0.9540314103274274
+    },
+    {
+      "patient_id": "viral_pharyngitis_b7a8c96f-9b8b-0dd5-b92d-750340f7128c",
+      "stratum": "moderate_low",
+      "two_worker_seconds": 15.093606125003134,
+      "four_worker_seconds": 15.888204541995947,
+      "ratio_new_over_old": 1.0526447033539936
+    },
+    {
+      "patient_id": "viral_pharyngitis_8e620ba9-7d8f-95cf-402d-0ad61d60594f",
+      "stratum": "low",
+      "two_worker_seconds": 15.441770625002391,
+      "four_worker_seconds": 14.897762833003071,
+      "ratio_new_over_old": 0.9647703747704622
+    },
+    {
+      "patient_id": "heart_failure_49e076ea-735a-23a4-4c14-2713788f8689",
+      "stratum": "high",
+      "two_worker_seconds": 16.636368125000445,
+      "four_worker_seconds": 16.05656604199612,
+      "ratio_new_over_old": 0.9651485180751067
+    },
+    {
+      "patient_id": "viral_pharyngitis_540f8b50-afd6-83eb-a8a0-3a2b6acd2ddd",
+      "stratum": "moderate_low",
+      "two_worker_seconds": 14.407417916998384,
+      "four_worker_seconds": 13.370132333002402,
+      "ratio_new_over_old": 0.9280033667398406
+    },
+    {
+      "patient_id": "cystitis_c60576a7-1b1f-ea39-6557-f28df9d9f9cc",
+      "stratum": "moderate_high",
+      "two_worker_seconds": 17.064961542004312,
+      "four_worker_seconds": 16.31542558399815,
+      "ratio_new_over_old": 0.9560774891779728
+    }
+  ],
+  "diagnostics_mean_seconds": {
+    "limiter_rpm": 0.00013151537496014498,
+    "limiter_tpm": 5.885249265702441e-06,
+    "attribution": 0.2142571352505911
+  },
+  "http_attempts": [
+    {
+      "stage": "keywords",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 8
+    },
+    {
+      "stage": "guideline_questions",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 8
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/embeddings",
+      "status": 200,
+      "count": 8
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/chat/completions",
+      "status": 200,
+      "count": 8
+    }
+  ],
+  "captured_model_response_counts": {
+    "keyword_extraction": 8,
+    "guideline_questions": 8,
+    "guideline_query_embedding": 8,
+    "guideline_evidence": 8
+  },
+  "resources": {
+    "peak_sum_worker_rss_gib": 15.452911376953125,
+    "swap_at_first_sample": "total = 8192.00M  used = 6986.75M  free = 1205.25M  (encrypted)",
+    "swap_at_last_sample": "total = 8192.00M  used = 6978.75M  free = 1213.25M  (encrypted)"
+  },
+  "integrity": {
+    "unique_patients": 8,
+    "workers_each_completed_two": true,
+    "completed_evidence_components": 16,
+    "all_inputs_match_baseline": true,
+    "guidelines_settings_unchanged": true,
+    "prompts_and_ranking_metadata_present": true,
+    "final_generation_scoring_judging_calls": 0,
+    "error_artifacts": 0
+  },
+  "limitations": [
+    "Baseline eight-case wall time is reconstructed from the existing two-worker per-patient durations and original assignments, excluding the two unselected cases; no new baseline run was performed.",
+    "Four-worker measured processing wall includes tiny protocol and shutdown overhead; baseline reconstruction sums recorded service durations.",
+    "Only two cases per new worker; fresh limiter buckets cannot establish long-run throttling behavior.",
+    "API-generated keywords/questions/answers are stochastic. Different screening retry counts and provider latency can affect timing.",
+    "This is preparation-only. Concurrent final generation/scoring interference was not reproduced; existing parent work was left untouched.",
+    "Two-worker and four-worker runs occurred at different times, so throughput ratios are estimates rather than a controlled simultaneous comparison."
+  ]
+}

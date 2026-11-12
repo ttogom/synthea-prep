@@ -1,0 +1,114 @@
+......................................................................................................................Could not mark run.json as stopped:
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 330, in stop
+    self.update(status="failed_incomplete", finished_at=finished_at.isoformat())
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 274, in update
+    write_run_json(self.run_dir, self.metadata)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 110, in write_run_json
+    os.replace(temporary, run_dir / RUN_FILE)
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+OSError: disk full
+...................................................................................................................................................guidelines failed (RuntimeError): [REDACTED] and [REDACTED]
+...patient_retrieval failed (RuntimeError): failure
+..guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+....patient_retrieval failed (RuntimeError): safe
+......................................................................................s................ERROR:graphrag.language_model.providers.litellm.request_wrappers.with_logging:with_logging: Request failed with exception=secret-mini secret-llama
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+RuntimeError: secret-mini secret-llama
+....ERROR:graphrag.language_model.providers.litellm.request_wrappers.with_logging:with_logging: Request failed with exception=temporary failure
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+RuntimeError: temporary failure
+.........................ERROR:graphrag.language_model.providers.litellm.request_wrappers.with_logging:with_logging: Request failed with exception=retry failed before response
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+RuntimeError: retry failed before response
+........ERROR:graphrag.language_model.providers.litellm.services.retry.exponential_retry:ExponentialRetry: Request failed, retrying, retries=1, delay=2.0, max_retries=2, exception=litellm.RateLimitError: retry
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/services/retry/exponential_retry.py", line 47, in retry
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+litellm.exceptions.RateLimitError: litellm.RateLimitError: retry
+..............................................................................Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpgl_dy6bn/run: Plan judge concurrency must be an integer from 1 to 64
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpgl_dy6bn/run: Plan judge context length must be an integer from 512 to 262144
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpgl_dy6bn/run: Plan judge context length must be an integer from 512 to 262144
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpgl_dy6bn/run: Plan judge context length must be an integer from 512 to 262144
+.......................WARNING:graphrag.config.models.language_model_config:Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+WARNING:graphrag.config.models.language_model_config:Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+.........patient_retrieval failed (RuntimeError): Retrieval failed
+.....guidelines failed (RuntimeError): Graph unavailable [REDACTED]
+.................................................................................................................................................................huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+.......
+----------------------------------------------------------------------
+Ran 697 tests in 8.561s
+
+OK (skipped=1)
+Judge calls made: 18; reused from run/judge_responses.jsonl: 0
+HTML results: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpzgbepxf0/run/report.html
+Judge calls made: 0; reused from run/judge_responses.jsonl: 0
+HTML results: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpzgbepxf0/run/report.html
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/asyncio/base_events.py:693: ResourceWarning: unclosed event loop <_UnixSelectorEventLoop running=False closed=False debug=False>

@@ -1,0 +1,42 @@
+{
+  "status": "completed",
+  "output": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/ollama-calibration-speedup.json",
+  "conditions": [
+    {
+      "requests": 36,
+      "valid_requests": 35,
+      "elapsed_seconds": 70.69704562499828,
+      "p50_seconds": 1.7147132499994768,
+      "p95_seconds": 3.477858801747061,
+      "requests_per_second": 0.5092150553356433,
+      "valid_requests_per_second": 0.495070192687431
+    },
+    {
+      "requests": 36,
+      "valid_requests": 36,
+      "elapsed_seconds": 50.563313332997495,
+      "p50_seconds": 2.4188836664980045,
+      "p95_seconds": 4.75667914575024,
+      "requests_per_second": 0.7119786585762862,
+      "valid_requests_per_second": 0.7119786585762862
+    },
+    {
+      "requests": 36,
+      "valid_requests": 36,
+      "elapsed_seconds": 44.72368695800833,
+      "p50_seconds": 4.50473602099737,
+      "p95_seconds": 7.673693833754442,
+      "requests_per_second": 0.8049425807358165,
+      "valid_requests_per_second": 0.8049425807358165
+    },
+    {
+      "requests": 36,
+      "valid_requests": 36,
+      "elapsed_seconds": 65.56105079200643,
+      "p50_seconds": 4.318217625001125,
+      "p95_seconds": 7.211632406750141,
+      "requests_per_second": 0.5491065131675608,
+      "valid_requests_per_second": 0.5491065131675608
+    }
+  ]
+}

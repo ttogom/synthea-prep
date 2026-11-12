@@ -1,0 +1,58 @@
+{
+  "scope": "One additional guideline-only replay from the ten sampled patients; excluded from ten-case averages",
+  "total_seconds": 6.9922122080024565,
+  "events": [
+    {
+      "step": "load_config",
+      "seconds": 0.00286995799979195
+    },
+    {
+      "step": "load_tables",
+      "seconds": 0.19624733299860964
+    },
+    {
+      "step": "read_indexer_entities",
+      "seconds": 0.18186016700201435
+    },
+    {
+      "step": "read_indexer_reports",
+      "seconds": 0.02675575000466779
+    },
+    {
+      "step": "read_indexer_text_units",
+      "seconds": 0.12626791699585738
+    },
+    {
+      "step": "read_indexer_relationships",
+      "seconds": 0.14977400000498164
+    },
+    {
+      "step": "build_search_engine",
+      "seconds": 0.150954290998925
+    },
+    {
+      "step": "limiter",
+      "seconds": 7.167000148911029e-06
+    },
+    {
+      "step": "http_full",
+      "path": "/v1/embeddings",
+      "seconds": 0.31619970799511066,
+      "headers_seconds": 0.3161976249975851,
+      "stream": false,
+      "status": 200
+    },
+    {
+      "step": "limiter",
+      "seconds": 2.4084001779556274e-05
+    },
+    {
+      "step": "http_full",
+      "path": "/v1/chat/completions",
+      "seconds": 5.643935332998808,
+      "headers_seconds": 0.5923858329988434,
+      "stream": true,
+      "status": 200
+    }
+  ]
+}

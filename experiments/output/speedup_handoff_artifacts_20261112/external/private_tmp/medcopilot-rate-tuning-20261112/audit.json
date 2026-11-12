@@ -1,0 +1,88 @@
+{
+  "checks": {
+    "all_comparison_configs_differ_only_in_RPM_TPM": true,
+    "query_count": 24,
+    "http_attempt_count": 48,
+    "http_status_counts": {
+      "200": 48
+    },
+    "finish_reason_counts": {
+      "stop": 24
+    },
+    "byte_identical_requests_per_patient": false,
+    "identical_contexts_per_patient": false,
+    "identical_queries_per_patient": true,
+    "patients_with_context_variation": [
+      "viral_pharyngitis_8e620ba9-7d8f-95cf-402d-0ad61d60594f"
+    ],
+    "patients_with_request_variation": [
+      "viral_pharyngitis_8e620ba9-7d8f-95cf-402d-0ad61d60594f"
+    ],
+    "initial_factorial_byte_identical_requests": true,
+    "initial_comparison_strata": {
+      "moderate_high": 2,
+      "moderate_low": 1,
+      "high": 1
+    },
+    "confirmation_strata": {
+      "low": 1,
+      "moderate_high": 1,
+      "high": 1,
+      "moderate_low": 1
+    },
+    "prepared_patients": 10,
+    "validation_strata": {
+      "moderate_high": 3,
+      "moderate_low": 3,
+      "high": 2,
+      "low": 2
+    },
+    "final_generation_scoring_judging_calls": 0,
+    "validation_error_artifacts": 0,
+    "credential_headers_saved": false
+  },
+  "before_after": {
+    "old_wall_seconds_including_loading": 296.671801291006,
+    "new_wall_seconds_including_loading": 110.8979514169987,
+    "old_mean_preparation_seconds": 51.43532210840058,
+    "new_mean_preparation_seconds": 14.956207729300512,
+    "service_speedup": 3.4390617621360198,
+    "wall_speedup": 2.6751783734530865,
+    "old_warm_eight_mean_preparation_seconds": 59.87806965112486,
+    "new_warm_eight_mean_preparation_seconds": 14.67543870324971,
+    "approx_preparation_hours_for_2378_two_workers": 4.939703052816197,
+    "stages": {
+      "keyword_extraction": {
+        "old_mean_seconds": 3.146633549800754,
+        "new_mean_seconds": 2.6895552334004607
+      },
+      "patient_retrieval_reranking_attribution": {
+        "old_mean_seconds": 1.7410371087993552,
+        "new_mean_seconds": 1.6850044498998613
+      },
+      "guideline_question_generation": {
+        "old_mean_seconds": 2.16721684150034,
+        "new_mean_seconds": 2.3554616000015813
+      },
+      "guideline_retrieval": {
+        "old_mean_seconds": 44.365846658701045,
+        "new_mean_seconds": 8.213755266500812
+      },
+      "prompt_assembly_saving_other_overhead": {
+        "old_mean_seconds": 0.014587949599081185,
+        "new_mean_seconds": 0.012431179497798438
+      }
+    }
+  },
+  "warnings": {
+    "async_limiter_reuse": 12
+  },
+  "limitations": [
+    "Initial comparison sampled three strata; confirmation corrected to one patient per stratum and full validation used all ten.",
+    "Initial exhausted-bucket stress preconditions RPM then TPM when each is first acquired, adding conservative one-time debt. Use full-preparation timings for operational projections.",
+    "Small sample and stochastic API latency do not establish a unique global optimum or clinical equivalence.",
+    "One low-complexity confirmation case selected a different tenth context entity between conditions, with unchanged input token count. The initial factorial requests were byte-identical; do not interpret confirmation as a perfectly controlled clinical comparison.",
+    "Quota headers are observed at test time; two workers have independent local buckets. Rebudget if workers or other shared API traffic change.",
+    "The existing library warns about sequential reuse of limiters across asyncio loops. No failures were observed; no library code was changed."
+  ]
+}

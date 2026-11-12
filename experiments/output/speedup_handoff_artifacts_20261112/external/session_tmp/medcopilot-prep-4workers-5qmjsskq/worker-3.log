@@ -1,0 +1,138 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:41Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Differential Diagnoses for Chronic Neck and Low Back Pain
+- **Considerations**:
+  - **Musculoskeletal Disorders**: 
+    - **Osteoarthritis**: Look for joint stiffness, crepitus, and pain exacerbated by movement.
+    - **Herniated Disc**: Symptoms may include radicular pain, numbness, or weakness in extremities.
+  - **Neurological Conditions**:
+    - **Cervical or Lumbar Radiculopathy**: Assess for nerve root involvement through sensory or motor deficits.
+  - **Inflammatory Conditions**:
+    - **Ankylosing Spondylitis**: Check for morning stiffness and improvement with activity.
+  - **Infections or Tumors**: Consider if there are systemic symptoms like fever or unexplained weight loss.
+  
+- **Differentiating Findings**:
+  - **Imaging**: MRI or CT scans can help visualize structural abnormalities.
+  - **Physical Examination**: Neurological assessments and range of motion tests are crucial.
+  - **History**: Recent trauma, duration of symptoms, and response to previous treatments can guide diagnosis.
+
+## Guidelines for Managing Elevated Blood Pressure in Young Adults
+- **NICE Guidelines**:
+  - **Stepwise Approach**: Begin with lifestyle modifications (diet, exercise) before pharmacological interventions.
+  - **First-Line Medications**: 
+    - **ACE Inhibitors** or **Calcium Channel Blockers** are recommended for initial treatment.
+  - **Monitoring**: Regular follow-up to assess blood pressure control and medication adherence.
+  
+- **Specific Recommendations**:
+  - **Dietary Changes**: Emphasize the DASH diet (Dietary Approaches to Stop Hypertension).
+  - **Physical Activity**: Encourage at least 150 minutes of moderate-intensity exercise weekly.
+
+## Pain Management Strategy for Chronic Pain Post-Traumatic Brain Injury
+- **Guidelines**:
+  - **First-Line Medications**:
+    - **Acetaminophen** or **NSAIDs** for mild to moderate pain.
+    - **Gabapentinoids** (e.g., gabapentin) for neuropathic pain.
+  - **Non-Pharmacological Therapies**:
+    - **Cognitive Behavioral Therapy (CBT)**: Effective for managing chronic pain and associated psychological distress.
+    - **Physical Therapy**: Tailored exercise programs to improve function and reduce pain.
+  
+- **Monitoring and Adjustment**: Regular assessments to evaluate pain levels and treatment efficacy.
+
+## Recommendations for Improving Mental Health and Social Functioning
+- **Patient Education**:
+  - **Stress Management Techniques**: Teach relaxation strategies such as mindfulness and deep breathing exercises.
+  - **Coping Strategies**: Provide resources for managing feelings of violence and stress.
+  
+- **Counseling**:
+  - **Individual or Group Therapy**: Facilitate social connections and provide support.
+  - **Crisis Intervention**: Ensure access to immediate support if feelings of violence escalate.
+  
+- **Lifestyle Modifications**:
+  - **Social Engagement**: Encourage participation in community activities or support groups.
+  - **Physical Activity**: Promote regular exercise as a means to improve mood and reduce stress.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:56Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Upper Respiratory Tract Infections in a 2-Year-Old
+
+- **Potential Causes**:
+  - **Viral Infections**: Most common cause of sore throat and fever in children, often self-limiting.
+  - **Bacterial Infections**: Group A beta-hemolytic streptococcus (GABHS) is a key bacterial cause, particularly in cases with severe symptoms.
+  
+- **Diagnostic Criteria**:
+  - **Centor Criteria**: Useful for assessing likelihood of streptococcal infection:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Another scoring system that includes:
+    - Fever in the last 24 hours
+    - Purulence (pus on tonsils)
+    - Rapid attendance (within 3 days of symptom onset)
+    - Severe symptoms
+  - Both criteria help determine the need for antibiotics.
+
+### Diagnostic Tests for Fatigue and Sore Throat
+
+- **Recommended Tests**:
+  - **Rapid Antigen Testing**: For GABHS in cases of sore throat.
+  - **Throat Culture**: If rapid tests are negative but suspicion remains high.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection or inflammation.
+  
+- **Guidelines**:
+  - Emphasize the importance of clinical evaluation alongside testing to guide management decisions.
+
+### Symptomatic Relief for Upper Respiratory Symptoms
+
+- **First-Line Medications**:
+  - **Analgesics/Antipyretics**: Paracetamol or ibuprofen for pain and fever relief.
+  
+- **Alternative Options**:
+  - **Medicated Lozenges**: Containing benzocaine or hexylresorcinol for throat pain.
+  - **Throat Sprays**: Chlorhexidine plus benzydamine may provide symptomatic relief.
+  
+- **Guidelines**: Recommend supportive care as the primary approach, especially for viral infections.
+
+### Long-Term Management for Otitis Media
+
+- **Preventive Strategies**:
+  - **Vaccination**: Ensure pneumococcal and influenza vaccinations are up to date.
+  - **Avoidance of Smoke Exposure**: Reducing exposure to tobacco smoke can decrease recurrence.
+  
+- **Current Symptom Management**:
+  - **Pain Relief**: Use of analgesics for discomfort.
+  - **Monitoring Symptoms**: Regular follow-up to assess for recurrent infections.
+  
+- **Lifestyle Advice**:
+  - Encourage good hygiene practices to reduce infection risk.
+  - Consideration of ear tubes in recurrent cases, based on clinical evaluation and guidelines.

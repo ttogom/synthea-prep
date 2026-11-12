@@ -1,0 +1,107 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:41Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Sore Throat with Associated Symptoms
+- **Guidelines**: The NICE guidelines provide recommendations for managing sore throat, particularly focusing on distinguishing between viral and bacterial infections.
+- **Criteria**: 
+  - **Centor Criteria**: Evaluates the likelihood of streptococcal pharyngitis based on:
+    - Fever
+    - Absence of cough
+    - Swollen tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Assesses severity and includes:
+    - Fever in the last 24 hours
+    - Purulence (pus on tonsils)
+    - Rapid attendance (within 3 days of symptom onset)
+    - Severe symptoms
+- **Investigations**: Rapid antigen tests for Group A beta-hemolytic streptococcus (GABHS) may be considered, especially in cases with high FeverPAIN scores.
+
+### Runny/Stuffy Nose, Fatigue, and Body Aches
+- **Diagnostic Tests**: 
+  - **Viral Testing**: Consider testing for common viral pathogens (e.g., influenza, rhinovirus) if symptoms are severe or prolonged.
+  - **Complete Blood Count (CBC)**: May help identify signs of infection or inflammation.
+  - **Nasal Swab**: For specific viral infections if indicated.
+
+### Fever, Sore Throat, and Decreased Appetite
+- **First-Line Medication**: 
+  - **Paracetamol**: Recommended for pain and fever management. Typical dose is 500 mg to 1000 mg every 4 to 6 hours, not exceeding 4 grams per day.
+- **Alternative Medication**: 
+  - **Ibuprofen**: Effective for pain and inflammation. Typical dose is 200 mg to 400 mg every 6 to 8 hours, not exceeding 1200 mg per day for over-the-counter use.
+
+### Swollen Lymph Nodes and Tonsils
+- **Patient Education**:
+  - **Hydration**: Encourage increased fluid intake to soothe the throat and prevent dehydration.
+  - **Rest**: Advise adequate rest to support the immune system.
+  - **Symptom Management**: Recommend over-the-counter pain relievers (e.g., paracetamol or ibuprofen) for symptom relief.
+  - **Avoid Irritants**: Suggest avoiding smoking and exposure to secondhand smoke, which can exacerbate throat irritation.
+  - **Follow-Up**: Educate on the importance of follow-up if symptoms worsen or do not improve within a few days.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:57Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Guidelines for Potential Causes of Dyspnea
+
+- **Potential Causes**: The symptoms of dyspnea, orthopnea, edema, and rales suggest possible conditions such as heart failure, chronic obstructive pulmonary disease (COPD), pneumonia, or pulmonary edema.
+- **Distinguishing Findings**:
+  - **Heart Failure**: Look for elevated jugular venous pressure, S3 heart sound, and peripheral edema.
+  - **COPD**: Assess for history of smoking, wheezing, and prolonged expiration.
+  - **Pneumonia**: Check for fever, cough with sputum, and localized rales.
+  - **Pulmonary Edema**: Evaluate for pink, frothy sputum and bilateral rales.
+- **Guidelines**: NICE guidelines and other clinical guidelines provide frameworks for assessing these conditions, emphasizing the importance of clinical history, physical examination, and targeted investigations.
+
+### Recommended Diagnostic Tests for Dyspnea
+
+- **Chest X-ray**: To identify fluid overload, pneumonia, or other structural abnormalities.
+- **Echocardiogram**: To assess cardiac function and rule out heart failure.
+- **Pulmonary Function Tests**: To evaluate for obstructive or restrictive lung disease.
+- **Blood Tests**: Including complete blood count (CBC), B-type natriuretic peptide (BNP), and arterial blood gases (ABGs) to assess oxygenation and acid-base status.
+- **Guidelines**: Recommendations from NICE and other organizations emphasize the use of these tests to clarify the underlying cause of respiratory symptoms.
+
+### Management Strategies for Elevated HIV Viral Load and Dyspnea
+
+- **Optimize HIV Treatment**:
+  - **Antiretroviral Therapy (ART)**: Ensure adherence to ART to achieve viral suppression.
+  - **Consider Switching Regimens**: If the current regimen is ineffective or poorly tolerated.
+- **Address Respiratory Symptoms**:
+  - **Bronchodilators**: For symptomatic relief if COPD or asthma is suspected.
+  - **Corticosteroids**: May be indicated for inflammatory conditions or exacerbations.
+  - **Oxygen Therapy**: If hypoxemia is present.
+- **Guidelines**: HIV management guidelines recommend regular monitoring of viral load and CD4 counts, alongside addressing any opportunistic infections or respiratory complications.
+
+### Treatments for Chronic Anemia in HIV Context
+
+- **First-Line Treatments**:
+  - **Erythropoiesis-Stimulating Agents (ESAs)**: Such as epoetin alfa for anemia related to chronic disease or HIV.
+  - **Iron Supplementation**: If iron deficiency is identified.
+- **Alternative Treatments**:
+  - **Transfusion**: For severe anemia or symptomatic patients.
+  - **Vitamin B12 and Folate Supplementation**: If deficiencies are present.
+- **Guidelines**: NICE guidelines and other clinical recommendations emphasize the importance of addressing the underlying cause of anemia while considering the patient's HIV status and overall health. Regular monitoring of hemoglobin levels and response to treatment is crucial.

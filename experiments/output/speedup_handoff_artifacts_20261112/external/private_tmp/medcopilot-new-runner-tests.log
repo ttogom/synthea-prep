@@ -1,0 +1,207 @@
+E..EEEEEEEEE
+======================================================================
+ERROR: test_entry_runs_real_pipeline_records_all_settings_and_resumes_without_calls (__main__.RunnerEntryTests.test_entry_runs_real_pipeline_records_all_settings_and_resumes_without_calls)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 412, in test_entry_runs_real_pipeline_records_all_settings_and_resumes_without_calls
+    self.assertEqual(self.invoke(), 0)
+                     ^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 404, in invoke
+    return self.entry(["--config", str(self.config), "--yes", *(extra or [])])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/run_experiments.py", line 77, in main
+    models = AssessmentPlanModels(experiment.model_config, experiment.selected_models,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_models.py", line 43, in __init__
+    credentials = configured_model_credentials(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_config.py", line 402, in configured_model_credentials
+    raise ValueError("\n\n".join(f"  - {issue}" for issue in issues))
+ValueError:   - Shared-stage API key is missing or empty: GRAPHRAG_API_KEY
+    Add GRAPHRAG_API_KEY to .env in the repository root.
+
+======================================================================
+ERROR: test_report_failure_keeps_completed_results_and_explicit_failure_metadata (__main__.RunnerEntryTests.test_report_failure_keeps_completed_results_and_explicit_failure_metadata)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 453, in test_report_failure_keeps_completed_results_and_explicit_failure_metadata
+    self.assertEqual(self.invoke(report_failure=True), 1)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 404, in invoke
+    return self.entry(["--config", str(self.config), "--yes", *(extra or [])])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/run_experiments.py", line 77, in main
+    models = AssessmentPlanModels(experiment.model_config, experiment.selected_models,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_models.py", line 43, in __init__
+    credentials = configured_model_credentials(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_config.py", line 402, in configured_model_credentials
+    raise ValueError("\n\n".join(f"  - {issue}" for issue in issues))
+ValueError:   - Shared-stage API key is missing or empty: GRAPHRAG_API_KEY
+    Add GRAPHRAG_API_KEY to .env in the repository root.
+
+======================================================================
+ERROR: test_server_startup_failure_marks_run_failed_without_provider_requests (__main__.RunnerEntryTests.test_server_startup_failure_marks_run_failed_without_provider_requests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 446, in test_server_startup_failure_marks_run_failed_without_provider_requests
+    self.invoke(server_failure=True)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 404, in invoke
+    return self.entry(["--config", str(self.config), "--yes", *(extra or [])])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/run_experiments.py", line 77, in main
+    models = AssessmentPlanModels(experiment.model_config, experiment.selected_models,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_models.py", line 43, in __init__
+    credentials = configured_model_credentials(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_config.py", line 402, in configured_model_credentials
+    raise ValueError("\n\n".join(f"  - {issue}" for issue in issues))
+ValueError:   - Shared-stage API key is missing or empty: GRAPHRAG_API_KEY
+    Add GRAPHRAG_API_KEY to .env in the repository root.
+
+======================================================================
+ERROR: test_canonical_completed_plan_scores_are_not_reverted_from_stale_job_payloads (__main__.SchedulerPipelineTests.test_canonical_completed_plan_scores_are_not_reverted_from_stale_job_payloads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_durable_scoring_survives_canonical_export_failure_without_recomputation (__main__.SchedulerPipelineTests.test_durable_scoring_survives_canonical_export_failure_without_recomputation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_failed_received_reply_checkpoint_prevents_parse_and_remaining_work (__main__.SchedulerPipelineTests.test_failed_received_reply_checkpoint_prevents_parse_and_remaining_work)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_full_matrix_overlaps_requests_and_drains_each_local_alias_before_switching (__main__.SchedulerPipelineTests.test_full_matrix_overlaps_requests_and_drains_each_local_alias_before_switching)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_generation_failure_keeps_siblings_and_resume_retries_only_failed_job (__main__.SchedulerPipelineTests.test_generation_failure_keeps_siblings_and_resume_retries_only_failed_job)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_new_raw_reply_is_in_database_before_parser_runs (__main__.SchedulerPipelineTests.test_new_raw_reply_is_in_database_before_parser_runs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+======================================================================
+ERROR: test_newer_preparation_checkpoint_overlays_stale_canonical_before_paid_work (__main__.SchedulerPipelineTests.test_newer_preparation_checkpoint_overlays_stale_canonical_before_paid_work)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 208, in setUp
+    self.scheduler = self.fixture.create()
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 163, in create
+    return self.scheduler()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_run_experiments.py", line 166, in scheduler
+    return scheduler_module.ExperimentScheduler(self.experiment, self.patients, self.models,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_scheduler.py", line 190, in __init__
+    validate_preparation_result(experiment, record)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_preparation.py", line 37, in validate_preparation_result
+    result["id"], model_ids=experiment.selected_models,
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'FakeExperiment' object has no attribute 'selected_models'
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.174s
+
+FAILED (errors=10)

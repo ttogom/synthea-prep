@@ -1,0 +1,110 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:30Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Underlying Causes of Urinary Symptoms
+For a patient presenting with urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria, the following underlying causes are suggested by guidelines:
+
+- **Urinary Tract Infection (UTI)**: Commonly presents with dysuria, urgency, and frequency.
+- **Interstitial Cystitis**: Characterized by chronic pelvic pain and urinary urgency.
+- **Bladder Stones**: Can cause suprapubic pain and dysuria.
+- **Prostatitis**: In males, may present with similar urinary symptoms.
+
+**Distinguishing Criteria and Investigations**:
+- **Urine Testing**: Essential for diagnosing UTIs; look for nitrites, leukocyte esterase, and blood.
+- **Urine Culture**: Confirms UTI and identifies causative organisms.
+- **Ultrasound or CT Scan**: May be indicated if bladder stones or other structural abnormalities are suspected.
+- **Symptom Assessment**: Detailed history regarding onset, duration, and associated symptoms can help differentiate between conditions.
+
+### Diagnostic Tests for Dysuria and Anemia
+For a patient presenting with dysuria and anemia (hemoglobin level of 9.4 g/dL), the following diagnostic tests are recommended:
+
+- **Complete Blood Count (CBC)**: To confirm anemia and assess other blood parameters.
+- **Urinalysis**: To check for signs of infection, hematuria, or proteinuria.
+- **Urine Culture**: To identify any urinary pathogens.
+- **Renal Function Tests**: To evaluate kidney function, especially if there are concerns about chronic kidney disease.
+- **Imaging Studies**: Such as ultrasound, if structural abnormalities are suspected.
+
+### Treatment Options for Anemia
+For a patient presenting with anemia (hemoglobin 9.4 g/dL), the guidelines recommend:
+
+- **First-line Treatment**:
+  - **Iron Supplementation**: Oral iron (e.g., ferrous sulfate 325 mg once or twice daily) is commonly recommended for iron deficiency anemia.
+  
+- **Alternative Treatments**:
+  - **Intravenous Iron**: Considered if oral iron is not tolerated or if rapid correction of anemia is needed.
+  - **Erythropoiesis-Stimulating Agents (ESAs)**: May be used in specific cases, particularly in chronic kidney disease.
+
+### Lifestyle Changes and Patient Education
+For a patient presenting with increased frequency of urination and suprapubic pain, the following lifestyle changes and patient education are recommended:
+
+- **Fluid Management**: Encourage adequate hydration but advise limiting fluid intake before bedtime to reduce nocturia.
+- **Dietary Modifications**: Avoid bladder irritants such as caffeine, alcohol, and spicy foods.
+- **Pelvic Floor Exercises**: Strengthening pelvic muscles can help manage urinary urgency and frequency.
+- **Bladder Training**: Gradually increasing the time between urinations can help retrain the bladder.
+- **Education on UTI Prevention**: Advise on proper hygiene practices and the importance of urinating after intercourse to reduce UTI risk. 
+
+These recommendations aim to empower patients in managing their symptoms effectively while addressing underlying causes.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:44Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Differential Diagnoses for Sore Throat and Swollen Lymph Nodes
+- **Potential Causes**:
+  - **Viral Pharyngitis**: Commonly presents with sore throat, cough, and fever. Often associated with upper respiratory infections.
+  - **Bacterial Pharyngitis (e.g., Streptococcal)**: Characterized by severe sore throat, swollen tonsils, and fever. Rapid antigen detection tests or throat cultures can confirm diagnosis.
+  - **Mononucleosis**: Caused by Epstein-Barr virus, presents with severe sore throat, swollen lymph nodes, and fatigue. Heterophile antibody test (Monospot) can aid diagnosis.
+  - **Tonsillitis**: Inflammation of the tonsils, often with fever and difficulty swallowing. Examination and throat swabs can help differentiate from other causes.
+  - **Cervical Lymphadenopathy**: May indicate infections (viral or bacterial) or malignancies. Imaging studies or biopsies may be necessary for further evaluation.
+
+### Recommended Workup for Fever, Body Aches, and Fatigue
+- **Initial Investigations**:
+  - **Complete Blood Count (CBC)**: To assess for leukocytosis or anemia.
+  - **Blood Cultures**: If systemic infection is suspected.
+  - **Urinalysis**: To check for urinary tract infections.
+  - **Chest X-ray**: If respiratory symptoms are present to rule out pneumonia.
+  - **Viral Panel**: To identify viral infections if indicated.
+- **Further Testing**: Depending on findings, consider specific tests for conditions like influenza, COVID-19, or other systemic infections.
+
+### Diagnostic Tests for Anemia with Fatigue and Body Aches
+- **Key Tests**:
+  - **CBC with Reticulocyte Count**: To evaluate the type of anemia (microcytic, macrocytic, or normocytic).
+  - **Iron Studies**: Including serum iron, ferritin, and total iron-binding capacity to assess for iron deficiency anemia.
+  - **Vitamin B12 and Folate Levels**: To rule out deficiencies causing macrocytic anemia.
+  - **Peripheral Blood Smear**: To examine red blood cell morphology for clues to underlying causes.
+  - **Bone Marrow Biopsy**: If hematological malignancies or aplastic anemia are suspected.
+
+### Guidelines for Management of Swollen Lymph Nodes and Fever
+- **First-Line Treatments**:
+  - **Antibiotics**: Recommended for bacterial infections (e.g., streptococcal pharyngitis) based on NICE guidelines.
+  - **Symptomatic Relief**: Analgesics (e.g., paracetamol or ibuprofen) for pain and fever management.
+  - **Hydration and Rest**: Important for recovery from viral infections.
+  - **Referral**: Consider referral to specialists if symptoms persist or worsen, or if malignancy is suspected based on clinical findings.
+- **Monitoring**: Regular follow-up to assess response to treatment and adjust management as necessary.

@@ -1,0 +1,196 @@
+{
+  "n": 10,
+  "sampling": "quartiles of the existing structural complexity score; allocations 2/3/3/2",
+  "stratum_counts": {
+    "low": 2,
+    "moderate_low": 3,
+    "moderate_high": 3,
+    "high": 2
+  },
+  "wall_seconds_including_loading": 296.671801291006,
+  "initialization_seconds_by_worker": [
+    35.77948416599975,
+    35.779193499998655
+  ],
+  "approx_processing_wall_seconds_excluding_initialization": 260.89231712500623,
+  "mean_preparation_seconds": 51.43532210840058,
+  "stages": {
+    "keyword_extraction": {
+      "mean_seconds": 3.146633549800754,
+      "median_seconds": 2.8644162910022715,
+      "min_seconds": 2.080961458996171,
+      "max_seconds": 5.245540707997861,
+      "share_percent": 6.117651102036816
+    },
+    "patient_retrieval_reranking_attribution": {
+      "mean_seconds": 1.7410371087993552,
+      "median_seconds": 1.8119401885051047,
+      "min_seconds": 0.9266753339979914,
+      "max_seconds": 2.402784126003098,
+      "share_percent": 3.384905620169148
+    },
+    "guideline_question_generation": {
+      "mean_seconds": 2.16721684150034,
+      "median_seconds": 2.1462211869984458,
+      "min_seconds": 1.6401130829981412,
+      "max_seconds": 2.8676781250032946,
+      "share_percent": 4.213479672457195
+    },
+    "guideline_retrieval": {
+      "mean_seconds": 44.365846658701045,
+      "median_seconds": 52.83191106300001,
+      "min_seconds": 9.134848250003415,
+      "max_seconds": 55.30470175000664,
+      "share_percent": 86.25560187063566
+    },
+    "prompt_assembly_saving_other_overhead": {
+      "mean_seconds": 0.014587949599081185,
+      "median_seconds": 0.01493824900171603,
+      "min_seconds": 0.0056019169933279045,
+      "max_seconds": 0.02231158299400704,
+      "share_percent": 0.028361734701178504
+    }
+  },
+  "nested_diagnostics_mean_seconds": {
+    "attribution": 0.5323340416005522,
+    "patient_search": 3.500333525199676,
+    "patient_rerank": 1.3873371334004332,
+    "limiter_total": 34.73720331209988,
+    "limiter_rpm": 34.73662538769931,
+    "limiter_tpm": 0.00044509989966172724,
+    "graphrag_setup:load_config": 0.006866649899893673,
+    "graphrag_setup:_resolve_output_files": 0.1749600705996272,
+    "checkpoint_ack": 0.011805387499043718
+  },
+  "rpm_wait_share_of_all_preparation_percent": 67.5345734483619,
+  "rpm_wait_share_of_guideline_retrieval_percent": 78.29586946671456,
+  "warm_eight": {
+    "mean_preparation_seconds": 59.87806965112486,
+    "mean_rpm_wait_seconds": 43.420775312624755
+  },
+  "http_attempt_counts": [
+    {
+      "stage": "keywords",
+      "path": "/v1/chat/completions",
+      "http_status": 200,
+      "count": 10
+    },
+    {
+      "stage": "guideline_questions",
+      "path": "/v1/chat/completions",
+      "http_status": 200,
+      "count": 10
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/embeddings",
+      "http_status": 200,
+      "count": 10
+    },
+    {
+      "stage": "graphrag",
+      "path": "/v1/chat/completions",
+      "http_status": 200,
+      "count": 10
+    }
+  ],
+  "captured_model_response_counts": {
+    "keyword_extraction": 10,
+    "guideline_questions": 10,
+    "guideline_query_embedding": 10,
+    "guideline_evidence": 10
+  },
+  "by_complexity": {
+    "high": {
+      "n": 2,
+      "mean_preparation_seconds": 59.925107479499275,
+      "mean_rpm_wait_seconds": 43.19545127099991
+    },
+    "low": {
+      "n": 2,
+      "mean_preparation_seconds": 58.767255854501855,
+      "mean_rpm_wait_seconds": 43.15823206249843
+    },
+    "moderate_high": {
+      "n": 3,
+      "mean_preparation_seconds": 46.78749426399978,
+      "mean_rpm_wait_seconds": 28.82507258333256
+    },
+    "moderate_low": {
+      "n": 3,
+      "mean_preparation_seconds": 45.53533720800139,
+      "mean_rpm_wait_seconds": 29.39455648666626
+    }
+  },
+  "verification": {
+    "prepared_patients": 10,
+    "final_generation_calls": 0,
+    "diagnosis_scoring_calls": 0,
+    "plan_judging_calls": 0,
+    "errors": 0
+  },
+  "limitations": [
+    "Two workers and two CPU threads per worker match the main pilot; other parent-session work can still affect CPU/network timing.",
+    "First request in each process incurs no steady-state RPM wait, making the overall ten-case average optimistic for a large cohort.",
+    "HTTP streaming timings cover headers only; the remainder includes streamed generation and uninstrumented local work.",
+    "Substep timings are observational, not a test of removing the limiter."
+  ],
+  "streaming_validation_probe": {
+    "scope": "One additional guideline-only replay from the ten sampled patients; excluded from ten-case averages",
+    "total_seconds": 6.9922122080024565,
+    "events": [
+      {
+        "step": "load_config",
+        "seconds": 0.00286995799979195
+      },
+      {
+        "step": "load_tables",
+        "seconds": 0.19624733299860964
+      },
+      {
+        "step": "read_indexer_entities",
+        "seconds": 0.18186016700201435
+      },
+      {
+        "step": "read_indexer_reports",
+        "seconds": 0.02675575000466779
+      },
+      {
+        "step": "read_indexer_text_units",
+        "seconds": 0.12626791699585738
+      },
+      {
+        "step": "read_indexer_relationships",
+        "seconds": 0.14977400000498164
+      },
+      {
+        "step": "build_search_engine",
+        "seconds": 0.150954290998925
+      },
+      {
+        "step": "limiter",
+        "seconds": 7.167000148911029e-06
+      },
+      {
+        "step": "http_full",
+        "path": "/v1/embeddings",
+        "seconds": 0.31619970799511066,
+        "headers_seconds": 0.3161976249975851,
+        "stream": false,
+        "status": 200
+      },
+      {
+        "step": "limiter",
+        "seconds": 2.4084001779556274e-05
+      },
+      {
+        "step": "http_full",
+        "path": "/v1/chat/completions",
+        "seconds": 5.643935332998808,
+        "headers_seconds": 0.5923858329988434,
+        "stream": true,
+        "status": 200
+      }
+    ]
+  }
+}

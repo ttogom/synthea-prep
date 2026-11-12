@@ -1,0 +1,326 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:22:18Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Diagnostic Tests for Sore Throat Symptoms
+- **NICE Guidelines** recommend using clinical assessments to identify the underlying etiology of symptoms such as difficulty swallowing, swollen lymph nodes, swollen tonsils, sore throat, body aches, and fever.
+- **Diagnostic Tests**: 
+  - Consider throat swabs for microbiological testing if there is discharge or significant symptoms.
+  - Assess for streptococcal infection using **Centor criteria**: fever, absence of cough, swollen and tender anterior cervical lymph nodes, and tonsillar swelling/exudate.
+  - Use **FeverPAIN criteria** to evaluate the severity of sore throat symptoms and guide antibiotic treatment decisions.
+
+### First-Line Medications for Symptomatic Relief
+- **Symptomatic Management**:
+  - Analgesics such as paracetamol or ibuprofen for pain relief and fever reduction.
+  - Throat lozenges or sprays may provide localized relief for sore throat.
+  - If bacterial infection is suspected (e.g., streptococcal pharyngitis), antibiotics may be indicated based on clinical guidelines.
+
+### Managing Chronic Pain and Anemia
+- **NICE Guidelines** suggest a comprehensive approach for managing chronic pain and anemia:
+  - **Lifestyle Advice**: Encourage regular physical activity, balanced nutrition, and adequate hydration.
+  - **Long-Term Management Strategies**:
+    - Regular monitoring of hemoglobin levels and pain assessments.
+    - Consider pharmacological options for pain management, ensuring they do not exacerbate anemia.
+    - Referral to pain management specialists if pain is severe or unresponsive to standard treatments.
+
+### Distinguishing Causes of Infection Symptoms
+- **Monitoring Criteria**:
+  - Assess the presence of cough, runny/stuffy nose, and fever to differentiate between viral and bacterial infections.
+  - Evaluate the severity and duration of symptoms: 
+    - Viral infections typically present with milder symptoms and resolve within a week.
+    - Bacterial infections may lead to more severe symptoms and require antibiotic treatment.
+  - Use clinical scoring systems like **Centor** and **FeverPAIN** to guide the need for further testing or treatment.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:22:33Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+## Chronic Neck Pain, Low Back Pain, and Brain Injury
+
+- **Potential Causes**:
+  - Chronic pain can arise from various sources, including:
+    - **Musculoskeletal issues**: Strains, degenerative disc disease, or herniated discs.
+    - **Neuropathic pain**: Resulting from nerve injury or central sensitization post-brain injury.
+    - **Psychological factors**: Stress, anxiety, or depression can exacerbate pain perception.
+
+- **Guidelines and Distinguishing Criteria**:
+  - **NICE Guidelines** recommend assessing:
+    - **History and physical examination**: Focus on pain characteristics, duration, and impact on daily life.
+    - **Diagnostic imaging**: MRI or CT scans may be indicated if red flags are present (e.g., neurological deficits).
+    - **Psychosocial assessment**: Evaluate for stress, anxiety, or depression that may contribute to chronic pain.
+
+## Evaluating and Managing Chronic Pain with Elevated Blood Pressure
+
+- **Guidelines for Pain Management**:
+  - **NICE Guidelines** suggest:
+    - **Initial evaluation**: Assess pain intensity, functional impact, and psychosocial factors.
+    - **Diagnostic tests**: Consider blood tests to rule out underlying conditions (e.g., thyroid function tests, inflammatory markers).
+    - **First-line medications**:
+      - **Non-opioid analgesics**: Acetaminophen or NSAIDs (considering blood pressure).
+      - **Adjuvant therapies**: Antidepressants or anticonvulsants for neuropathic pain.
+
+- **Blood Pressure Management**:
+  - Address elevated blood pressure through lifestyle modifications and possibly antihypertensive medications.
+
+## Lifestyle Advice for Chronic Low Back Pain and Environmental Stressors
+
+- **Recommended Guidelines**:
+  - **NICE Guidelines** emphasize:
+    - **Physical activity**: Encourage regular low-impact exercises (e.g., walking, swimming) to improve mobility and reduce pain.
+    - **Cognitive-behavioral therapy (CBT)**: Address stress and coping strategies.
+    - **Social engagement**: Promote activities that enhance social contact and support networks.
+    - **Self-management strategies**: Educate on pain management techniques, including mindfulness and relaxation exercises.
+
+## Medication Adjustment for Chronic Pain Management
+
+- **Current Medication Review**:
+  - Patient is on ibuprofen, acetaminophen, and hydrocodone.
+  
+- **Guidelines for Medication Adjustment**:
+  - **NICE Guidelines** recommend:
+    - **Reassess pain control**: If pain is not adequately managed, consider adjusting dosages or switching medications.
+    - **Alternative treatments**:
+      - **Physical therapy**: Referral for tailored exercise programs.
+      - **Non-pharmacological interventions**: Acupuncture, chiropractic care, or cognitive-behavioral therapy.
+    - **Monitoring for side effects**: Regularly evaluate for potential adverse effects of current medications, especially with hydrocodone use.
+
+- **Considerations**:
+  - Evaluate the need for opioid-sparing strategies due to potential dependence and side effects.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:23:36Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes Associated with Urinary Symptoms
+
+The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is highly suggestive of a **urinary tract infection (UTI)**. Other potential causes include:
+
+- **Cystitis (Lower UTI)**:
+  - Symptoms: Painful urination (dysuria), urgency, frequency.
+  - Distinguishing Features: Typically presents without systemic symptoms like fever.
+
+- **Acute Pyelonephritis**:
+  - Symptoms: Similar to UTI but may include fever and flank pain.
+  - Distinguishing Features: Presence of systemic symptoms and possible loin tenderness.
+
+- **Interstitial Cystitis**:
+  - Symptoms: Chronic pelvic pain, urgency, frequency.
+  - Distinguishing Features: Symptoms persist longer than typical UTI and may not respond to antibiotics.
+
+- **Prostatitis (in males)**:
+  - Symptoms: Urgency, frequency, dysuria, and possibly pelvic pain.
+  - Distinguishing Features: May include fever and perineal pain.
+
+### Recommended Diagnostic Tests
+
+For a patient presenting with the aforementioned urinary symptoms, the following diagnostic tests are recommended:
+
+- **Urine Testing**:
+  - **Urine Culture**: Essential for diagnosing UTI and determining antibiotic susceptibility.
+  - **Dipstick Test**: Can provide rapid results for nitrites and leukocyte esterase, indicating infection.
+
+- **Ultrasound or CT Scan** (if indicated):
+  - To rule out anatomical abnormalities or complications such as obstruction.
+
+- **Consideration of Referral**:
+  - If symptoms persist or if there are recurrent infections, referral to a urologist may be warranted.
+
+### Treatment Options for Anemia
+
+For a patient presenting with anemia (hemoglobin 9.4 g/dL) and a history of prior anemia, the following treatment options should be considered:
+
+- **First-Line Treatment**:
+  - **Iron Supplementation**: Oral iron (ferrous sulfate) is commonly used to treat iron deficiency anemia.
+  - **Dietary Modifications**: Increase intake of iron-rich foods (e.g., red meat, leafy greens).
+
+- **Alternative Treatments**:
+  - **Intravenous Iron**: Considered if oral iron is not tolerated or if rapid correction is needed.
+  - **Erythropoiesis-Stimulating Agents (ESAs)**: May be considered in specific cases, particularly in chronic kidney disease.
+
+### Long-Term Management for Chronic Sinusitis
+
+For a patient presenting with chronic sinusitis, the following lifestyle advice and management plans are recommended:
+
+- **Nasal Irrigation**:
+  - Use saline nasal sprays or rinses to help clear mucus and allergens.
+
+- **Avoidance of Triggers**:
+  - Identify and avoid allergens or irritants that may exacerbate symptoms.
+
+- **Hydration**:
+  - Encourage adequate fluid intake to help thin mucus.
+
+- **Medication Management**:
+  - Consider long-term use of intranasal corticosteroids to reduce inflammation.
+  - Antibiotics may be prescribed for acute exacerbations but are not typically used long-term.
+
+- **Surgery**:
+  - Referral for surgical evaluation may be necessary if symptoms persist despite medical management.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:24:34Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+## Causes and Guidelines for Sore Throat Symptoms
+- **Common Causes**: The combination of sore throat, runny/stuffy nose, difficulty swallowing, fatigue, body aches, swollen lymph nodes, swollen tonsils, cough, and fever is often associated with:
+  - Viral infections (e.g., influenza, common cold)
+  - Bacterial infections (e.g., streptococcal pharyngitis)
+- **Distinguishing Criteria**:
+  - **Centor Criteria**: Evaluates the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Assesses severity and need for antibiotics based on:
+    - Fever in the past 24 hours
+    - Purulence (tonsillar exudate)
+    - Attend rapidly (within 3 days)
+    - Severely inflamed tonsils
+    - Age (younger than 15 years)
+- **Investigations**: Rapid antigen detection tests (RADTs) or throat cultures may be recommended to confirm streptococcal infection.
+
+## Diagnostic Tests for Fever and Swollen Lymph Nodes
+- **Recommended Tests**:
+  - **Throat Swab**: To test for streptococcal bacteria.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection (e.g., elevated white blood cell count).
+  - **Monospot Test**: To rule out infectious mononucleosis if indicated by clinical presentation.
+- **Guidelines**: Emphasize the importance of clinical assessment alongside these tests to guide management decisions.
+
+## Medications for Sore Throat and Fever
+- **First-Line Medications**:
+  - **Analgesics**: Paracetamol (acetaminophen) or ibuprofen for pain relief and fever reduction.
+    - **Dosage**: 
+      - Paracetamol: 500-1000 mg every 4-6 hours (max 4g/day).
+      - Ibuprofen: 200-400 mg every 6-8 hours (max 1200 mg/day over-the-counter).
+- **Alternative Medications**:
+  - **Throat Lozenges**: May provide symptomatic relief.
+  - **Topical Anesthetics**: Benzocaine lozenges for localized pain relief.
+- **Guidelines**: Recommend symptomatic treatment while awaiting confirmation of bacterial infection for potential antibiotic therapy.
+
+## Patient Education for Recovery and Symptom Management
+- **Lifestyle Advice**:
+  - **Hydration**: Encourage increased fluid intake to stay hydrated.
+  - **Rest**: Emphasize the importance of adequate rest to support recovery.
+  - **Nutrition**: Suggest small, nutritious meals to manage decreased appetite.
+- **Symptom Management**:
+  - Use humidifiers to ease throat discomfort.
+  - Gargle with warm salt water for symptomatic relief.
+- **Guidelines**: Highlight the importance of monitoring symptoms and seeking medical advice if they worsen or do not improve within a few days.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:25:35Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes and Guidelines for Symptoms in a 2-Year-Old
+
+- **Common Causes**:
+  - Viral infections (e.g., adenovirus, influenza) are frequent in young children and can cause:
+    - Difficulty swallowing
+    - Body aches
+    - Runny/stuffy nose
+    - Swollen lymph nodes
+    - Fever
+  - Bacterial infections (e.g., streptococcal pharyngitis) should also be considered, especially with significant sore throat and fever.
+
+- **Guidelines and Criteria**:
+  - **Centor Criteria**: Useful for assessing the likelihood of streptococcal infection:
+    - Fever
+    - Absence of cough
+    - Swollen tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **FeverPAIN Criteria**: Another scoring system that includes:
+    - Fever in the last 24 hours
+    - Purulence (pus on tonsils)
+    - Rapid attendance (within 3 days)
+    - Severe symptoms
+  - **Investigations**:
+    - Rapid antigen tests for Group A beta-hemolytic streptococcus (GABHS) can help confirm bacterial infections.
+
+### Diagnostic Tests for Sore Throat and Swollen Tonsils
+
+- **Recommended Tests**:
+  - **Rapid Antigen Test**: For GABHS to confirm streptococcal pharyngitis.
+  - **Throat Culture**: If rapid test is negative but suspicion remains high.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection (e.g., elevated white blood cell count).
+  - **Monospot Test**: If infectious mononucleosis is suspected, especially in older children.
+
+### Management of Symptoms with Swollen Tonsils and Lymph Nodes
+
+- **First-Line Medications**:
+  - **Analgesics/Antipyretics**: Acetaminophen or ibuprofen for pain and fever relief.
+  - **Antibiotics**: If bacterial infection (e.g., streptococcal) is confirmed or highly suspected.
+
+- **Alternative Medications**:
+  - **Corticosteroids**: May be considered for severe swelling or difficulty breathing.
+  - **Throat Lozenges**: For older children who can safely use them to soothe throat discomfort.
+
+### Patient Education for Cough, Sore Throat, and Fever
+
+- **Lifestyle Advice**:
+  - **Hydration**: Encourage fluid intake to prevent dehydration.
+  - **Rest**: Emphasize the importance of rest for recovery.
+  - **Humidifier Use**: To ease throat irritation and congestion.
+  - **Avoid Irritants**: Such as smoke or strong odors that can exacerbate symptoms.
+
+- **When to Seek Further Care**:
+  - If symptoms worsen or do not improve within a few days.
+  - Difficulty breathing or swallowing.
+  - High fever persisting beyond 48 hours. 
+
+This structured approach helps in distinguishing between potential causes and managing symptoms effectively in pediatric patients.

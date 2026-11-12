@@ -1,0 +1,145 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:31Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Causes and Guidelines for Dyspnea, Orthopnea, Edema, and Paroxysmal Dyspnea
+- **Common Causes**:
+  - **Heart Failure**: Often presents with orthopnea, paroxysmal nocturnal dyspnea, and edema.
+  - **Chronic Obstructive Pulmonary Disease (COPD)**: Can cause dyspnea on exertion and orthopnea.
+  - **Pulmonary Embolism**: May present with sudden dyspnea and edema.
+  
+- **Guidelines and Investigations**:
+  - **Clinical Assessment**: History and physical examination focusing on heart and lung function.
+  - **Diagnostic Tests**:
+    - **Chest X-ray**: To assess for heart size and pulmonary congestion.
+    - **Echocardiogram**: To evaluate cardiac function and structure.
+    - **BNP Levels**: Elevated levels suggest heart failure.
+    - **Pulmonary Function Tests**: To assess for COPD or other lung diseases.
+
+### Diagnostic Tests for Rales, Dyspnea on Exertion, and Orthopnea
+- **Recommended Investigations**:
+  - **Chest X-ray**: To identify fluid, masses, or other abnormalities.
+  - **CT Scan of the Chest**: For detailed imaging if initial tests are inconclusive.
+  - **Echocardiogram**: To evaluate heart function, especially if heart failure is suspected.
+  - **Spirometry**: To assess lung function and rule out obstructive or restrictive lung disease.
+
+### Management Strategies for HIV with Viral Load of 18,243 copies/mL and CD4+ Count of 118/uL
+- **Recommended Management**:
+  - **Initiate Antiretroviral Therapy (ART)**: Start a regimen that includes:
+    - **NRTIs**: Such as tenofovir and emtricitabine.
+    - **Integrase Inhibitors**: Such as dolutegravir or bictegravir.
+  - **Monitor Viral Load and CD4+ Count**: Regular follow-up to assess treatment efficacy.
+  - **Consider Prophylaxis for Opportunistic Infections**: Given the low CD4+ count, prophylaxis for PCP (Pneumocystis pneumonia) may be indicated.
+
+### Guidelines for Managing Dyspnea and Edema in Ischemic Heart Disease
+- **First-Line Medications**:
+  - **Diuretics**: Such as furosemide to manage fluid overload and edema.
+  - **ACE Inhibitors**: To improve heart function and reduce symptoms.
+  
+- **Alternative Medications**:
+  - **Beta-Blockers**: To manage heart rate and improve cardiac output.
+  - **Aldosterone Antagonists**: Such as spironolactone for additional diuresis and heart failure management.
+  
+- **Guidelines** emphasize the importance of a comprehensive approach, including lifestyle modifications and monitoring for symptom improvement.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:45Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Differential Diagnoses for Sore Throat and Associated Symptoms
+For a patient with difficulty swallowing, swollen lymph nodes, swollen tonsils, sore throat, cough, and fever, consider the following differential diagnoses:
+
+- **Streptococcal Pharyngitis (Strep Throat)**
+  - **Criteria/Findings**: Use the Centor criteria:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - A score of 2 or more suggests a higher likelihood of streptococcal infection.
+
+- **Viral Pharyngitis**
+  - **Criteria/Findings**: Typically presents with cough and conjunctivitis; less likely to have exudate.
+
+- **Mononucleosis (EBV)**
+  - **Criteria/Findings**: Often presents with severe fatigue, splenomegaly, and atypical lymphocytes on blood smear.
+
+- **Tonsillitis**
+  - **Criteria/Findings**: Similar to strep throat but may also include more pronounced tonsillar enlargement and exudate.
+
+- **Peritonsillar Abscess**
+  - **Criteria/Findings**: Severe unilateral throat pain, "hot potato" voice, and trismus.
+
+### Initial Diagnostic Tests for Body Aches and Fatigue
+For a patient presenting with body aches, fatigue, sore throat, cough, fever, and decreased appetite, the following initial diagnostic tests are recommended:
+
+- **Complete Blood Count (CBC)**
+  - To assess for leukocytosis or atypical lymphocytes.
+
+- **Rapid Antigen Detection Test (RADT) for Streptococcus**
+  - To confirm or rule out streptococcal infection.
+
+- **Throat Culture**
+  - If RADT is negative but clinical suspicion remains high.
+
+- **Monospot Test**
+  - If mononucleosis is suspected based on clinical presentation.
+
+- **Basic Metabolic Panel (BMP)**
+  - To evaluate hydration status and electrolyte balance.
+
+### First-Line Management Strategies for Sore Throat Symptoms
+For a patient with swollen lymph nodes, swollen tonsils, difficulty swallowing, and fever, the following first-line management strategies are recommended:
+
+- **Antibiotics**
+  - If streptococcal infection is confirmed or highly suspected (e.g., penicillin or amoxicillin).
+
+- **Supportive Care**
+  - Analgesics (e.g., acetaminophen or ibuprofen) for pain and fever.
+  - Hydration and throat lozenges for symptomatic relief.
+
+- **Corticosteroids**
+  - Consider for severe swelling or difficulty swallowing.
+
+### Patient Education and Lifestyle Advice for Body Aches and Fatigue
+For a patient presenting with body aches, fatigue, and a reported stress level of 'somewhat', the following patient education and lifestyle advice is suggested:
+
+- **Rest and Recovery**
+  - Emphasize the importance of adequate rest to support the immune system.
+
+- **Hydration**
+  - Encourage increased fluid intake to prevent dehydration.
+
+- **Nutrition**
+  - Suggest a balanced diet rich in fruits, vegetables, and proteins to aid recovery.
+
+- **Stress Management Techniques**
+  - Recommend relaxation techniques such as deep breathing, meditation, or gentle yoga.
+
+- **Gradual Return to Activities**
+  - Advise a gradual return to normal activities as symptoms improve, avoiding overexertion.

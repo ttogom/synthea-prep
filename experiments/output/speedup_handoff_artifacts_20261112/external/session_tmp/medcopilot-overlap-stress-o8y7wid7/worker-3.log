@@ -1,0 +1,125 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:30Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Differential Diagnoses for Chronic Pain with Brain Injury History
+- **Chronic Pain Conditions**:
+  - **Chronic Primary Pain**: Pain lasting over three months without identifiable cause; often requires multidisciplinary management.
+  - **Chronic Neck and Low Back Pain**: Commonly due to mechanical issues, muscle strain, or underlying conditions like osteoarthritis.
+  - **Neuropathic Pain**: May arise from nerve damage due to brain injury; characterized by burning or shooting sensations.
+
+- **Distinguishing Features**:
+  - **Chronic Primary Pain**: No identifiable physical cause; often disproportionate to any observable injury.
+  - **Neuropathic Pain**: Symptoms include tingling, numbness, and pain that may not correlate with physical findings.
+  - **Mechanical Pain**: Typically worsens with movement and improves with rest; may be associated with specific activities or postures.
+
+## Guidelines for Evaluating Elevated Blood Pressure in Young Adults
+- **NICE Guidelines**: Recommend assessing blood pressure in young adults with readings above 140/90 mmHg.
+- **Evaluation Steps**:
+  - Confirm elevated readings with multiple measurements.
+  - Assess for secondary causes of hypertension, especially if persistent.
+  - Lifestyle modifications should be discussed, including diet, exercise, and weight management.
+
+## Treatment Options for Chronic Low Back and Neck Pain
+- **First-Line Treatments**:
+  - **Non-Pharmacological**: Physical therapy, exercise programs, and cognitive behavioral therapy (CBT) are recommended.
+  - **Pharmacological**: NSAIDs (e.g., ibuprofen) and acetaminophen are commonly used; consider adjusting dosages or switching to other analgesics if pain persists.
+
+- **Alternative Treatments**:
+  - **Duloxetine**: Effective for chronic pain management, particularly in cases of chronic primary pain.
+  - **Amitriptyline**: Can be initiated at low doses for chronic pain relief.
+  - **Non-Pharmacological Interventions**: Acupuncture, mindfulness therapy, and other complementary therapies may provide additional relief.
+
+## Lifestyle Advice for Chronic Pain Management
+- **Patient Education Guidelines**:
+  - **Stress Management**: Encourage techniques such as mindfulness, relaxation exercises, and cognitive behavioral strategies to cope with stress.
+  - **Physical Activity**: Promote regular, gentle exercise tailored to the patient's abilities to improve physical function and reduce pain.
+  - **Social Support**: Highlight the importance of social connections and support systems to mitigate feelings of isolation and enhance mental well-being.
+  - **Environmental Adjustments**: Suggest creating a comfortable living space that minimizes stressors and promotes relaxation.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:43Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Possible Causes and Clinical Criteria
+- **Urinary Tract Infection (UTI)**:
+  - Symptoms: Urgent desire to urinate, suprapubic pain, increased frequency, dysuria.
+  - Clinical Criteria: Positive leukocyte esterase or nitrite on urine dipstick, pyuria, bacteriuria.
+  
+- **Acute Cystitis**:
+  - Symptoms: Similar to UTI but may not present with systemic signs.
+  - Clinical Criteria: Diagnosis based on symptoms and urinalysis findings.
+
+- **Acute Pyelonephritis**:
+  - Symptoms: Fever, flank pain, and systemic symptoms may accompany urinary symptoms.
+  - Clinical Criteria: Presence of fever, loin pain, and bacteriuria.
+
+- **Bladder Irritation** (e.g., from medications or dietary irritants):
+  - Symptoms: Urgency and dysuria without infection.
+  - Clinical Criteria: Negative urine culture and absence of infection signs.
+
+### Recommended Diagnostic Tests
+- **Urinalysis**:
+  - Essential for detecting leukocyte esterase, nitrites, and bacteria.
+  
+- **Urine Culture**:
+  - Confirms UTI and identifies specific pathogens and antibiotic sensitivities.
+
+- **Microscopy**:
+  - To assess for pyuria and bacteriuria.
+
+- **Imaging** (if atypical UTI or recurrent infections):
+  - Ultrasound to check for structural abnormalities.
+
+### First-Line or Alternative Medications
+- **First-Line Antibiotics** (if UTI is confirmed):
+  - **Nitrofurantoin**: Safe in pregnancy for uncomplicated UTIs.
+  - **Amoxicillin**: Considered safe during pregnancy.
+  
+- **Alternative Options**:
+  - **Cephalexin**: Another safe option for treating UTIs in pregnant patients.
+  
+- **Avoid**:
+  - **Fluoroquinolones**: Due to potential risks in pregnancy.
+
+### Lifestyle Modifications and Patient Education
+- **Hydration**:
+  - Encourage increased fluid intake to dilute urine and promote urination.
+
+- **Dietary Changes**:
+  - Avoid irritants such as caffeine, alcohol, and spicy foods.
+
+- **Regular Bathroom Visits**:
+  - Advise not to hold urine for prolonged periods.
+
+- **Pelvic Floor Exercises**:
+  - Kegel exercises may help strengthen pelvic muscles and improve urinary control.
+
+- **Education on Symptoms**:
+  - Inform about signs of worsening infection (e.g., fever, chills) that require immediate medical attention.

@@ -1,0 +1,7 @@
+{
+  "pilot_config_sha_matches_recorded": true,
+  "model_registry_sha_matches_recorded": true,
+  "recorded_guideline_resource_sha": "b91597ca1bffdb6d94a3f835d39dcb12c21a4b920a9ff5f94b97f22cf5cb9801",
+  "reconstructed_with_original_settings_sha": "b91597ca1bffdb6d94a3f835d39dcb12c21a4b920a9ff5f94b97f22cf5cb9801",
+  "original_guideline_resources_reconstructed": true
+}

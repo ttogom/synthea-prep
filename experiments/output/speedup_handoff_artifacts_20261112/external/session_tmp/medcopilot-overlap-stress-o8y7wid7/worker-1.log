@@ -1,0 +1,155 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:30Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Possible Causes of Urinary Symptoms
+
+For a patient presenting with:
+- **Urgent desire to urinate**
+- **Suprapubic pain**
+- **Increased frequency of urination**
+- **Dysuria**
+
+**Possible Causes:**
+- **Urinary Tract Infection (UTI)**
+  - Symptoms include dysuria, urgency, frequency, and suprapubic pain.
+  - Diagnosis confirmed via urine testing (culture and sensitivity).
+- **Acute Pyelonephritis**
+  - May present similarly but often includes fever and flank pain.
+  - Requires imaging and urine culture for diagnosis.
+- **Bladder Irritation (e.g., from medications or irritants)**
+  - Consider recent medication changes or exposure to irritants.
+- **Interstitial Cystitis**
+  - Chronic condition with similar symptoms but often lacks infection.
+  - Diagnosis may require cystoscopy.
+
+**Distinguishing Criteria:**
+- **Urine Testing:** Positive culture for UTI, presence of white blood cells, and nitrites.
+- **Symptoms:** Fever and flank pain suggest pyelonephritis.
+- **History:** Recent antibiotic use may indicate resistant organisms.
+
+### Diagnostic Tests for Cloudy, Brown Urine
+
+For a patient with:
+- **Cloudy, brown urine**
+- **Ammoniacal odor**
+- **Urine protein +++**
+- **Urine glucose ++**
+- **Urine ketones +++**
+- **Bilirubin present**
+
+**Recommended Diagnostic Tests:**
+- **Urine Culture:** To identify any bacterial infection.
+- **Urinalysis:** Comprehensive analysis to assess for hematuria, crystals, and other abnormalities.
+- **Blood Tests:** Check renal function (creatinine, BUN), electrolytes, and liver function tests (due to bilirubin).
+- **Imaging Studies:** Ultrasound or CT scan to evaluate for structural abnormalities or obstructions.
+
+### First-Line and Alternative Medications for UTI Symptoms
+
+For a patient with:
+- **Increased frequency of urination**
+- **Dysuria**
+
+**First-Line Medications:**
+- **Nitrofurantoin:** Effective for uncomplicated lower UTIs.
+- **Trimethoprim:** Commonly used unless contraindicated.
+
+**Alternative Medications:**
+- **Amoxicillin:** If culture results indicate susceptibility.
+- **Ciprofloxacin:** For more complicated cases or resistant organisms.
+- **Paracetamol:** For pain management associated with UTI symptoms.
+
+### Lifestyle Advice for Chronic Kidney Disease Stage 4
+
+For a patient with:
+- **Chronic kidney disease stage 4**
+- **Ongoing dialysis**
+- **Urinary symptoms**
+
+**Lifestyle Advice:**
+- **Fluid Management:** Monitor fluid intake to prevent overload.
+- **Dietary Modifications:** Low protein, potassium, and phosphorus diet to reduce kidney strain.
+- **Medication Review:** Ensure medications are appropriate for kidney function; avoid nephrotoxic drugs.
+- **Regular Monitoring:** Frequent follow-ups for kidney function and urinary symptoms.
+- **Education on Dialysis:** Understanding the process and managing symptoms related to dialysis.
+
+**Long-Term Management Plans:**
+- **Referral to Nephrology:** For ongoing management and potential transplant evaluation.
+- **Patient Education:** About recognizing symptoms of complications and when to seek medical help.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-overlap-stress-o8y7wid7/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:43:45Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Causes Associated with Symptoms
+
+- **Combination of Symptoms**: Difficulty swallowing, swollen lymph nodes, swollen tonsils, and sore throat can indicate:
+  - **Streptococcal Pharyngitis**: Often presents with fever, swollen tonsils, and lymphadenopathy.
+  - **Viral Pharyngitis**: Typically associated with upper respiratory symptoms and may not require antibiotics.
+  - **Tonsillitis**: Can be bacterial or viral; characterized by tonsillar swelling and pain.
+  - **Mononucleosis**: Caused by Epstein-Barr virus; presents with severe sore throat, lymphadenopathy, and fatigue.
+
+- **Distinguishing Criteria**:
+  - **Centor Criteria**: Evaluates the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **Investigations**: Rapid antigen detection tests or throat cultures for streptococcus; monospot test for mononucleosis.
+
+### Recommended Diagnostic Tests
+
+- **For Difficulty Swallowing, Swollen Tonsils, Sore Throat, and Fever**:
+  - **Throat Swab**: To test for streptococcal infection.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection or mononucleosis.
+  - **Monospot Test**: To check for Epstein-Barr virus if mononucleosis is suspected.
+  - **Imaging**: Ultrasound or CT scan may be indicated if abscess formation is suspected.
+
+### Management of Fatigue and Swollen Lymph Nodes
+
+- **First-Line Medications**:
+  - **Analgesics**: Ibuprofen (400-600 mg every 6-8 hours) or Acetaminophen (500-1000 mg every 4-6 hours) for pain relief.
+  - **Antibiotics**: If bacterial infection is confirmed (e.g., Penicillin V 500 mg every 6-8 hours for 10 days for streptococcal pharyngitis).
+
+- **Alternative Medications**:
+  - **Corticosteroids**: Considered for severe inflammation (e.g., Prednisone 10-20 mg daily for a short course).
+  - **Supportive Care**: Hydration and rest are crucial.
+
+### Long-Term Management for Chronic Sinusitis
+
+- **Management Plans**:
+  - **Nasal Corticosteroids**: Fluticasone or mometasone nasal spray to reduce inflammation.
+  - **Saline Irrigation**: Regular saline nasal rinses to clear mucus and allergens.
+  - **Antihistamines**: If allergies are contributing to symptoms.
+
+- **Lifestyle Advice**:
+  - **Avoid Irritants**: Such as smoke and strong odors.
+  - **Stay Hydrated**: To thin mucus.
+  - **Humidifiers**: Use to maintain moisture in the air.
+  - **Regular Follow-Up**: Monitor symptoms and adjust treatment as necessary.

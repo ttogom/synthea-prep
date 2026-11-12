@@ -1,0 +1,13 @@
+{"worker": 1, "loading_and_initialization_seconds": 35.779193499998655}
+{"worker": 0, "loading_and_initialization_seconds": 35.77948416599975}
+{"worker": 1, "completed_jobs_in_worker": 1, "seconds": 16.74357391599915}
+{"worker": 0, "completed_jobs_in_worker": 1, "seconds": 18.586555375004536}
+{"worker": 0, "completed_jobs_in_worker": 2, "seconds": 59.29867170799844}
+{"worker": 1, "completed_jobs_in_worker": 2, "seconds": 61.83258233300148}
+{"worker": 0, "completed_jobs_in_worker": 3, "seconds": 60.566781582994736}
+{"worker": 1, "completed_jobs_in_worker": 3, "seconds": 60.22788462500466}
+{"worker": 1, "completed_jobs_in_worker": 4, "seconds": 61.17619200000627}
+{"worker": 0, "completed_jobs_in_worker": 4, "seconds": 61.55083100000047}
+{"worker": 1, "completed_jobs_in_worker": 5, "seconds": 56.35948787500092}
+{"worker": 0, "completed_jobs_in_worker": 5, "seconds": 58.019518291002896}
+{"status": "completed", "wall_seconds_including_loading": 296.671801291006}

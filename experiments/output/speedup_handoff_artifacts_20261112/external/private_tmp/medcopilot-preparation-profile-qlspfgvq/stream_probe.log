@@ -1,0 +1,110 @@
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:28:53Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).
+- **Guidelines**: The NICE guidelines on urinary tract infections (NG224) provide a framework for assessing these symptoms.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI; includes microscopy and culture.
+  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.
+  - **Referral**: Consider referral to specialist care for infants under 3 months with suspected UTI.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Guidelines**: The NICE guidelines on urinary tract infections and chronic kidney disease provide recommendations for diagnostic tests.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify causative organisms.
+  - **Microscopy**: To assess for crystals, cells, or bacteria.
+  - **Further Investigations**: Consider metabolic assessments if indicated by urine findings (e.g., proteinuria, glucosuria, ketonuria).
+  - **Imaging**: If structural abnormalities are suspected, ultrasound may be warranted.
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **First-Line Options**: The NICE guidelines recommend:
+  - **Paracetamol**: As a first-line analgesic for managing pain.
+- **Alternative Options**:
+  - **Non-Steroidal Anti-Inflammatory Drugs (NSAIDs)**: Use with caution due to potential renal effects.
+  - **Opioids**: Consider for severe pain, ensuring careful monitoring of renal function.
+- **Patient-Centered Approach**: Emphasize shared decision-making regarding pain management strategies.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Guidelines**: NICE guidelines on chronic kidney disease management emphasize patient education.
+- **Recommended Advice**:
+  - **Fluid Management**: Educate on appropriate fluid intake to manage urination symptoms.
+  - **Dietary Modifications**: Discuss dietary changes to reduce protein intake and manage electrolyte balance.
+  - **Monitoring Symptoms**: Encourage patients to monitor changes in urination and report any significant changes to their healthcare provider.
+- **Support Resources**: Provide information on support groups and resources for chronic kidney disease management.
+prompt is used!
+{
+  "scope": "One additional guideline-only replay from the ten sampled patients; excluded from ten-case averages",
+  "total_seconds": 6.9922122080024565,
+  "events": [
+    {
+      "step": "load_config",
+      "seconds": 0.00286995799979195
+    },
+    {
+      "step": "load_tables",
+      "seconds": 0.19624733299860964
+    },
+    {
+      "step": "read_indexer_entities",
+      "seconds": 0.18186016700201435
+    },
+    {
+      "step": "read_indexer_reports",
+      "seconds": 0.02675575000466779
+    },
+    {
+      "step": "read_indexer_text_units",
+      "seconds": 0.12626791699585738
+    },
+    {
+      "step": "read_indexer_relationships",
+      "seconds": 0.14977400000498164
+    },
+    {
+      "step": "build_search_engine",
+      "seconds": 0.150954290998925
+    },
+    {
+      "step": "limiter",
+      "seconds": 7.167000148911029e-06
+    },
+    {
+      "step": "http_full",
+      "path": "/v1/embeddings",
+      "seconds": 0.31619970799511066,
+      "headers_seconds": 0.3161976249975851,
+      "stream": false,
+      "status": 200
+    },
+    {
+      "step": "limiter",
+      "seconds": 2.4084001779556274e-05
+    },
+    {
+      "step": "http_full",
+      "path": "/v1/chat/completions",
+      "seconds": 5.643935332998808,
+      "headers_seconds": 0.5923858329988434,
+      "stream": true,
+      "status": 200
+    }
+  ]
+}

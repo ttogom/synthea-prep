@@ -1,0 +1,17 @@
+{
+  "concurrency": 4,
+  "context_length": 8192,
+  "calls": 2895,
+  "cache_hits": 3,
+  "wall_seconds": 1095.0,
+  "cache_prefix_bytes": 11803137,
+  "cache_prefix_sha256": "faaa34493b7bbeb8c28fdcbb8627e0644b6b3d5060a256fdf824206cd80807c9",
+  "cache_rows": 2895,
+  "stage_counts": {
+    "scored": 922,
+    "unavailable": 13,
+    "pending": 2129,
+    "error": 8,
+    "interrupted": 0
+  }
+}

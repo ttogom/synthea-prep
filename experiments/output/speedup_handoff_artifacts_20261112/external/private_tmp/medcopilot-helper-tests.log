@@ -1,0 +1,29 @@
+................................Could not mark run.json as stopped:
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 314, in stop
+    self.update(status="failed_incomplete", finished_at=finished_at.isoformat())
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 258, in update
+    write_run_json(self.run_dir, self.metadata)
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/med_copilot_run_file.py", line 96, in write_run_json
+    os.replace(temporary, run_dir / RUN_FILE)
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+OSError: disk full
+........................................................................................................................................guidelines failed (RuntimeError): [REDACTED] and [REDACTED]
+...patient_retrieval failed (RuntimeError): failure
+..guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+guidelines failed (ValueError): Component did not publish its declared string outputs
+....patient_retrieval failed (RuntimeError): safe
+...........
+----------------------------------------------------------------------
+Ran 188 tests in 0.671s
+
+OK

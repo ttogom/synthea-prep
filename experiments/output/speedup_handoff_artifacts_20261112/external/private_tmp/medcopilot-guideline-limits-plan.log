@@ -1,0 +1,13 @@
+..Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpksxfgk4r/run: Plan judge concurrency must be an integer from 1 to 64
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpksxfgk4r/run: Plan judge context length must be an integer from 512 to 262144
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpksxfgk4r/run: Plan judge context length must be an integer from 512 to 262144
+Cannot resume evaluation of /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmpksxfgk4r/run: Plan judge context length must be an integer from 512 to 262144
+......................
+----------------------------------------------------------------------
+Ran 24 tests in 0.248s
+
+OK
+Judge calls made: 18; reused from run/judge_responses.jsonl: 0
+HTML results: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmp2huhngvk/run/report.html
+Judge calls made: 0; reused from run/judge_responses.jsonl: 0
+HTML results: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/tmp2huhngvk/run/report.html

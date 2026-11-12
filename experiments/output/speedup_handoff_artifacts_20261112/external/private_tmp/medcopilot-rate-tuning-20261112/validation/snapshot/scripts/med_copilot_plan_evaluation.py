@@ -1,0 +1,366 @@
+"""Complete only saved Plan judgements, with bounded concurrency and durable reuse.
+
+The scalar response cache is the incremental checkpoint. Exporting results once
+per invocation avoids rewriting the entire growing run after every patient.
+"""
+
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import nullcontext
+from contextvars import copy_context
+import hashlib
+import json
+import math
+from numbers import Real
+import os
+from pathlib import Path
+
+from scripts.med_copilot_config import PIPELINE_DEFAULTS
+from scripts.med_copilot_helpers import load_patient_records
+from scripts.med_copilot_judges import (
+    DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
+    parse_action_judgement, parse_extras_judgement, plan_action_messages,
+    plan_entry, plan_extras_messages, plan_score, request_key,
+)
+from scripts.med_copilot_run_file import (
+    RUN_FILE, RunFile, RunMetadataError, _fsync_directory, error_scope,
+    pacific_now, pipeline_stage,
+)
+from scripts.med_copilot_run_lock import exclusive_run_lock
+
+
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"Duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _reject_constant(value):
+    raise ValueError(f"Nonfinite JSON constant: {value}")
+
+
+def _finite_float(text):
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"Nonfinite JSON number: {text}")
+    return value
+
+
+def _read_object(text):
+    value = json.loads(text, object_pairs_hook=_unique_object,
+                       parse_constant=_reject_constant, parse_float=_finite_float)
+    if not isinstance(value, dict):
+        raise ValueError("Saved run/result must be a JSON object")
+    return value
+
+
+def _outputs(record):
+    if "variants" in record:
+        variants = record["variants"]
+        if not isinstance(variants, dict) or not variants:
+            raise ValueError("Result variants must be a nonempty object")
+        for variant, body in variants.items():
+            if not isinstance(body, dict) or not isinstance(body.get("assessment_plans"), dict):
+                raise ValueError("Result variant must contain assessment_plans")
+            for model, output in body["assessment_plans"].items():
+                yield variant, model, output
+    elif "assessment_plans" in record:
+        if not isinstance(record["assessment_plans"], dict):
+            raise ValueError("Result assessment_plans must be an object")
+        for model, output in record["assessment_plans"].items():
+            yield None, model, output
+    else:
+        yield None, None, record
+
+
+def _records(run_dir, metadata, scorer):
+    if metadata.get("status") not in ("completed", "completed_with_errors"):
+        raise ValueError("Generation must finish before Plan evaluation")
+    selected = metadata.get("evaluation", {}).get("selected_patient_ids")
+    if selected != [patient["id"] for patient in scorer.patients]:
+        raise ValueError("The scorer's cohort does not match the run's selected_patient_ids")
+    if len(set(selected)) != len(selected):
+        raise ValueError("selected_patient_ids contains duplicate patients")
+    source = (run_dir / "results.jsonl").read_text(encoding="utf-8")
+    records = [_read_object(line) for line in source.split("\n") if line.strip()]
+    ids = [record.get("id") for record in records]
+    if len(ids) != len(selected) or set(ids) != set(selected) or len(set(ids)) != len(ids):
+        raise ValueError("Saved results must contain every selected patient exactly once")
+    expected_models = metadata.get("assessment_plan_models", {}).get("selected_models")
+    expected_variants = metadata.get("experiment", {}).get("selected_variants")
+    for record in records:
+        if record.get("status") not in ("completed", "failed_incomplete"):
+            raise ValueError(f"Generation is incomplete for patient {record['id']}")
+        if "variants" in record and expected_variants and set(record["variants"]) != set(expected_variants):
+            raise ValueError("Saved result variants do not match the recorded experiment")
+        groups = {}
+        for variant, model, output in _outputs(record):
+            groups.setdefault(variant, []).append(model)
+            if not isinstance(output, dict) or output.get("status") not in (
+                    "completed", "failed_incomplete", "not_processed"):
+                raise ValueError(f"Invalid generation slot for patient {record['id']}")
+            if output["status"] != "completed":
+                continue
+            predictions = output.get("predictions")
+            if predictions is not None and (not isinstance(predictions, list) or len(predictions) != 3):
+                raise ValueError("Generated predictions must contain exactly three ranked objects or null")
+            if predictions is not None:
+                for prediction in predictions:
+                    if (not isinstance(prediction, dict) or set(prediction) - {"condition", "plan"}
+                            or prediction.get("condition") is not None
+                            and not isinstance(prediction["condition"], str)
+                            or prediction.get("plan") is not None and (
+                                not isinstance(prediction["plan"], list) or len(prediction["plan"]) > 3
+                                or any(not isinstance(action, str) for action in prediction["plan"]))):
+                        raise ValueError("Invalid saved diagnosis/Plan prediction")
+            evaluation = output.get("evaluation")
+            if evaluation is not None and (not isinstance(evaluation, list) or len(evaluation) != 3
+                    or any(not isinstance(entry, dict) or type(entry.get("rank")) is not int
+                           or entry["rank"] != rank
+                           for rank, entry in enumerate(evaluation, 1))):
+                raise ValueError("Saved evaluation must contain exactly ranks 1, 2 and 3")
+        if not groups or any(not values for values in groups.values()):
+            raise ValueError("Saved result has no generation slots")
+        if expected_models and any(None not in values and set(values) != set(expected_models)
+                                   for values in groups.values()):
+            raise ValueError("Saved generation models do not match the recorded experiment")
+    return records
+
+
+def _verified_sources(metadata, scorer, root):
+    for recorded, label in ((metadata["input"], "Patient input"),
+                            ({"file": metadata["evaluation"]["labels_path"],
+                              "sha256": metadata["evaluation"]["labels_sha256"]}, "Labels")):
+        path = Path(root) / recorded["file"]
+        if hashlib.sha256(path.read_bytes()).hexdigest() != recorded["sha256"]:
+            raise ValueError(f"{label} changed since the run: {path}")
+    if scorer._labels_sha256 != metadata["evaluation"]["labels_sha256"]:
+        raise ValueError("The scorer's labels do not match the recorded labels")
+    inputs = {patient["id"]: patient for patient in load_patient_records(Path(root) / metadata["input"]["file"])}
+    labels = {_read_object(line)["id"]: _read_object(line) for line in (
+        Path(root) / metadata["evaluation"]["labels_path"]).read_text(encoding="utf-8").split("\n") if line.strip()}
+    for patient in scorer.patients:
+        source = inputs.get(patient["id"])
+        if source is None or any(patient.get(key) != source[key] for key in ("subjective", "objective")):
+            raise ValueError("The scorer's patient S/O does not match the recorded input")
+        if any(scorer._labels[patient["id"]][key] != labels[patient["id"]][key]
+               for key in ("condition", "plan")):
+            raise ValueError("The scorer's labels do not match the recorded labels")
+
+
+def _finite(value):
+    return not isinstance(value, bool) and isinstance(value, Real) and math.isfinite(value)
+
+
+def _saved_plan(entry, expected, judge, condition, patient):
+    """Trust completed aggregates only with matching inputs and scalar evidence."""
+    if not isinstance(entry, dict) or entry.get("status") != "scored":
+        return False
+    for key in ("method", "validation", "rank_weight", "reference_actions", "generated_actions"):
+        if entry.get(key) != expected[key]:
+            return False
+    if not all(_finite(entry.get(key)) for key in ("score", "weighted_score")):
+        return False
+    if expected["status"] == "scored":
+        return all(entry.get(key) == expected[key] for key in (
+            "reason", "score", "weighted_score", "credits", "unsupported_extra_count", "deduction"))
+    if expected["status"] != "pending":
+        return False
+    reference, generated = expected["reference_actions"], expected["generated_actions"]
+    records = entry.get("judges")
+    if not isinstance(records, list) or len(records) != len(reference) + 1:
+        return False
+    context = (condition, patient["subjective"], patient["objective"])
+    requests = [("action", index, plan_action_messages(*context, action, generated))
+                for index, action in enumerate(reference, 1)]
+    requests.append(("extras", None, plan_extras_messages(*context, reference, generated)))
+    credits = []
+    extras = None
+    try:
+        for record, (kind, index, messages) in zip(records, requests):
+            if (not isinstance(record, dict) or record.get("status") != "scored"
+                    or record.get("judge_model") != judge or record.get("call") != kind
+                    or record.get("reference_item") != index
+                    or record.get("request_key") != request_key(judge, messages)):
+                return False
+            if kind == "action":
+                credit = parse_action_judgement(record.get("raw_response"))["credit"]
+                if record.get("credit") != credit:
+                    return False
+                credits.append(credit)
+            else:
+                extras = parse_extras_judgement(record.get("raw_response"), len(generated))["unsupported_extra_count"]
+                if record.get("unsupported_extra_count") != extras:
+                    return False
+    except (ValueError, TypeError, KeyError):
+        return False
+    deduction = DEDUCTION_PER_UNSUPPORTED_EXTRA * extras
+    score = plan_score(credits, deduction)
+    return (entry.get("credits") == credits and entry.get("unsupported_extra_count") == extras
+            and entry.get("deduction") == deduction and math.isclose(entry["score"], score)
+            and math.isclose(entry["weighted_score"], score * expected["rank_weight"]))
+
+
+def _jobs(records, scorer, judge, changes):
+    for record in records:
+        patient = scorer._patients[record["id"]]
+        label = scorer._labels[record["id"]]
+        condition = label["condition"].replace("_", " ")
+        for _, _, output in _outputs(record):
+            if output["status"] != "completed":
+                continue
+            if output.get("evaluation") is None:
+                output["evaluation"] = [{"rank": rank} for rank in (1, 2, 3)]
+                changes["any"] = True
+            for index, evaluation in enumerate(output["evaluation"]):
+                predictions = output.get("predictions")
+                generated = predictions[index].get("plan") if predictions is not None else None
+                expected = plan_entry(index + 1, label["plan"], generated)
+                saved = evaluation.get("plan_correctness")
+                if _saved_plan(saved, expected, judge, condition, patient):
+                    continue
+                if saved != expected:
+                    changes["any"] = True
+                evaluation["plan_correctness"] = expected
+                if expected["status"] == "pending":
+                    changes["any"] = True
+                    yield record["id"], expected, condition, patient
+
+
+def _write_results(run_dir, records):
+    temporary = run_dir / ".results.jsonl.tmp"
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, run_dir / "results.jsonl")
+        _fsync_directory(run_dir)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+class PlanJudgeUnavailableError(RuntimeError):
+    """The configured judge endpoint/model cannot serve any Plan requests."""
+
+
+def _run_job(run_file, judges, patient_id, entry, condition, patient):
+    with error_scope(run_file, patient_id=patient_id), pipeline_stage("scoring"):
+        result = judges.judge_plan(entry, condition, patient)
+        for record in result.get("judges", []):
+            if (record.get("error") or {}).get("type") in (
+                    "NotFoundError", "AuthenticationError", "PermissionDeniedError"):
+                raise PlanJudgeUnavailableError(
+                    "Plan judge model or credentials are unavailable; fix the endpoint/model "
+                    "and rerun. Completed judge responses have been saved.")
+        return result
+
+
+def _parallel(jobs, judges, run_file, concurrency):
+    executor = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="plan-judge")
+    pending = set()
+    iterator = iter(jobs)
+    exhausted = False
+    try:
+        while pending or not exhausted:
+            while not exhausted and len(pending) < concurrency * 2:
+                try:
+                    job = next(iterator)
+                except StopIteration:
+                    exhausted = True
+                    break
+                pending.add(executor.submit(copy_context().run, _run_job, run_file, judges, *job))
+            if pending:
+                finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    future.result()
+    finally:
+        for future in pending:
+            future.cancel()
+        # Running requests save replies in the cache before we export any shared
+        # entries. A future exception or Ctrl-C stops new work, not durable saves.
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def _counts(records):
+    counts = dict.fromkeys(("scored", "unavailable", "pending", "error", "interrupted"), 0)
+    for record in records:
+        for _, _, output in _outputs(record):
+            if output.get("status") != "completed":
+                continue
+            for entry in output.get("evaluation") or []:
+                status = entry.get("plan_correctness", {}).get("status", "pending")
+                counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, _lock_held=False):
+    """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
+
+    models contains only the recorded judge. _lock_held is reserved for the CLI,
+    which must hold the same lock while reconstructing its input/model objects.
+    """
+    if type(concurrency) is not int or not 1 <= concurrency <= 64:
+        raise ValueError("plan_judge_concurrency must be an integer from 1 to 64")
+    run_dir = Path(run_dir).resolve()
+    with nullcontext() if _lock_held else exclusive_run_lock(run_dir):
+        metadata = _read_object((run_dir / RUN_FILE).read_text(encoding="utf-8"))
+        judge = metadata.get("experiment", {}).get("plan_judge", PIPELINE_DEFAULTS["plan_judge"])
+        _verified_sources(metadata, scorer, root)
+        CorrectnessJudges.validate_resume(metadata, root, plan_judge=judge)
+        records = _records(run_dir, metadata, scorer)
+        if judge not in models.model_ids:
+            raise ValueError(f"Recorded Plan judge {judge} is unavailable; no Plan scores were changed")
+        run_file = RunFile(run_dir, metadata)
+        run_file.redact = models.redact
+        judges = CorrectnessJudges(
+            models.judge, models.model_ids, run_dir / JUDGE_FILE, plan_judge=judge,
+            generator_models=metadata.get("assessment_plan_models", {}).get("selected_models"),
+            judge_model_config=models.metadata(root) if hasattr(models, "metadata") else None,
+            redact=models.redact,
+        )
+        started = pacific_now().isoformat()
+        stage = {"status": "running", "started_at": started, "finished_at": None,
+                 "judge_model": judge, "concurrency": concurrency,
+                 "responses_file": JUDGE_FILE, "calls": 0, "cache_hits": 0,
+                 "implementation_file": str(Path(__file__).resolve().relative_to(Path(root).resolve()))
+                 if Path(__file__).resolve().is_relative_to(Path(root).resolve()) else str(Path(__file__).resolve()),
+                 "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+        run_file.update(plan_evaluation=stage)
+        interrupted = None
+        changes = {"any": False}
+        try:
+            _parallel(_jobs(records, scorer, judge, changes), judges, run_file, concurrency)
+        except BaseException as exc:
+            interrupted = exc
+        try:
+            if changes["any"]:
+                _write_results(run_dir, records)
+            counts = _counts(records)
+            stage.update(status=("interrupted" if isinstance(interrupted, KeyboardInterrupt)
+                                 else "failed_incomplete" if interrupted is not None
+                                 or any(counts.get(key, 0) for key in ("pending", "error", "interrupted"))
+                                 else "completed"), finished_at=pacific_now().isoformat(),
+                         calls=judges.calls, cache_hits=judges.cache_hits, counts=counts,
+                         judge_settings=judges.metadata(root)["plan"])
+            stage["error"] = None if interrupted is None else {
+                "type": type(interrupted).__name__, "message": models.redact(str(interrupted))}
+            evaluation = metadata["evaluation"]
+            if not isinstance(evaluation.get("correctness"), dict):
+                evaluation["correctness"] = judges.metadata(root)
+            else:
+                evaluation["correctness"]["plan"] = judges.metadata(root)["plan"]
+            run_file.update(plan_evaluation=stage)
+        except BaseException:
+            # Never claim completed when the canonical export failed. Scalar
+            # replies already fsynced to the cache remain available next time.
+            stage.update(status="failed_incomplete", finished_at=pacific_now().isoformat(),
+                         calls=judges.calls, cache_hits=judges.cache_hits)
+            run_file.update(plan_evaluation=stage)
+            raise
+        if interrupted is not None:
+            raise interrupted
+        return judges

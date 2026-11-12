@@ -1,0 +1,71 @@
+models:
+  gpt_4o_mini:
+    type: chat
+    model_provider: openai
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+    output_mode: json_schema
+  ollama_gemma3_4b:
+    type: chat
+    model_provider: openai
+    model: gemma3:4b
+    api_base: http://127.0.0.1:11437/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_llama3_2_3b:
+    type: chat
+    model_provider: openai
+    model: llama3.2:3b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_ministral_3_3b:
+    type: chat
+    model_provider: openai
+    model: ministral-3:3b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_qwen2_5_14b_speedup:
+    type: chat
+    model_provider: openai
+    model: qwen2.5:14b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 64
+  ollama_healthcare:
+    type: chat
+    model_provider: openai
+    model: Jayasimma/healthcare:latest
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  ollama_llama3:
+    type: chat
+    model_provider: openai
+    model: llama3:latest
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  ollama_gemma2_2b:
+    type: chat
+    model_provider: openai
+    model: gemma2:2b
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  ollama_qwen2_5_14b:
+    type: chat
+    model_provider: openai
+    model: qwen2.5:14b
+    api_base: http://localhost:11434/v1
+    output_mode: json_schema
+  llama_3_3_70b:
+    type: chat
+    model_provider: groq
+    model: llama-3.3-70b-versatile
+    api_key_env: GROQ_API_KEY
+    output_mode: json_object
+  llama_3_3_70b_local:
+    type: chat
+    model_provider: openai
+    model: meta-llama/Llama-3.3-70B-Instruct
+    api_base: http://localhost:8000/v1
+    output_mode: json_schema

@@ -1,0 +1,54 @@
+Matplotlib is building the font cache; this may take a moment.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:52:16Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency of urination, and dysuria is suggestive of a urinary tract infection (UTI).
+- **Guidelines**: The NICE guidelines on urinary tract infections (NG224) provide a framework for assessing these symptoms.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI; includes microscopy and culture.
+  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.
+  - **Referral**: For infants under 3 months with suspected UTI, refer to pediatric specialist care.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Guidelines**: The NICE guidelines on urinary tract infections and chronic kidney disease provide recommendations for diagnostic tests.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify causative organisms.
+  - **Microscopy**: To assess for crystals, cells, or bacteria.
+  - **Further Investigations**: Consider metabolic assessments if indicated by urine findings (e.g., proteinuria, glucosuria, ketonuria).
+  - **Imaging**: If obstruction or anatomical abnormalities are suspected.
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **First-Line Options**: The NICE guidelines recommend:
+  - **Paracetamol**: As a first-line analgesic for managing pain.
+- **Alternative Options**:
+  - **Non-Steroidal Anti-Inflammatory Drugs (NSAIDs)**: Use with caution due to potential renal effects.
+  - **Opioids**: May be considered for severe pain, but require careful monitoring.
+- **Considerations**: Assess renal function and adjust dosages accordingly.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Guidelines**: NICE guidelines on chronic kidney disease management emphasize patient education.
+- **Recommended Advice**:
+  - **Fluid Management**: Educate on appropriate fluid intake to manage urination symptoms.
+  - **Dietary Modifications**: Low-protein diet may help reduce kidney workload.
+  - **Monitoring Symptoms**: Encourage patients to track changes in urination and report any significant changes.
+  - **Regular Follow-Up**: Importance of regular check-ups to monitor kidney function and adjust management plans as needed.
+prompt is used!
+{"label": "quota_probe", "index": 0, "seconds": 9.085252874996513, "ok": true}

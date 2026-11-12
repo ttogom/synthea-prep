@@ -1,0 +1,21 @@
+{
+  "quota_rpm": 5000,
+  "quota_tpm": 2000000,
+  "per_worker_rpm": [
+    6,
+    12
+  ],
+  "per_worker_tpm": [
+    100000,
+    200000
+  ],
+  "workers": 2,
+  "reserved_capacity_fraction": 0.5,
+  "indices": [
+    0,
+    2,
+    5,
+    8
+  ],
+  "scope": "Four same saved queries, 2x2 factorial, exhausted initial local buckets; then reverse-order repeat and ten-case full preparation validation"
+}

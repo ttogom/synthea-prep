@@ -1,0 +1,16 @@
+[nltk_data] Downloading package punkt to
+[nltk_data]     /Users/rasikaramanan/nltk_data...
+[nltk_data]   Package punkt is already up-to-date!
+[nltk_data] Downloading package punkt_tab to
+[nltk_data]     /Users/rasikaramanan/nltk_data...
+[nltk_data]   Package punkt_tab is already up-to-date!
+[nltk_data] Downloading package wordnet to
+[nltk_data]     /Users/rasikaramanan/nltk_data...
+[nltk_data]   Package wordnet is already up-to-date!
+[nltk_data] Downloading package omw-1.4 to
+[nltk_data]     /Users/rasikaramanan/nltk_data...
+[nltk_data]   Package omw-1.4 is already up-to-date!
+Run directory: /Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup
+Some weights of RobertaModel were not initialized from the model checkpoint at roberta-large and are newly initialized: ['roberta.pooler.dense.bias', 'roberta.pooler.dense.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+Finished: completed_with_errors; HTML results: /Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup/results_summary.html

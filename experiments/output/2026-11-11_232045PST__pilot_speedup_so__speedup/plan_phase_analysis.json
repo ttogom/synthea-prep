@@ -1,0 +1,1506 @@
+{
+  "method": "read-only-plan-phase-analysis-v1",
+  "run_directory": "experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup",
+  "analyzed_at": "2026-11-12T01:03:28.008658-08:00",
+  "final_plan_status": "failed_incomplete",
+  "final_plan_counts": {
+    "scored": 3033,
+    "unavailable": 13,
+    "pending": 0,
+    "error": 26,
+    "interrupted": 0
+  },
+  "canonical_plan_status_counts": {
+    "scored": 3033,
+    "error": 26,
+    "unavailable": 13
+  },
+  "canonical_plan_reason_counts": {
+    "judge_failed": 26,
+    "missing_generation": 13,
+    "empty_generated_plan": 43
+  },
+  "canonical_unfinished_plan_entries": [
+    {
+      "patient_id": "hypertension_0dab4204-25c0-3783-fd0b-4a41fe070418",
+      "stratum": "complex",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "977c81f0ab357dad55c9a86546b362aec722813f191de297373a1cba9cc24155",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_23db4088-dfaa-91df-d6df-27dac4e72890",
+      "stratum": "complex",
+      "variant": "guidelines",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "9bfda4585ba45aac9c1cfa9a20f6d83c610b8598aaff99f289137c2ad72097cd",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_773c1337-de98-5101-a45c-4b30153834e1",
+      "stratum": "complex",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "fcfb6b5863584fc17b82b3fa9976cae24e0a71e1587857bd9c882184f07f2f51",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_773c1337-de98-5101-a45c-4b30153834e1",
+      "stratum": "complex",
+      "variant": "patient_retrieval_guidelines",
+      "model": "ollama_ministral_3_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "58a048524a20585b58a553758d9bae4f7293c3197df2b912f2430c48ed10912b",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_800f82ee-2420-5008-e4ea-6b9446fadd5b",
+      "stratum": "long",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "453358bf388d542d2782d6b5d94ddf0da425d366336ea8038fadfc4fce503a76",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_8372b253-055d-16d4-db6c-1b2e47414b00",
+      "stratum": "long",
+      "variant": "guidelines",
+      "model": "ollama_gemma3_4b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "01358f830ef7d3f2616c98ee45c069a40378372cce447b9a53f52985ae623e11",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "hypertension_8d75b53a-a889-d6c2-6483-0ef9e0945917",
+      "stratum": "complex",
+      "variant": "patient_retrieval_guidelines",
+      "model": "ollama_ministral_3_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "6b8e8ff03d3a866afa026ea80d3fd1032a8d71209893a4e10d0403bf039472bc",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "strep_throat_14e194c2-d32c-3226-b0a8-8d11eb68b0b0",
+      "stratum": "typical",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "df0c52c0365fa6cf677dc77b02fb890a084989d27b619dad260f8d996968de66",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "strep_throat_99087227-832f-799c-3789-70d1e7362300",
+      "stratum": "short",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "5932c2ec4ee4959620de88a7a2fcd2cd58d782c5b376526b9d63f726becbbf67",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "strep_throat_e1321c04-bd89-f7d8-ee92-ce4aa31d2636",
+      "stratum": "typical",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "4cc5ece7090e01067e4f8363ac0fb21a77598d74a5231962b25f1c488128d199",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "strep_throat_e73789ec-2624-ecd4-291c-8ba01c91815b",
+      "stratum": "complex",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "19f7c14faac28d329540d8447c74aab2f498b8eeecff3dd9ddc116021b7748de",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "viral_pharyngitis_c1c06948-466e-cb4d-ce32-36127e6c5e77",
+      "stratum": "typical",
+      "variant": "patient_retrieval",
+      "model": "ollama_gemma3_4b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "04f28d54d3bcfa0de1650fb974af360f75fb624e477354d2e2543c582385e397",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "viral_pharyngitis_c1c06948-466e-cb4d-ce32-36127e6c5e77",
+      "stratum": "typical",
+      "variant": "guidelines",
+      "model": "ollama_ministral_3_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "e9c7c4f159590731c97f24c2cb9da2ce729230b4e7721b8b57d5b5e7f19de83a",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_96af6362-da6a-7b71-177b-63487815456d",
+      "stratum": "short",
+      "variant": "patient_retrieval",
+      "model": "ollama_llama3_2_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "31b02e31ea49726930feb943fbc6fb9da0273a79ba2a161bc58060e164f92e9b",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_llama3_2_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "f7a6d588c1cb73c0dc5e3007dbc7150ed87b233986c6460bab389f9d245d89f7",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_llama3_2_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "776faa0887a55b153d9da4f188f373a878682b099862058da540c7ebc4b38a28",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_llama3_2_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "f8b4c169dffd89c751caf9963db33df0d3168a525b1a6a67ab4ac1e8ec2e293c",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "37ca54ed3f4b5b772ad3dd5f52fdd3e9825759311527ab525e03340a6327d072",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "0967d35b88d6ef9a6b01b8e84e09dea8d546a7fc8932c72156cf1d55ac9dd171",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "f8a458e6c3f0b6f66294913a60b268a7faa459de372d595bbbe39982ec4c31eb",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "variant": "patient_retrieval",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "303b9efae82fc32eab1b96c19696477d6041adcfe3a58abcf5e724997b022239",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_bd063530-56b6-9db9-a063-23234ae99e30",
+      "stratum": "short",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "2fb5d56dc515aa0c90a23fd90973a2ecadffbe824a49fa3f674f2a032dae4158",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_ff3caa44-52cb-6a6b-a809-c2afe62b7089",
+      "stratum": "long",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "075ef8d1afc50177496416385c02b9d9bca3a88d2c78b82a3f6a96615f0eb283",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "cystitis_ff3caa44-52cb-6a6b-a809-c2afe62b7089",
+      "stratum": "long",
+      "variant": "patient_retrieval_guidelines",
+      "model": "ollama_ministral_3_3b",
+      "rank": 3,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "4809ce0078d61318268cc6bcbe8138b17805204eda3797fc818145dd9d98b25e",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "heart_failure_3490a5c6-5129-e0d6-37d6-47fa5d9484f9",
+      "stratum": "complex",
+      "variant": "llm_only",
+      "model": "ollama_ministral_3_3b",
+      "rank": 2,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "7bfcc787ca431c2483a4362cac3da72d88e2e9f668ac0788e4e612da66bf1814",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    },
+    {
+      "patient_id": "heart_failure_4b2afa6e-a74d-486b-9018-8288b14c9089",
+      "stratum": "long",
+      "variant": "patient_retrieval",
+      "model": "ollama_llama3_2_3b",
+      "rank": 1,
+      "status": "error",
+      "reason": "judge_failed",
+      "error": {
+        "type": "JudgeFailed",
+        "message": "The Plan judge did not return every valid judgement"
+      },
+      "failed_judges": [
+        {
+          "request_key": "590c4be593a6f084ded36ff7acc9946567b8eadb938199ef83ac41aa2c9897e0",
+          "call": "extras",
+          "status": "invalid_response",
+          "error": {
+            "type": "JudgeResponseError",
+            "message": "unsupported_extra_count must be a whole number from 0 to 1"
+          }
+        }
+      ]
+    }
+  ],
+  "judgeable_plan_entries": 3016,
+  "logical_scalar_calls": {
+    "plan_action": 4999,
+    "plan_extras": 3016
+  },
+  "logical_scalar_total": 8015,
+  "expected_unique_request_keys": 8006,
+  "valid_unique_cached_request_keys": 7980,
+  "expected_keys_without_valid_reply": [
+    "01358f830ef7d3f2616c98ee45c069a40378372cce447b9a53f52985ae623e11",
+    "04f28d54d3bcfa0de1650fb974af360f75fb624e477354d2e2543c582385e397",
+    "075ef8d1afc50177496416385c02b9d9bca3a88d2c78b82a3f6a96615f0eb283",
+    "0967d35b88d6ef9a6b01b8e84e09dea8d546a7fc8932c72156cf1d55ac9dd171",
+    "19f7c14faac28d329540d8447c74aab2f498b8eeecff3dd9ddc116021b7748de",
+    "2fb5d56dc515aa0c90a23fd90973a2ecadffbe824a49fa3f674f2a032dae4158",
+    "303b9efae82fc32eab1b96c19696477d6041adcfe3a58abcf5e724997b022239",
+    "31b02e31ea49726930feb943fbc6fb9da0273a79ba2a161bc58060e164f92e9b",
+    "37ca54ed3f4b5b772ad3dd5f52fdd3e9825759311527ab525e03340a6327d072",
+    "453358bf388d542d2782d6b5d94ddf0da425d366336ea8038fadfc4fce503a76",
+    "4809ce0078d61318268cc6bcbe8138b17805204eda3797fc818145dd9d98b25e",
+    "4cc5ece7090e01067e4f8363ac0fb21a77598d74a5231962b25f1c488128d199",
+    "58a048524a20585b58a553758d9bae4f7293c3197df2b912f2430c48ed10912b",
+    "590c4be593a6f084ded36ff7acc9946567b8eadb938199ef83ac41aa2c9897e0",
+    "5932c2ec4ee4959620de88a7a2fcd2cd58d782c5b376526b9d63f726becbbf67",
+    "6b8e8ff03d3a866afa026ea80d3fd1032a8d71209893a4e10d0403bf039472bc",
+    "776faa0887a55b153d9da4f188f373a878682b099862058da540c7ebc4b38a28",
+    "7bfcc787ca431c2483a4362cac3da72d88e2e9f668ac0788e4e612da66bf1814",
+    "977c81f0ab357dad55c9a86546b362aec722813f191de297373a1cba9cc24155",
+    "9bfda4585ba45aac9c1cfa9a20f6d83c610b8598aaff99f289137c2ad72097cd",
+    "df0c52c0365fa6cf677dc77b02fb890a084989d27b619dad260f8d996968de66",
+    "e9c7c4f159590731c97f24c2cb9da2ce729230b4e7721b8b57d5b5e7f19de83a",
+    "f7a6d588c1cb73c0dc5e3007dbc7150ed87b233986c6460bab389f9d245d89f7",
+    "f8a458e6c3f0b6f66294913a60b268a7faa459de372d595bbbe39982ec4c31eb",
+    "f8b4c169dffd89c751caf9963db33df0d3168a525b1a6a67ab4ac1e8ec2e293c",
+    "fcfb6b5863584fc17b82b3fa9976cae24e0a71e1587857bd9c882184f07f2f51"
+  ],
+  "expected_keys_never_attempted": [],
+  "cache_row_count": 8014,
+  "all_cache_key_hashes_match_current_messages": true,
+  "unexpected_cache_keys": [],
+  "C4_cache_prefix_preserved": true,
+  "C4_valid_keys_recalled_under_C8": [],
+  "C4_valid_keys_not_recalled_under_C8": 2887,
+  "stages": [
+    {
+      "stage_index": 0,
+      "status": "interrupted",
+      "started_at": "2026-11-12T00:06:41-08:00",
+      "finished_at": "2026-11-12T00:24:56-08:00",
+      "concurrency": 4,
+      "context_length": 8192,
+      "wall_seconds": 1095.0,
+      "calls_reported": 2895,
+      "cache_hits_reported": 3,
+      "response_rows": 2895,
+      "valid_response_rows": 2887,
+      "valid_unique_keys": 2887,
+      "invalid_response_rows": 8,
+      "calls_per_second": 2.643835616438356,
+      "valid_responses_per_second": 2.636529680365297,
+      "max_reported_prompt_tokens": 1400,
+      "max_reported_completion_tokens": 12,
+      "native_slot_context_counts": {
+        "8192": 2896
+      },
+      "native_truncation_or_context_shift_detected": false,
+      "native_matching_lines": [],
+      "counts": {
+        "scored": 922,
+        "unavailable": 13,
+        "pending": 2129,
+        "error": 8,
+        "interrupted": 0
+      }
+    },
+    {
+      "stage_index": 1,
+      "status": "failed_incomplete",
+      "started_at": "2026-11-12T00:29:13-08:00",
+      "finished_at": "2026-11-12T01:03:10-08:00",
+      "concurrency": 8,
+      "context_length": 4096,
+      "wall_seconds": 2037.0,
+      "calls_reported": 5119,
+      "cache_hits_reported": 26,
+      "response_rows": 5119,
+      "valid_response_rows": 5093,
+      "valid_unique_keys": 5093,
+      "invalid_response_rows": 26,
+      "calls_per_second": 2.513009327442317,
+      "valid_responses_per_second": 2.5002454590083456,
+      "max_reported_prompt_tokens": 1782,
+      "max_reported_completion_tokens": 12,
+      "native_slot_context_counts": {
+        "4096": 5120
+      },
+      "native_truncation_or_context_shift_detected": false,
+      "native_matching_lines": [],
+      "counts": {
+        "scored": 3033,
+        "unavailable": 13,
+        "pending": 0,
+        "error": 26,
+        "interrupted": 0
+      }
+    }
+  ],
+  "patient_categories_by_stratum": {
+    "C4_valid_complete": {
+      "long": 2,
+      "complex": 4,
+      "typical": 3,
+      "short": 2
+    },
+    "C4_C8_mixed_fully_attempted_with_invalid_reply": {
+      "complex": 4,
+      "long": 2,
+      "typical": 1
+    },
+    "C4_C8_mixed_valid_complete": {
+      "complex": 1
+    },
+    "C8_only_valid_complete": {
+      "short": 11,
+      "typical": 10,
+      "complex": 5,
+      "long": 9
+    },
+    "C8_only_fully_attempted_with_invalid_reply": {
+      "short": 3,
+      "typical": 2,
+      "complex": 2,
+      "long": 3
+    }
+  },
+  "C8_patient_interval_allocation": [
+    {
+      "patient_id": "hypertension_04e4b34b-9bf1-860f-0b30-f4ae982d2841",
+      "stratum": "long",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 144,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_0dab4204-25c0-3783-fd0b-4a41fe070418",
+      "stratum": "complex",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 143,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 1.0
+    },
+    {
+      "patient_id": "hypertension_23db4088-dfaa-91df-d6df-27dac4e72890",
+      "stratum": "complex",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 192,
+      "valid_C4_keys": 191,
+      "attempted_C4_keys": 192,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 1.0
+    },
+    {
+      "patient_id": "hypertension_37220b0b-efa8-8373-fdf1-966cc3eb38b2",
+      "stratum": "complex",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 141,
+      "attempted_C4_keys": 141,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_390a6bd4-aab1-6d5d-db51-ec28129bc361",
+      "stratum": "typical",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 144,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_6890c1c0-e14b-96a2-ed93-1691b1bab9df",
+      "stratum": "complex",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 192,
+      "valid_C4_keys": 192,
+      "attempted_C4_keys": 192,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_773c1337-de98-5101-a45c-4b30153834e1",
+      "stratum": "complex",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 192,
+      "valid_C4_keys": 190,
+      "attempted_C4_keys": 192,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 2.0
+    },
+    {
+      "patient_id": "hypertension_800f82ee-2420-5008-e4ea-6b9446fadd5b",
+      "stratum": "long",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 143,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 1.0
+    },
+    {
+      "patient_id": "hypertension_8372b253-055d-16d4-db6c-1b2e47414b00",
+      "stratum": "long",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 143,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_8aa09f4c-fb31-d1e8-6b09-2aee3f28c36e",
+      "stratum": "complex",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 180,
+      "valid_C4_keys": 180,
+      "attempted_C4_keys": 180,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_8d75b53a-a889-d6c2-6483-0ef9e0945917",
+      "stratum": "complex",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 192,
+      "valid_C4_keys": 191,
+      "attempted_C4_keys": 192,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 9.0
+    },
+    {
+      "patient_id": "hypertension_c568f9f9-3492-3941-08ea-ad4d8421f31f",
+      "stratum": "short",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 141,
+      "attempted_C4_keys": 141,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "hypertension_fc441c3c-fc63-ceb1-25b8-aa34ea24889c",
+      "stratum": "complex",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 188,
+      "valid_C4_keys": 188,
+      "attempted_C4_keys": 188,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "strep_throat_06a8ea8f-cc5d-afc4-31ff-59402b4e3ea3",
+      "stratum": "long",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 144,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "strep_throat_0704ca8a-3c91-1f5c-2007-89b93f4d792f",
+      "stratum": "short",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 141,
+      "attempted_C4_keys": 141,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "strep_throat_14e194c2-d32c-3226-b0a8-8d11eb68b0b0",
+      "stratum": "typical",
+      "category": "C4_C8_mixed_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 143,
+      "attempted_C4_keys": 144,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 1.0
+    },
+    {
+      "patient_id": "strep_throat_2b724131-eb16-2f6d-f766-f0ace27d9a33",
+      "stratum": "typical",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 94,
+      "attempted_C4_keys": 94,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "strep_throat_3d29af01-f433-1cb5-bc32-40930aefd9d1",
+      "stratum": "typical",
+      "category": "C4_valid_complete",
+      "expected_unique_keys": 138,
+      "valid_C4_keys": 138,
+      "attempted_C4_keys": 138,
+      "valid_C8_keys": 0,
+      "C8_allocated_seconds": 0.0
+    },
+    {
+      "patient_id": "strep_throat_45df3736-9233-c63a-c8a0-6d92e7fca5e6",
+      "stratum": "complex",
+      "category": "C4_C8_mixed_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 96,
+      "attempted_C4_keys": 96,
+      "valid_C8_keys": 48,
+      "C8_allocated_seconds": 29.0
+    },
+    {
+      "patient_id": "strep_throat_46c3388b-136b-1782-039b-84fc267089c2",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 135,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 135,
+      "C8_allocated_seconds": 41.0
+    },
+    {
+      "patient_id": "strep_throat_604774d2-54ec-b60f-02b8-d9a821903ab1",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 34.0
+    },
+    {
+      "patient_id": "strep_throat_60e5165e-a61b-2359-9ad8-0b1c57a184e9",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 32.0
+    },
+    {
+      "patient_id": "strep_throat_79c3bf21-4aec-da3a-18d0-c738d45449fd",
+      "stratum": "complex",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 144,
+      "C8_allocated_seconds": 60.0
+    },
+    {
+      "patient_id": "strep_throat_7d6d45a2-b4d2-33a9-7071-f603941f9078",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 90,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 90,
+      "C8_allocated_seconds": 32.0
+    },
+    {
+      "patient_id": "strep_throat_88c45b54-e69a-fead-f18b-b54d517ab699",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 141,
+      "C8_allocated_seconds": 44.0
+    },
+    {
+      "patient_id": "strep_throat_99087227-832f-799c-3789-70d1e7362300",
+      "stratum": "short",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 140,
+      "C8_allocated_seconds": 42.0
+    },
+    {
+      "patient_id": "strep_throat_c6774ce4-e63b-57d4-efb1-f3fc85e6040a",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 144,
+      "C8_allocated_seconds": 47.0
+    },
+    {
+      "patient_id": "strep_throat_e1321c04-bd89-f7d8-ee92-ce4aa31d2636",
+      "stratum": "typical",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 90,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 89,
+      "C8_allocated_seconds": 33.0
+    },
+    {
+      "patient_id": "strep_throat_e73789ec-2624-ecd4-291c-8ba01c91815b",
+      "stratum": "complex",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 140,
+      "C8_allocated_seconds": 66.0
+    },
+    {
+      "patient_id": "strep_throat_eda23af4-9f75-2e4e-a35c-bbf380097a96",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 30.0
+    },
+    {
+      "patient_id": "strep_throat_fc38b16b-7593-0f57-8210-6c7cfeadff8d",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 144,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 144,
+      "C8_allocated_seconds": 53.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_2782fe83-1183-846c-e81d-f271a491660d",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 37.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_4b5b4146-8a7d-c28d-6f8d-8ca79fb9b8a0",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 40.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_5d6dae2c-9710-0676-af6e-2ba56a9f1747",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 41.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_71ba0c05-64cb-6a05-1868-bd6bcef0c449",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 50.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_86c2092a-456e-a4c6-d123-2eaa1b8e2164",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 31.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_8cf78d68-f170-12b1-a318-4b910f5ade00",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 38.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_8f2ef189-529f-81d0-af57-9456e6f0399b",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 29.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_946b32b4-24c5-8ec3-2d45-eab7b41f06ed",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 33.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_9f6f229b-a222-f19e-5a09-e78deff345f2",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 90,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 90,
+      "C8_allocated_seconds": 29.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_a1c6ef98-75e2-8021-71d0-9e7920cffb62",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 42.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_b2cb0b5c-a8e2-ed27-0054-8786b17d33ef",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 34.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_b3252eed-dd39-05d9-9815-5e74489f3e35",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 37.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_bf961e8e-e3d9-6b59-f05b-bc50097c073d",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 36.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_c1c06948-466e-cb4d-ce32-36127e6c5e77",
+      "stratum": "typical",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 94,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 35.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_ce4a00f2-9587-4b6d-3ca2-3f806ad24e0e",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 31.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_e0923a3b-3fca-8980-c061-5e9e14183106",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 47.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_e5593d0d-bde5-d73d-9cee-34a2dd6e4036",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 36.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_eddee600-a3fd-f933-b4e3-b773b75dd036",
+      "stratum": "typical",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 34.0
+    },
+    {
+      "patient_id": "viral_pharyngitis_ffcb7525-4968-9cf1-651f-3ee2ce051ffd",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 90,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 90,
+      "C8_allocated_seconds": 44.0
+    },
+    {
+      "patient_id": "cystitis_2169a2ae-71a9-8dd4-bd37-d447b290862a",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 29.0
+    },
+    {
+      "patient_id": "cystitis_96af6362-da6a-7b71-177b-63487815456d",
+      "stratum": "short",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 95,
+      "C8_allocated_seconds": 34.0
+    },
+    {
+      "patient_id": "cystitis_9e00f0a2-6f68-81f8-47b9-d41c9c8f58fb",
+      "stratum": "long",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 89,
+      "C8_allocated_seconds": 43.0
+    },
+    {
+      "patient_id": "cystitis_bd063530-56b6-9db9-a063-23234ae99e30",
+      "stratum": "short",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 91,
+      "C8_allocated_seconds": 31.0
+    },
+    {
+      "patient_id": "cystitis_c019412a-716d-8388-bd63-cf5034ada689",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 96,
+      "C8_allocated_seconds": 31.0
+    },
+    {
+      "patient_id": "cystitis_d497b852-99bc-e72f-b6ef-98eb5773e7a8",
+      "stratum": "short",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 92,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 92,
+      "C8_allocated_seconds": 39.0
+    },
+    {
+      "patient_id": "cystitis_ff3caa44-52cb-6a6b-a809-c2afe62b7089",
+      "stratum": "long",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 96,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 94,
+      "C8_allocated_seconds": 52.0
+    },
+    {
+      "patient_id": "heart_failure_20b938db-7f06-2f2c-69ef-3d475ef98990",
+      "stratum": "complex",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 188,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 188,
+      "C8_allocated_seconds": 88.0
+    },
+    {
+      "patient_id": "heart_failure_22383087-7d6b-ee83-7c71-7ec04134920c",
+      "stratum": "complex",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 138,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 138,
+      "C8_allocated_seconds": 68.0
+    },
+    {
+      "patient_id": "heart_failure_3490a5c6-5129-e0d6-37d6-47fa5d9484f9",
+      "stratum": "complex",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 180,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 179,
+      "C8_allocated_seconds": 79.0
+    },
+    {
+      "patient_id": "heart_failure_4b2afa6e-a74d-486b-9018-8288b14c9089",
+      "stratum": "long",
+      "category": "C8_only_fully_attempted_with_invalid_reply",
+      "expected_unique_keys": 138,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 137,
+      "C8_allocated_seconds": 74.0
+    },
+    {
+      "patient_id": "heart_failure_eb77f94b-6377-3c53-32f7-e30d248dc399",
+      "stratum": "long",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 141,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 141,
+      "C8_allocated_seconds": 60.0
+    },
+    {
+      "patient_id": "heart_failure_ef44ba71-5eef-1d43-39ae-35999af848cb",
+      "stratum": "complex",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 188,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 188,
+      "C8_allocated_seconds": 61.0
+    },
+    {
+      "patient_id": "heart_failure_f3966f02-83e5-f38d-8cdd-58e09c158365",
+      "stratum": "complex",
+      "category": "C8_only_valid_complete",
+      "expected_unique_keys": 188,
+      "valid_C4_keys": 0,
+      "attempted_C4_keys": 0,
+      "valid_C8_keys": 188,
+      "C8_allocated_seconds": 85.0
+    }
+  ],
+  "C8_stratum_allocation": {
+    "short": {
+      "population_count": 535,
+      "population_weight": 0.2249789739276703,
+      "C8_only_fully_attempted_patients": 14,
+      "C8_only_valid_complete_patients": 11,
+      "allocated_seconds": 492.0,
+      "mean_allocated_seconds_per_patient": 35.142857142857146
+    },
+    "typical": {
+      "population_count": 1070,
+      "population_weight": 0.4499579478553406,
+      "C8_only_fully_attempted_patients": 12,
+      "C8_only_valid_complete_patients": 10,
+      "allocated_seconds": 437.0,
+      "mean_allocated_seconds_per_patient": 36.416666666666664
+    },
+    "long": {
+      "population_count": 535,
+      "population_weight": 0.2249789739276703,
+      "C8_only_fully_attempted_patients": 12,
+      "C8_only_valid_complete_patients": 9,
+      "allocated_seconds": 556.0,
+      "mean_allocated_seconds_per_patient": 46.333333333333336
+    },
+    "complex": {
+      "population_count": 238,
+      "population_weight": 0.10008410428931876,
+      "C8_only_fully_attempted_patients": 7,
+      "C8_only_valid_complete_patients": 5,
+      "allocated_seconds": 507.0,
+      "mean_allocated_seconds_per_patient": 72.42857142857143
+    }
+  },
+  "C8_only_projected_full_judge_seconds": 99793.59523809524,
+  "C8_only_projected_full_judge_hours": 27.720443121693123,
+  "generation_baseline": {
+    "file": "runtime_projection_first_pass.json",
+    "pipeline_wall_time_hours": 27.24800028720443,
+    "note": "Original first-pass projection retained; resumed generation metadata was not projected."
+  },
+  "generation_plus_C8_judge_hours": 54.968443408897556,
+  "forecast_limitations": [
+    "Approximate timestamp allocation: each interval between durable replies is assigned to the patient owning its ending reply.",
+    "Timestamps have one-second precision; concurrent patient boundaries can transfer wall time between patients.",
+    "C8-only fully attempted patients have no valid C4 prefix key. Invalid replies still count as work, avoiding exclusion bias.",
+    "The C8 subset is a nonrandom input-order suffix after C4; stratum weighting does not eliminate condition/action-count mix bias.",
+    "C4 and C8 processed different work slices; their observed reply rates do not establish causal concurrency speedup.",
+    "This projects initial attempted judgement work; invalid replies may still require additional retries or review.",
+    "Native log absence of truncation is observed evidence, not a model-independent proof for unseen full-cohort prompts."
+  ],
+  "source_sha256": {
+    "run.json": "7bd429b957318e7325c7d7fad6bad5ff40093279404c4d9c0ac0807aaeb95fa9",
+    "results.jsonl": "fdbcf4fe905c21a64f4bfe819fbc55690968f20c0ae8ac98db06b216c76edb0c",
+    "judge_responses.jsonl": "9af72f903920248ed2eab1e67bd5675ae8a40bbf6891bca9fb8c080083e6d631",
+    "runtime_projection_first_pass.json": "f69f03a1a326eaf27e944eb1dcf1edb5cb297cf594e852cd212c9c05ed24aa2c"
+  },
+  "invalid_scalar_reply_summary": {
+    "rows": 34,
+    "unique_keys": 26,
+    "tasks": {
+      "plan_extras": 34
+    },
+    "validation_messages": {
+      "unsupported_extra_count must be a whole number from 0 to 1": 34
+    },
+    "returned_unsupported_extra_count": {
+      "3": 15,
+      "2": 19
+    },
+    "C4_invalid_keys_retried_and_still_invalid_under_C8": 8,
+    "finding": "All invalid replies are valid JSON returning unsupported_extra_count 2 or 3 when the generated Plan has one array item and the parser permits 0 or 1. These are count-bound failures, not truncation or token-cap failures."
+  },
+  "observed_cap_findings": {
+    "C8_context_length": 4096,
+    "C8_max_reported_prompt_tokens": 1782,
+    "configured_judge_max_tokens": 64,
+    "max_reported_completion_tokens_all_stages": 12,
+    "finding": "No observed context/input truncation. The longest reported completion is 12 tokens, below the 64-token cap; invalid scalar replies completed in valid JSON."
+  }
+}

@@ -1,0 +1,44 @@
+patient_input: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/patients.jsonl
+patient_labels: /Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/input/test_labels.jsonl
+presenting_evidence_only: true
+exclude_none_recorded_plans: true
+max_patients: null
+selected_variants:
+- patient_retrieval_guidelines
+variant_settings: {}
+patient_corpus: /Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/data/patient_corpus/reference_patients.json
+patient_retrieval_artifacts_dir: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/patient_retrieval_so
+patient_embedding_model: emilyalsentzer/Bio_ClinicalBERT
+patient_keyword_model: gpt-4o-mini
+patient_reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+patient_retrieval_alpha: 0.5
+patient_retrieval_top_k: 20
+patient_rerank_top_k: 5
+guidelines: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines
+guideline_question_model: gpt-4o-mini
+guideline_community_level: 2
+guideline_response_type: Multiple Paragraphs
+guideline_verbose: false
+selected_models:
+- gpt_4o_mini
+- ollama_gemma3_4b
+- ollama_llama3_2_3b
+- ollama_ministral_3_3b
+plan_judge: ollama_qwen2_5_14b_speedup
+plan_judge_concurrency: 4
+temperature: 1
+max_retries: 3
+execution:
+  preparation_workers: 4
+  local_concurrency: 4
+  hosted_concurrency: 4
+  scoring_batch_patients: 8
+  overlap_scoring: true
+  cpu_threads: 2
+  encoder_device: cpu
+  manage_ollama: true
+  ollama_host: 127.0.0.1:11435
+  ollama_parallel_slots: 4
+  ollama_context_length: 16384
+  ollama_judge_context_length: 8192
+experiment_output: /var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/unused-experiment-output

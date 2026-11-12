@@ -1,0 +1,19 @@
+Secret scan passed for 1293 source artifacts
+Byte-verified backup complete: 1293 artifacts
+{
+  "manifest": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/speedup_handoff_artifacts_20261112/artifact_manifest.json",
+  "backup": "/Users/rasikaramanan/Documents/medcopilot-backups/speedup-20261112",
+  "artifacts": 1300,
+  "bytes": 1420633850,
+  "sqlite": {
+    "integrity": "ok",
+    "tables_row_counts": {
+      "jobs": 2177,
+      "metadata": 2
+    },
+    "consistent_snapshot": "experiments/output/speedup_handoff_artifacts_20261112/reference_snapshots/jobs.consistent.sqlite3",
+    "source_wal_size": 0
+  },
+  "historical_outputs": 16,
+  "maximum_file_bytes": 73809528
+}

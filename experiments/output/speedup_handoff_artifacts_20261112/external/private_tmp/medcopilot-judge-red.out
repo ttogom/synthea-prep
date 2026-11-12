@@ -1,0 +1,212 @@
+EEEEEEEEEEEEEEE.EEEEEEEE.
+======================================================================
+ERROR: test_availability_and_runtime_status_can_change_without_changing_scores (__main__.ResumeValidationTests.test_availability_and_runtime_status_can_change_without_changing_scores)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 575, in test_availability_and_runtime_status_can_change_without_changing_scores
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_runtime_prompt_is_rejected_against_saved_prompt_hash (__main__.ResumeValidationTests.test_changed_runtime_prompt_is_rejected_against_saved_prompt_hash)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 589, in test_changed_runtime_prompt_is_rejected_against_saved_prompt_hash
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='diagnosis.model')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='diagnosis.model_revision')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='diagnosis.normalization.abbreviations')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='diagnosis.normalization.rule')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.judge_model')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.judge_temperature')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.rubric_sha256')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.action_prompt_template_sha256')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.extras_prompt_template_sha256')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.credit_values')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='plan.deduction_per_unsupported_extra')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='rank_weighting.formula')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_changed_scoring_semantics_are_rejected (__main__.ResumeValidationTests.test_changed_scoring_semantics_are_rejected) (setting='rank_weighting.weights')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 566, in test_changed_scoring_semantics_are_rejected
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_identical_semantics_validate_without_models_cache_calls_or_writes (__main__.ResumeValidationTests.test_identical_semantics_validate_without_models_cache_calls_or_writes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 537, in test_identical_semantics_validate_without_models_cache_calls_or_writes
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (metadata={})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 580, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (metadata={'evaluation': {}})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 580, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (metadata={'evaluation': {'correctness': None}})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 580, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume(metadata, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (correctness=[])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 583, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume({"evaluation": {"correctness": correctness}}, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (correctness='invalid')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 583, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume({"evaluation": {"correctness": correctness}}, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (correctness={})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 583, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume({"evaluation": {"correctness": correctness}}, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+======================================================================
+ERROR: test_legacy_without_correctness_and_malformed_correctness_metadata (__main__.ResumeValidationTests.test_legacy_without_correctness_and_malformed_correctness_metadata) (correctness={'diagnosis': None})
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/tests/test_med_copilot_judges.py", line 583, in test_legacy_without_correctness_and_malformed_correctness_metadata
+    CorrectnessJudges.validate_resume({"evaluation": {"correctness": correctness}}, ROOT)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'CorrectnessJudges' has no attribute 'validate_resume'
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.004s
+
+FAILED (errors=23)

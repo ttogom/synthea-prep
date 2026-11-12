@@ -1,0 +1,113 @@
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:57:06Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+## Causes and Guidelines for Sore Throat Symptoms
+- **Common Causes**:
+  - **Viral Infections**: Most sore throats are viral (e.g., rhinovirus, influenza).
+  - **Bacterial Infections**: Streptococcal pharyngitis (strep throat) is a key bacterial cause.
+- **Guidelines**:
+  - **Centor Criteria**: Used to assess the likelihood of streptococcal infection based on:
+    - Fever
+    - Absence of cough
+    - Swollen and tender anterior cervical lymph nodes
+    - Tonsillar swelling or exudate
+  - **Investigations**:
+    - Rapid antigen detection tests (RADTs) for strep throat.
+    - Throat culture if RADT is negative but suspicion remains high.
+
+## Diagnostic Tests for Fever and Swollen Lymph Nodes
+- **Recommended Tests**:
+  - **Throat Swab**: To test for streptococcal infection.
+  - **Complete Blood Count (CBC)**: To assess for signs of infection (e.g., leukocytosis).
+  - **Monospot Test**: To rule out infectious mononucleosis if indicated by clinical findings.
+- **Additional Considerations**:
+  - Consider imaging (e.g., ultrasound) if abscess is suspected.
+
+## Medications for Sore Throat and Fever
+- **First-Line Medications**:
+  - **Analgesics**: 
+    - **Paracetamol (Acetaminophen)**: 500-1000 mg every 4-6 hours as needed.
+    - **Ibuprofen**: 200-400 mg every 6-8 hours as needed.
+- **Alternative Medications**:
+  - **Topical Anesthetics**: Benzocaine lozenges for localized pain relief.
+  - **Corticosteroids**: Consider for severe swelling or difficulty swallowing (e.g., dexamethasone 10 mg orally).
+
+## Patient Education for Recovery and Symptom Management
+- **Lifestyle Advice**:
+  - **Hydration**: Encourage fluid intake to prevent dehydration.
+  - **Rest**: Emphasize the importance of adequate rest for recovery.
+  - **Nutrition**: Suggest small, nutritious meals to support energy levels.
+- **Symptom Management**:
+  - Use humidifiers to ease throat discomfort.
+  - Gargle with warm salt water for symptomatic relief.
+  - Monitor symptoms and seek medical attention if they worsen or do not improve.
+prompt is used!
+{"label": "B_repeat_w0", "index": 7, "seconds": 20.94259437499568, "ok": true}
+[DEBUG] Expected file not found in communities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/communities.parquet
+[DEBUG] Expected file not found in community_reports.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/community_reports.parquet
+[DEBUG] Expected file not found in text_units.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/text_units.parquet
+[DEBUG] Expected file not found in relationships.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/relationships.parquet
+[DEBUG] Expected file not found in entities.parquet, trying fallback search...
+[DEBUG] Loading from med_copilot/data/guidelines/output/entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/tmp/medcopilot-preparation-profile-qlspfgvq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T08:57:27Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Urgent Desire to Urinate: Guidelines and Investigations
+- **Potential Causes**: The combination of urgent desire to urinate, suprapubic pain, increased frequency, and dysuria suggests a urinary tract infection (UTI) or other urological conditions.
+- **Guidelines**: The NICE guidelines on urinary tract infections (UTIs) provide a framework for assessing these symptoms.
+- **Investigations**:
+  - **Urine Testing**: Essential for confirming UTI; includes microscopy and culture.
+  - **Symptoms Assessment**: Use Table 1 from the guidelines to evaluate symptoms that increase or decrease the likelihood of a UTI.
+  - **Referral**: Consider referral to a specialist if symptoms persist or complications are suspected.
+
+### Cloudy, Brown Urine: Diagnostic Recommendations
+- **Guidelines**: The NICE guidelines on urine testing and chronic kidney disease (CKD) provide recommendations for evaluating abnormal urine findings.
+- **Recommended Tests**:
+  - **Urine Culture**: To identify any infectious agents.
+  - **Microscopy**: To assess for cellular components or crystals.
+  - **Further Investigations**: Consider metabolic assessments or imaging if indicated by the urine findings and clinical context.
+
+### Chronic Kidney Disease Stage 4: Pain Management Guidelines
+- **First-Line Options**: The NICE guidelines recommend:
+  - **Acetaminophen**: As a first-line analgesic for managing mild to moderate pain.
+- **Alternative Options**:
+  - **Nonsteroidal Anti-Inflammatory Drugs (NSAIDs)**: Use with caution due to potential renal effects.
+  - **Opioids**: May be considered for severe pain, with careful monitoring for side effects.
+- **Patient Monitoring**: Regular assessment of pain and renal function is crucial.
+
+### Chronic Kidney Disease Stage 4: Patient Education and Lifestyle Advice
+- **Guidelines**: NICE guidelines emphasize the importance of patient education in managing CKD symptoms.
+- **Recommended Advice**:
+  - **Fluid Management**: Educate on appropriate fluid intake to manage urination frequency.
+  - **Dietary Modifications**: Low-protein diet may help reduce kidney workload.
+  - **Regular Monitoring**: Encourage regular follow-ups for kidney function and symptom management.
+  - **Symptom Awareness**: Teach patients to recognize signs of worsening kidney function or complications.
+{"label": "B_repeat_w0", "index": 0, "seconds": 7.879780791998201, "ok": true}

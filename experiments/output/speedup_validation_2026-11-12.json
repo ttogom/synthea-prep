@@ -1,0 +1,169 @@
+{
+  "branch": "speedup",
+  "full_experiment_started": false,
+  "population_count": 2378,
+  "pilot": {
+    "run_directory": "experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup",
+    "patients": 64,
+    "patients_per_stratum": 16,
+    "generation_slots_completed": 1024,
+    "first_pass_seconds": 2662,
+    "one_capped_generation_recovered_by_resume": true,
+    "nonempty_plan_ranks": 3016,
+    "plan_counts": {
+      "scored": 3033,
+      "unavailable": 13,
+      "pending": 0,
+      "error": 26,
+      "interrupted": 0
+    },
+    "existing_artifacts_byte_identical_after_rate_update": 24
+  },
+  "production_graph_settings": {
+    "file": "med_copilot/data/guidelines/settings.yaml",
+    "chat_requests_per_minute_per_worker": 12,
+    "chat_tokens_per_minute_per_worker": 200000,
+    "preparation_workers": 2,
+    "nominal_combined_requests_per_minute": 24,
+    "nominal_combined_tokens_per_minute": 400000,
+    "embedding_model_unchanged": true,
+    "embedding_requests_per_minute": null,
+    "embedding_tokens_per_minute": null
+  },
+  "resume_validation": {
+    "generation_resume_rejects_changed_guideline_fingerprint_before_writes_or_calls": true,
+    "plan_only_resume_uses_saved_outputs_and_cached_scalar_replies_after_guideline_change": true,
+    "saved_pilot_metadata_not_rewritten": true
+  },
+  "measured_original_auto_limits_forecast": {
+    "generation_and_scoring_hours": 27.24800028720443,
+    "generation_and_scoring_planning_range_hours": [
+      20.436000215403322,
+      34.06000035900554
+    ],
+    "preparation_hours": 19.51291610379967,
+    "plan_attempts_approximate_hours": 27.720443121693123,
+    "combined_approximate_hours": 54.96844340889755
+  },
+  "numeric_rate_limit_scenario": {
+    "status": "extrapolation, not a new end-to-end pilot",
+    "source_report": {
+      "file": "/private/tmp/medcopilot-rate-tuning-20261112/report.md",
+      "sha256": "f7f6d771c2243d4efaa3aa61a5860e637f19883612901dd99d9d833ab5966f42"
+    },
+    "source_report_text": "# GraphRAG RPM/TPM tuning results\n\nNo repository files were changed. All code and results are in this temporary directory. Only preparation and isolated guideline replay calls were run; no final diagnosis/Plan generation or scoring/judging.\n\nComparison and validation completed in 379.4 seconds, excluding the initial quota probe and harness setup.\n\nObserved GPT-4o-mini response-header quota: 5,000 RPM and 2,000,000 TPM. Embedding quota: 5,000 RPM and 1,000,000 TPM.\n\nRecommended tested setting: requests_per_minute: 12; tokens_per_minute: 200000 per preparation worker. Two workers therefore have combined local ceilings of 24 RPM / 400,000 TPM. Other clients do not share these local limiters, so maintain quota headroom.\n\n## Comparison\n\nFour same saved queries for the 2x2 factorial; two persistent sequential workers per condition. Initial limiter capacity was deliberately consumed. Timing excludes imports but includes query/context setup, streaming and initial artificial limiter debt. Treat these rates as stress-comparison results, not full-preparation throughput.\n\n| RPM/worker | TPM/worker | Initial valid answers/min | Confirmation valid answers/min |\n|---:|---:|---:|---:|\n| 6 | 100,000 | 5.61 | not repeated |\n| 12 | 100,000 | 8.18 | 7.91 |\n| 6 | 200,000 | 7.82 | not repeated |\n| 12 | 200,000 | 8.72 | 8.61 |\n\nAll 48 comparison HTTP attempts succeeded (200); all 24 streamed answers ended with stop. No retries or truncations were observed in this comparison. Model, temperature, prompts, token settings and retrieval settings were retained. The only config changes were the two limiter fields.\n\n## Ten-patient full-preparation validation\n\n| Measure | Previous auto/auto | Selected numeric limits |\n|---|---:|---:|\n| Wall time including model loading | 296.7 s | 110.9 s |\n| Mean preparation service time/patient | 51.44 s | 14.96 s |\n| Mean preparation, warm eight | 59.88 s | 14.68 s |\n\n| Preparation step | Old seconds/patient | New seconds/patient |\n|---|---:|---:|\n| keyword_extraction | 3.147 | 2.690 |\n| patient_retrieval_reranking_attribution | 1.741 | 1.685 |\n| guideline_question_generation | 2.167 | 2.355 |\n| guideline_retrieval | 44.366 | 8.214 |\n| prompt_assembly_saving_other_overhead | 0.015 | 0.012 |\n\nMean RPM wait: 0.000151 s; TPM wait: 0.000015 s.\n\n10/10 distinct patients prepared, both evidence components completed, ranking metadata and selected reference present, combined prompts saved, and no error artifacts. Final generation/scoring/judging counts remained zero.\n\nA simple two-worker projection is 4.94 hours of preparation for 2,378 patients. This is a small-sample estimate, not an end-to-end deadline guarantee; generation, scoring, overlap and contention are not estimated here.\n\n## Limitations and adversarial checks\n\n- Initial comparison sampled three strata; confirmation corrected to one patient per stratum and full validation used all ten.\n- Initial exhausted-bucket stress preconditions RPM then TPM when each is first acquired, adding conservative one-time debt. Use full-preparation timings for operational projections.\n- Small sample and stochastic API latency do not establish a unique global optimum or clinical equivalence.\n- One low-complexity confirmation case selected a different tenth context entity between conditions, with unchanged input token count. The initial factorial requests were byte-identical; do not interpret confirmation as a perfectly controlled clinical comparison.\n- Quota headers are observed at test time; two workers have independent local buckets. Rebudget if workers or other shared API traffic change.\n- The existing library warns about sequential reuse of limiters across asyncio loops. No failures were observed; no library code was changed.\n\nThe initial 16 factorial requests were byte-identical across conditions. The single variable confirmation context is recorded in audit.json; no limit-related change in evidence selection was demonstrated. The library warning and retrieval variability predate any production fix, since no source files were modified.\n\nFull data: results.json; validation/summary.json; audit.json; per-condition worker JSON files. API credentials and authorization headers were not saved.\n",
+    "tested_cases": 10,
+    "mean_preparation_seconds": 14.96,
+    "preparation_hours": 4.940955555555556,
+    "generation_and_scoring_hours": 12.676039738960316,
+    "plan_attempts_approximate_hours": 27.720443121693123,
+    "combined_approximate_hours": 40.396482860653435,
+    "combined_planning_sensitivity_hours": [
+      30.29736214549008,
+      50.4956035758168
+    ]
+  },
+  "matched_judge_benchmark": {
+    "requests_per_condition": 32,
+    "context_length": 4096,
+    "conditions": [
+      {
+        "parallel_slots": 4,
+        "elapsed_seconds": 32.49168616699899,
+        "valid_count": 32,
+        "valid_replies_per_second": 0.9848673237679372
+      },
+      {
+        "parallel_slots": 8,
+        "elapsed_seconds": 31.238052167005662,
+        "valid_count": 32,
+        "valid_replies_per_second": 1.0243916563337814
+      }
+    ],
+    "eight_vs_four_speedup": 1.040131631552797,
+    "protected_artifacts_unchanged": true
+  },
+  "tests": {
+    "runner": {
+      "tests": 218,
+      "seconds": 51.61,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-runner.log",
+      "skipped": 0
+    },
+    "helpers": {
+      "tests": 199,
+      "seconds": 0.552,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-helpers.log",
+      "skipped": 0
+    },
+    "components": {
+      "tests": 697,
+      "seconds": 8.74,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-components.log",
+      "skipped": 1
+    },
+    "parallel_runner": {
+      "tests": 30,
+      "seconds": 2.939,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-parallel_runner.log",
+      "skipped": 0
+    },
+    "report": {
+      "tests": 84,
+      "seconds": 0.395,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-report.log",
+      "skipped": 0
+    },
+    "benchmark": {
+      "tests": 12,
+      "seconds": 0.423,
+      "status": "passed",
+      "log": "/tmp/medcopilot-speedup-final-benchmark.log",
+      "skipped": 0
+    }
+  },
+  "limitations": [
+    "Approximate timestamp allocation: each interval between durable replies is assigned to the patient owning its ending reply.",
+    "Timestamps have one-second precision; concurrent patient boundaries can transfer wall time between patients.",
+    "C8-only fully attempted patients have no valid C4 prefix key. Invalid replies still count as work, avoiding exclusion bias.",
+    "The C8 subset is a nonrandom input-order suffix after C4; stratum weighting does not eliminate condition/action-count mix bias.",
+    "C4 and C8 processed different work slices; their observed reply rates do not establish causal concurrency speedup.",
+    "This projects initial attempted judgement work; invalid replies may still require additional retries or review.",
+    "Native log absence of truncation is observed evidence, not a model-independent proof for unseen full-cohort prompts.",
+    "The numeric-rate scenario substitutes the separate ten-patient preparation mean into the original model-major overlap model; it does not remeasure generation, scoring, or contention.",
+    "The planning sensitivity is not a statistical confidence interval.",
+    "26 Plan judgments remain invalid: the rubric says to split bundled actions, but its extras-count bound uses the number of Plan array items. No values were clamped or repaired.",
+    "The full 2,378-patient experiment has not been started."
+  ],
+  "sources": [
+    {
+      "file": "experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup/runtime_projection_first_pass.json",
+      "sha256": "f69f03a1a326eaf27e944eb1dcf1edb5cb297cf594e852cd212c9c05ed24aa2c"
+    },
+    {
+      "file": "experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup/plan_phase_analysis.json",
+      "sha256": "066860535cae3392d492c7f4d8f3e68e77ee3a3b6913dc5feb31f8d81e3a2156"
+    },
+    {
+      "file": "experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup/plan_concurrency_benchmark.json",
+      "sha256": "876113b8e2de2fe11a014cc310293e67d1c6e78415f6d5362c222a7979a1f7c0"
+    },
+    {
+      "file": "scripts/med_copilot_pilot.py",
+      "sha256": "82067ff59a4723d79afc8d59939625cb9f22f9bf42029be2e9d33be4f2b81471"
+    },
+    {
+      "file": "med_copilot/data/guidelines/settings.yaml",
+      "sha256": "7c84849e9230ab63a60f0ce931b6c23070b863bb3b3e7c80fadc36bf8c820fda"
+    },
+    {
+      "file": "experiments/configs/experiment.yaml",
+      "sha256": "10c83243d4441374d4de85193d652ee61af7581fc7721aca1f11ee2dbd9c8bc7"
+    }
+  ]
+}

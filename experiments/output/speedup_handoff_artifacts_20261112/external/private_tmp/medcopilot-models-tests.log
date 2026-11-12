@@ -1,0 +1,73 @@
+.with_logging: Request failed with exception=secret-mini secret-llama
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+RuntimeError: secret-mini secret-llama
+....with_logging: Request failed with exception=temporary failure
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+RuntimeError: temporary failure
+................with_logging: Request failed with exception=retry failed before response
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/request_wrappers/with_logging.py", line 38, in _wrapped_with_logging
+    return sync_fn(**kwargs)
+           ^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1183, in _execute_mock_call
+    raise effect
+RuntimeError: retry failed before response
+........ExponentialRetry: Request failed, retrying, retries=1, delay=2.0, max_retries=2, exception=litellm.RateLimitError: retry
+Traceback (most recent call last):
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/services/retry/exponential_retry.py", line 47, in retry
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/med_copilot/upstream/graphrag/language_model/providers/litellm/chat_model.py", line 101, in _base_completion
+    return completion(**new_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1124, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1128, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/unittest/mock.py", line 1187, in _execute_mock_call
+    raise result
+litellm.exceptions.RateLimitError: litellm.RateLimitError: retry
+..
+----------------------------------------------------------------------
+Ran 31 tests in 2.184s
+
+OK

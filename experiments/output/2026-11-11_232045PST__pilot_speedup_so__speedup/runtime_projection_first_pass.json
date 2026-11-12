@@ -1,0 +1,316 @@
+{
+  "method": "stratum-weighted-runtime-v1",
+  "run_directory": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-11_232045PST__pilot_speedup_so__speedup/first_pass_measurement",
+  "population_count": 2378,
+  "pilot_count": 64,
+  "measured_pilot": {
+    "status": "completed_with_errors",
+    "wall_seconds": 2662.0,
+    "preparation_and_generation_seconds": 2661.494316832999,
+    "scoring_seconds": 0.23656450000271434,
+    "model_phases": {
+      "ollama_gemma3_4b": 1889.3356964169943,
+      "ollama_llama3_2_3b": 239.29936954200093,
+      "ollama_ministral_3_3b": 405.9683729590033
+    }
+  },
+  "generation_by_model": {
+    "gpt_4o_mini": {
+      "local": false,
+      "concurrency": 4,
+      "timing_observations": 256,
+      "completed_slots": 256,
+      "success_fraction": 1.0,
+      "stratum_coverage": {
+        "llm_only": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval_guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        }
+      },
+      "weighted_service_seconds": 25952.309602543344,
+      "retry_adjusted_weighted_service_seconds": 25952.309602543344,
+      "phase_utilization_factor": 1.0,
+      "wall_time": {
+        "seconds": 6488.077400635836,
+        "hours": 1.8022437223988435,
+        "planning_range_hours": [
+          1.3516827917991325,
+          2.252804652998554
+        ]
+      },
+      "output_coverage": {
+        "expected_ranked_pairs": 768,
+        "available_conditions": 768,
+        "valid_plans": 768,
+        "nonempty_plans": 768,
+        "complete_nonempty_slots": 256
+      }
+    },
+    "ollama_gemma3_4b": {
+      "local": true,
+      "concurrency": 4,
+      "timing_observations": 256,
+      "completed_slots": 256,
+      "success_fraction": 1.0,
+      "stratum_coverage": {
+        "llm_only": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval_guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        }
+      },
+      "weighted_service_seconds": 37402.32454191363,
+      "retry_adjusted_weighted_service_seconds": 37402.32454191364,
+      "phase_utilization_factor": 1.0037049252665922,
+      "wall_time": {
+        "seconds": 9385.224339784563,
+        "hours": 2.6070067610512675,
+        "planning_range_hours": [
+          1.9552550707884506,
+          3.258758451314084
+        ]
+      },
+      "output_coverage": {
+        "expected_ranked_pairs": 768,
+        "available_conditions": 768,
+        "valid_plans": 768,
+        "nonempty_plans": 768,
+        "complete_nonempty_slots": 256
+      }
+    },
+    "ollama_llama3_2_3b": {
+      "local": true,
+      "concurrency": 4,
+      "timing_observations": 256,
+      "completed_slots": 256,
+      "success_fraction": 1.0,
+      "stratum_coverage": {
+        "llm_only": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval_guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        }
+      },
+      "weighted_service_seconds": 35810.93503744076,
+      "retry_adjusted_weighted_service_seconds": 35810.935037440766,
+      "phase_utilization_factor": 1.000984295544707,
+      "wall_time": {
+        "seconds": 8961.545895312478,
+        "hours": 2.489318304253466,
+        "planning_range_hours": [
+          1.8669887281900996,
+          3.1116478803168324
+        ]
+      },
+      "output_coverage": {
+        "expected_ranked_pairs": 768,
+        "available_conditions": 768,
+        "valid_plans": 766,
+        "nonempty_plans": 733,
+        "complete_nonempty_slots": 221
+      }
+    },
+    "ollama_ministral_3_3b": {
+      "local": true,
+      "concurrency": 4,
+      "timing_observations": 256,
+      "completed_slots": 255,
+      "success_fraction": 0.99609375,
+      "stratum_coverage": {
+        "llm_only": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        },
+        "patient_retrieval_guidelines": {
+          "short": 16,
+          "typical": 16,
+          "long": 16,
+          "complex": 16
+        }
+      },
+      "weighted_service_seconds": 60120.799573705546,
+      "retry_adjusted_weighted_service_seconds": 60254.50308568045,
+      "phase_utilization_factor": 1.0064255549884773,
+      "wall_time": {
+        "seconds": 15160.417927140217,
+        "hours": 4.211227201983394,
+        "planning_range_hours": [
+          3.1584204014875454,
+          5.264034002479242
+        ]
+      },
+      "output_coverage": {
+        "expected_ranked_pairs": 768,
+        "available_conditions": 765,
+        "valid_plans": 754,
+        "nonempty_plans": 744,
+        "complete_nonempty_slots": 235
+      }
+    }
+  },
+  "preparation": {
+    "workers": 2,
+    "stratum_coverage": {
+      "short": 16,
+      "typical": 16,
+      "long": 16,
+      "complex": 16
+    },
+    "wall_time": {
+      "seconds": 70246.49797367882,
+      "hours": 19.51291610379967,
+      "planning_range_hours": [
+        14.634687077849756,
+        24.39114512974959
+      ]
+    }
+  },
+  "scoring": {
+    "stratum_coverage": {
+      "short": 16,
+      "typical": 16,
+      "long": 16,
+      "complex": 16
+    },
+    "fixed_cold_start_seconds": 0.0,
+    "wall_time": {
+      "seconds": 16562.02484717083,
+      "hours": 4.600562457547452,
+      "planning_range_hours": [
+        3.4504218431605893,
+        5.750703071934316
+      ]
+    },
+    "overlapped_service_wall_time": {
+      "seconds": 12873.447214881866,
+      "hours": 3.575957559689407,
+      "planning_range_hours": [
+        2.6819681697670554,
+        4.469946949611759
+      ]
+    },
+    "final_service_wall_time": {
+      "seconds": 3688.577632288962,
+      "hours": 1.0246048978580449,
+      "planning_range_hours": [
+        0.7684536733935338,
+        1.2807561223225563
+      ]
+    },
+    "overlapped_batch_count": 16,
+    "post_generation_service_wall_time": {
+      "seconds": 3688.577632288962,
+      "hours": 1.0246048978580449,
+      "planning_range_hours": [
+        0.7684536733935338,
+        1.2807561223225563
+      ]
+    },
+    "generation_end_seconds": 2561.5294475420014,
+    "timestamped_batch_count": 32,
+    "measured_post_generation_service_inside_prepare_seconds": 99.65405596000346,
+    "allocation": "newly_scored_fields"
+  },
+  "pipeline": {
+    "wall_time": {
+      "seconds": 98092.80103393595,
+      "hours": 27.24800028720443,
+      "planning_range_hours": [
+        20.436000215403322,
+        34.06000035900554
+      ]
+    },
+    "fixed_preparation_generation_overhead_seconds": 35.49248684848499,
+    "fixed_startup_report_overhead_seconds": 0.2691186669981107,
+    "conservative_serial_scoring_bound": {
+      "seconds": 110966.24824881782,
+      "hours": 30.82395784689384,
+      "planning_range_hours": [
+        23.117968385170382,
+        38.529947308617295
+      ]
+    },
+    "overlap_formula": "max(max(preparation, first local) + remaining locals, hosted work, max(preparation, first local) + overlapped scoring) + post-generation scoring + fixed overhead"
+  },
+  "warnings": [
+    "ollama_ministral_3_3b: 1/256 timed generation slots failed; projection assumes retry behavior remains similar",
+    "The \u00b125% band is a planning sensitivity, not a statistical confidence interval.",
+    "Hosted estimates assume similar API quota, retry behavior, and provider load.",
+    "Scoring batch time is allocated by scored field count; token-length effects are not isolated.",
+    "Overlap estimate assumes scoring keeps pace after the first local phase; the conservative bound serializes scoring to cover late snapshots and batch tails.",
+    "Scoring batches crossing the last local generation end are split proportionally by elapsed time; work within a batch may not be uniform."
+  ],
+  "plan_judging": null
+}

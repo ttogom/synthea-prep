@@ -1,0 +1,122 @@
+
+-Goal-
+Given a clinical text document that is potentially relevant to this activity and a list of entity types, identify all entities of those types from the text and all relationships among the identified entities.
+ 
+-Steps-
+1. Identify all entities. For each identified entity, extract the following information:
+- entity_name: Name of the entity, capitalized
+- entity_type: One of the following types: [{entity_types}]
+- entity_description: Comprehensive description of the entity's attributes and activities
+Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
+ 
+2. From the entities identified in step 1, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other.
+For each pair of related entities, extract the following information:
+- source_entity: name of the source entity, as identified in step 1
+- target_entity: name of the target entity, as identified in step 1
+- relationship_description: explanation as to why you think the source entity and the target entity are related to each other
+- relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
+ Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_strength>)
+ 
+3. Return output in English as a single list of all the entities and relationships identified in steps 1 and 2. Use **{record_delimiter}** as the list delimiter.
+ 
+4. When finished, output {completion_delimiter}
+ 
+######################
+-Examples-
+######################
+Example 1:
+Entity_types: ORGANIZATION,PERSON
+Text:
+The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
+######################
+Output:
+("entity"{tuple_delimiter}SEPSIS{tuple_delimiter}CONDITION{tuple_delimiter}Sepsis is a life-threatening organ dysfunction caused by a dysregulated host response to infection)
+{record_delimiter}
+("entity"{tuple_delimiter}BROAD-SPECTRUM ANTIBIOTICS{tuple_delimiter}INTERVENTION{tuple_delimiter}Broad-spectrum antibiotics are recommended for early treatment of sepsis in ICU patients)
+{record_delimiter}
+("entity"{tuple_delimiter}MORTALITY{tuple_delimiter}OUTCOME{tuple_delimiter}Mortality is the risk of death associated with sepsis and is a key outcome for evaluating treatment effectiveness)
+{record_delimiter}
+("relationship"{tuple_delimiter}BROAD-SPECTRUM ANTIBIOTICS{tuple_delimiter}SEPSIS{tuple_delimiter}Broad-spectrum antibiotics are administered to treat sepsis early in ICU patients{tuple_delimiter}10)
+{completion_delimiter}
+
+######################
+Example 2:
+Entity_types: CONDITION, INTERVENTION
+Text:
+The pharmaceutical company MedNova recently announced that its new drug, Cardiolix, significantly reduced the risk of heart failure in patients with chronic hypertension.
+Cardiolix was tested in a multi-center clinical trial involving more than 10,000 participants. The results showed that patients who received Cardiolix had a 25% lower incidence of hospitalization compared with those who received standard care.
+
+######################
+Output:
+("entity"{tuple_delimiter}CHRONIC HYPERTENSION{tuple_delimiter}CONDITION{tuple_delimiter}Chronic hypertension is a long-term condition characterized by persistently high blood pressure, often leading to cardiovascular complications)
+{record_delimiter}
+("entity"{tuple_delimiter}HEART FAILURE{tuple_delimiter}CONDITION{tuple_delimiter}Heart failure is a serious condition where the heart is unable to pump blood effectively, commonly associated with chronic hypertension)
+{record_delimiter}
+("entity"{tuple_delimiter}CARDIOLIX{tuple_delimiter}INTERVENTION{tuple_delimiter}Cardiolix is a newly developed drug by MedNova shown to reduce the risk of heart failure in hypertensive patients)
+{record_delimiter}
+("relationship"{tuple_delimiter}CHRONIC HYPERTENSION{tuple_delimiter}HEART FAILURE{tuple_delimiter}Chronic hypertension increases the risk of heart failure{tuple_delimiter}9)
+{record_delimiter}
+("relationship"{tuple_delimiter}CARDIOLIX{tuple_delimiter}HEART FAILURE{tuple_delimiter}Cardiolix reduces the risk of heart failure in patients with chronic hypertension{tuple_delimiter}10)
+{completion_delimiter}
+
+######################
+Example 3:
+Entity_types: ORGANIZATION,GEO,PERSON
+Text:
+A large-scale vaccination campaign against measles was recently launched in the province of Alvoria after a sudden outbreak that infected over 3,000 children.
+
+The program was coordinated by the Alvoria Ministry of Health with technical and financial support from the World Health Organization (WHO) and UNICEF.
+Mobile clinics were deployed in the rural districts of Norvia and Eldra, where vaccination coverage had previously been below 50%.
+
+The campaign was overseen by Dr. Helena Marquez, the Chief of Pediatric Infectious Diseases at Alvoria Central Hospital, who emphasized that the rapid spread of measles posed a serious threat to unvaccinated children.
+
+At the same time, international teams from Médecins Sans Frontières (MSF) provided logistics and cold-chain management to ensure vaccines remained viable during transport to remote mountain villages.
+
+Local officials in the capital, Rionas, reported that more than 1 million doses of vaccine were delivered, and the campaign is expected to continue for six weeks.
+
+######################
+Output:
+("entity"{tuple_delimiter}ALVORIA{tuple_delimiter}GEO{tuple_delimiter}Province where a major measles outbreak occurred, leading to a vaccination campaign)
+{record_delimiter}
+("entity"{tuple_delimiter}NORVIA{tuple_delimiter}GEO{tuple_delimiter}Rural district in Alvoria with low prior vaccination coverage)
+{record_delimiter}
+("entity"{tuple_delimiter}ELDRA{tuple_delimiter}GEO{tuple_delimiter}Rural district in Alvoria with historically low vaccination rates)
+{record_delimiter}
+("entity"{tuple_delimiter}RIONAS{tuple_delimiter}GEO{tuple_delimiter}Capital of Alvoria where local officials coordinated vaccine distribution)
+{record_delimiter}
+("entity"{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}ORGANIZATION{tuple_delimiter}National health authority of Alvoria that coordinated the measles vaccination campaign)
+{record_delimiter}
+("entity"{tuple_delimiter}WORLD HEALTH ORGANIZATION{tuple_delimiter}ORGANIZATION{tuple_delimiter}International body that provided technical and financial support to the vaccination campaign)
+{record_delimiter}
+("entity"{tuple_delimiter}UNICEF{tuple_delimiter}ORGANIZATION{tuple_delimiter}International organization that supported the measles vaccination campaign in Alvoria)
+{record_delimiter}
+("entity"{tuple_delimiter}MÉDECINS SANS FRONTIÈRES{tuple_delimiter}ORGANIZATION{tuple_delimiter}NGO that assisted with logistics and cold-chain management for vaccine distribution)
+{record_delimiter}
+("entity"{tuple_delimiter}DR. HELENA MARQUEZ{tuple_delimiter}PERSON{tuple_delimiter}Chief of Pediatric Infectious Diseases at Alvoria Central Hospital, responsible for overseeing the campaign)
+{record_delimiter}
+("entity"{tuple_delimiter}ALVORIA CENTRAL HOSPITAL{tuple_delimiter}ORGANIZATION{tuple_delimiter}Main hospital in Alvoria, where the campaign oversight was based)
+{record_delimiter}
+("relationship"{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}WORLD HEALTH ORGANIZATION{tuple_delimiter}WHO provided technical and financial support to the Ministry of Health{tuple_delimiter}9)
+{record_delimiter}
+("relationship"{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}UNICEF{tuple_delimiter}UNICEF collaborated with the Ministry of Health on the measles vaccination campaign{tuple_delimiter}9)
+{record_delimiter}
+("relationship"{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}MÉDECINS SANS FRONTIÈRES{tuple_delimiter}MSF supported the Ministry with logistics and cold-chain management{tuple_delimiter}8)
+{record_delimiter}
+("relationship"{tuple_delimiter}DR. HELENA MARQUEZ{tuple_delimiter}ALVORIA CENTRAL HOSPITAL{tuple_delimiter}Dr. Marquez works at Alvoria Central Hospital and oversaw the campaign{tuple_delimiter}10)
+{record_delimiter}
+("relationship"{tuple_delimiter}DR. HELENA MARQUEZ{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}Dr. Marquez collaborated with the Ministry of Health to supervise the campaign{tuple_delimiter}8)
+{record_delimiter}
+("relationship"{tuple_delimiter}NORVIA{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}Norvia was one of the rural districts where the Ministry deployed vaccination teams{tuple_delimiter}7)
+{record_delimiter}
+("relationship"{tuple_delimiter}ELDRA{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}Eldra was another rural district targeted by the vaccination campaign{tuple_delimiter}7)
+{record_delimiter}
+("relationship"{tuple_delimiter}RIONAS{tuple_delimiter}ALVORIA MINISTRY OF HEALTH{tuple_delimiter}Rionas officials reported the scale of vaccines delivered during the campaign{tuple_delimiter}6)
+{completion_delimiter}
+
+######################
+-Real Data-
+######################
+Entity_types: {entity_types}
+Text: {input_text}
+######################
+Output:

@@ -1,0 +1,15 @@
+{
+  "unchanged_component_groups": 128,
+  "unchanged_variant_prompts": 256,
+  "unchanged_completed_model_slots": 1023,
+  "recovered_slots": [
+    {
+      "patient": "hypertension_8d75b53a-a889-d6c2-6483-0ef9e0945917",
+      "variant": "patient_retrieval_guidelines",
+      "model": "ollama_ministral_3_3b",
+      "responses_before": 1,
+      "responses_after": 2
+    }
+  ],
+  "remaining_incomplete_slots": []
+}

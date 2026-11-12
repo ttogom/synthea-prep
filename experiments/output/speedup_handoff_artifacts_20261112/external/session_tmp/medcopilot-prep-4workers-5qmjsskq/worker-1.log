@@ -1,0 +1,111 @@
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/spacy/language.py:2195: FutureWarning: Possible set union at position 6328
+  deserializers["tokenizer"] = lambda p: self.tokenizer.from_disk(  # type: ignore[union-attr]
+scispaCy model loaded: en_core_sci_md
+Matplotlib is building the font cache; this may take a moment.
+prompt is used!
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+Model config based on fnllm is deprecated and will be removed in GraphRAG v3, please use ModelType.Chat or ModelType.Embedding instead to switch to LiteLLM config.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:41Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+### Evaluating Causes of Sore Throat and Associated Symptoms
+- **Guidelines for Evaluation**: 
+  - NICE guidelines recommend a thorough clinical assessment for patients with sore throat, swollen lymph nodes, and fever.
+  - Key diagnostic considerations include:
+    - **Streptococcal Pharyngitis**: Look for fever, swollen tonsils, and absence of cough.
+    - **Viral Pharyngitis**: Often presents with cough and conjunctivitis.
+    - **Mononucleosis**: Consider in cases with significant lymphadenopathy and fatigue.
+    - **Peritonsillar Abscess**: Look for severe throat pain, trismus, and deviation of the uvula.
+- **Distinguishing Features**:
+  - **Streptococcal**: Rapid antigen tests can confirm.
+  - **Viral**: Symptoms typically less severe and self-limiting.
+  - **Mononucleosis**: Positive heterophile test (e.g., Monospot).
+  - **Abscess**: Requires imaging or examination for pus.
+
+### First-Line Management for Cold Symptoms
+- **Symptomatic Relief Recommendations**:
+  - NICE guidelines suggest supportive care for upper respiratory tract infections:
+    - **Hydration**: Encourage fluid intake.
+    - **Analgesics**: Use paracetamol or ibuprofen for pain relief.
+    - **Decongestants**: May help with nasal congestion.
+    - **Rest**: Important for recovery.
+- **Avoidance of Antibiotics**: Unless bacterial infection is confirmed, antibiotics are not recommended.
+
+### Diagnostics for Anemia with Fatigue
+- **Initial Diagnostics**:
+  - Complete Blood Count (CBC) to assess hemoglobin levels and red blood cell indices.
+  - Reticulocyte count to evaluate bone marrow response.
+  - Iron studies (serum iron, ferritin, total iron-binding capacity) to assess for iron deficiency.
+  - Vitamin B12 and folate levels to rule out deficiencies.
+- **Findings Prompting Further Evaluation**:
+  - Low reticulocyte count with low hemoglobin suggests inadequate production.
+  - High reticulocyte count with low hemoglobin may indicate hemolysis or blood loss.
+  - Abnormal iron studies indicating iron deficiency or overload.
+
+### Long-Term Management of Chronic Pain
+- **Guidelines for Chronic Pain Management**:
+  - NICE guidelines recommend a multimodal approach:
+    - **Pharmacological Interventions**:
+      - Non-opioid analgesics (e.g., paracetamol, NSAIDs).
+      - Consider adjuvant medications (e.g., antidepressants, anticonvulsants) for neuropathic pain.
+    - **Non-Pharmacological Interventions**:
+      - Physical therapy and exercise programs tailored to the patient.
+      - Cognitive Behavioral Therapy (CBT) for pain management.
+      - Mindfulness and relaxation techniques.
+- **Regular Review**: Emphasize the importance of ongoing assessment and adjustment of the management plan based on patient response.
+[DEBUG] Loading from communities.parquet
+[DEBUG] Loading from community_reports.parquet
+[DEBUG] Loading from text_units.parquet
+[DEBUG] Loading from relationships.parquet
+[DEBUG] Loading from entities.parquet
+local_search is used!
+[DEBUG] Raw db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Normalized db_uri: /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] LanceDB connected at /private/var/folders/f2/td3s0h7d4d3ckqf_d6xgwm7h0000gn/T/medcopilot-prep-4workers-5qmjsskq/guidelines/output/lancedb
+[DEBUG] Available tables: ['default-community-full_content', 'default-entity-description', 'default-text_unit-text']
+[DEBUG] Requested index name: default-entity-description
+[INFO] Opened table default-entity-description
+[2026-11-12T09:29:55Z WARN  lance::index] Index vector_idx has unrecognized type /lance.table.VectorIndexDetails, ignoring it
+/Users/rasikaramanan/miniconda3/envs/medcopilot/lib/python3.11/site-packages/aiolimiter/leakybucket.py:103: RuntimeWarning: This AsyncLimiter instance is being re-used across loops. Please create a new limiter per event loop as re-use can lead to undefined behaviour.
+  _warn_reuse()
+### Diagnostic Tests for Sore Throat and Associated Symptoms
+- **Guidelines**: The NICE guidelines recommend using clinical scoring systems such as the **Centor criteria** and **FeverPAIN criteria** to evaluate patients with sore throat symptoms.
+- **Centor Criteria**: Assesses the likelihood of streptococcal infection based on:
+  - Presence of fever
+  - Absence of cough
+  - Swollen tender anterior cervical lymph nodes
+  - Tonsillar swelling or exudate
+- **FeverPAIN Criteria**: Includes additional parameters:
+  - Fever in the last 24 hours
+  - Purulence (pus on tonsils)
+  - Rapid attendance (within 3 days of symptom onset)
+  - Severe symptoms
+- **Diagnostic Tests**: Rapid antigen tests for Group A beta-haemolytic streptococcus (GABHS) may be considered, especially in patients with high FeverPAIN scores.
+
+### Evaluation of Viral vs. Bacterial Infections
+- **Symptoms**: For patients with body aches, runny/stuffy nose, fatigue, and fever, the guidelines suggest:
+  - **Clinical Assessment**: Focus on symptom duration and severity.
+  - **Diagnostic Tests**: Consider viral testing if symptoms are consistent with viral infections, as many upper respiratory infections are viral in nature.
+- **Management Recommendations**: Supportive care is often sufficient for viral infections, while bacterial infections may require antibiotics based on clinical scoring.
+
+### Nutritional Support and Lifestyle Advice
+- **Recommendations**: During recovery from infections, especially with decreased appetite and fatigue:
+  - **Nutritional Support**: Emphasize hydration and easy-to-digest foods to maintain energy levels.
+  - **Lifestyle Advice**: Encourage rest and gradual return to normal activities as symptoms improve.
+  - **Monitoring**: Regular assessment of nutritional intake and hydration status is important, especially in prolonged illness.
+
+### Distinguishing Viral from Bacterial Etiologies
+- **History of Viral Sinusitis**: In patients with a history of viral sinusitis presenting with sore throat and swollen tonsils:
+  - **Clinical Features**: Viral infections typically present with milder symptoms and may include cough and nasal congestion.
+  - **Criteria for Bacterial Infection**: Use Centor or FeverPAIN criteria to assess the likelihood of bacterial infection.
+  - **Management**: If bacterial infection is suspected (e.g., high FeverPAIN score), consider antibiotic therapy; otherwise, supportive care is recommended for viral infections.
