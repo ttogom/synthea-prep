@@ -33,6 +33,7 @@ from scripts.med_copilot_helpers import (
 from scripts.med_copilot_judges import CorrectnessJudges
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.experiment_runtime.ollama import ManagedOllama
+from scripts.experiment_runtime.provenance import finalize_provenance
 from scripts.med_copilot_run_file import RunFile, make_run_name, pacific_now
 from scripts.med_copilot_run_lock import exclusive_run_lock
 from scripts.experiment_runtime.scheduler import ExperimentScheduler
@@ -47,7 +48,7 @@ def _sources():
     paths = ("run_experiments.py", "scripts/experiment_runtime/scheduler.py",
              "scripts/experiment_runtime/execution.py", "scripts/experiment_runtime/preparation.py",
              "scripts/experiment_runtime/worker.py", "scripts/experiment_runtime/worker_stream.py",
-             "scripts/experiment_runtime/ollama.py")
+             "scripts/experiment_runtime/ollama.py", "scripts/experiment_runtime/provenance.py")
     return [{"file": path, "sha256": _fingerprint(ROOT / path)} for path in paths]
 
 
@@ -159,6 +160,7 @@ def main(argv=None):
             if manifest.exists():
                 run_file.update(pilot_selection=json.loads(manifest.read_text()))
         run_file.update(status="running", finished_at=None)
+        resources.enter_context(finalize_provenance(run_file))
         print(f"Run directory: {directory}", flush=True)
 
         # %% ------------------------------------------------------------------

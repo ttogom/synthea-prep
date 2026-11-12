@@ -34,6 +34,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 with patch.object(nltk, "download", return_value=True):
     from scripts.experiment_runtime import scheduler as scheduler_module
     from scripts.experiment_runtime.execution import write_results
+    from scripts.experiment_runtime import provenance as provenance_module
     from scripts.med_copilot_config import EXECUTION_DEFAULTS, PATH_SETTINGS, ExperimentConfig
     from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result, reference_data_metadata
     from graphrag.config.models.language_model_config import LanguageModelConfig
@@ -1317,6 +1318,12 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(metadata["schema_version"], 4)
         self.assertEqual(metadata["status"], "completed")
         self.assertEqual(metadata["results_summary"]["status"], "completed")
+        provenance_files = directory / "provenance"
+        self.assertEqual({path.name for path in provenance_files.iterdir()},
+                         {"reported-usage-cost.json", "recovery-incidents.json"})
+        usage = json.loads((provenance_files / "reported-usage-cost.json").read_text())
+        self.assertEqual(usage["prepared_patient_count"], 3)
+        self.assertEqual(usage["completed_hosted_output_count"], 12)
         self.assertTrue({"patient_id", "variant", "model", "seconds", "status"}
                         <= set(metadata["runtime_timings"]["generation"][0]))
         self.assertEqual({item["model"] for item in metadata["runtime_timings"]["model_phases"]}, set(ALIASES[1:]))
@@ -1329,6 +1336,9 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(self.saved()[2], records)
         self.assertEqual(len(self.saved()[1]["resumptions"]), 1)
         self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["standalone_stage_marker"], "judged later")
+        recovery = json.loads((provenance_files / "recovery-incidents.json").read_text())
+        self.assertEqual(recovery["run_restarts"], 1)
+        self.assertEqual(len(recovery["events"]), 1)
 
     def test_root_entry_and_provenance_resolve_from_an_unrelated_working_directory(self):
         caller = self.root / "unrelated-caller"
@@ -1341,7 +1351,7 @@ class RunnerEntryTests(unittest.TestCase):
             self.assertEqual(namespace["ROOT"], ROOT)
             sources = namespace["_sources"]()
             expected = {"run_experiments.py", *("scripts/experiment_runtime/" + name for name in
-                ("scheduler.py", "execution.py", "preparation.py", "worker.py", "worker_stream.py", "ollama.py"))}
+                ("scheduler.py", "execution.py", "preparation.py", "worker.py", "worker_stream.py", "ollama.py", "provenance.py"))}
             self.assertEqual({source["file"] for source in sources}, expected)
             for source in sources:
                 path = ROOT / source["file"]
@@ -1497,6 +1507,8 @@ class RunnerEntryTests(unittest.TestCase):
         metadata = json.loads((directory / "run.json").read_text())
         self.assertEqual(metadata["status"], "failed_incomplete")
         self.assertEqual(self.fixture.calls, [])
+        cost = json.loads((directory / "provenance/reported-usage-cost.json").read_text())
+        self.assertEqual(cost["completed_hosted_output_count"], 0)
 
     def test_report_failure_keeps_completed_results_and_explicit_failure_metadata(self):
         self.assertEqual(self.invoke(report_failure=True), 1)
@@ -1504,6 +1516,85 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(metadata["status"], "completed")
         self.assertEqual(metadata["results_summary"]["status"], "failed_incomplete")
         self.assertTrue(all(record["status"] == "completed" for record in records))
+        self.assertTrue((self.saved()[0] / "provenance/reported-usage-cost.json").is_file())
+
+    def test_provenance_is_absent_during_calls_and_written_only_after_server_cleanup(self):
+        events = []
+        fixture = self.fixture
+        model_factory = fixture.model_factory
+        def checked_factory(*args, **kwargs):
+            model = model_factory(*args, **kwargs)
+            completion = model.completion
+            def complete(**kwargs):
+                self.assertFalse(list((self.root / "output").glob("*/provenance/*.json")))
+                events.append("call")
+                return completion(**kwargs)
+            model.completion = complete
+            return model
+        fixture.model_factory = checked_factory
+        class TrackedServer(FakeServer):
+            def __exit__(self, *args):
+                events.append("server closed")
+        self.server = TrackedServer()
+        writer = provenance_module.write_provenance
+        def checked_write(*args, **kwargs):
+            self.assertEqual(events[-1], "server closed")
+            self.assertTrue(all(value == 0 for value in fixture.active.values()))
+            events.append("provenance")
+            return writer(*args, **kwargs)
+        with patch.object(provenance_module, "write_provenance", side_effect=checked_write):
+            self.assertEqual(self.invoke(), 0)
+        self.assertEqual(events[-2:], ["server closed", "provenance"])
+
+    def test_provenance_write_error_keeps_results_and_does_not_mask_primary_failure(self):
+        with patch.object(provenance_module, "write_provenance", side_effect=OSError("provenance unavailable")):
+            with self.assertRaisesRegex(OSError, "provenance unavailable"):
+                self.invoke()
+        directory, metadata, records = self.saved()
+        self.assertEqual(metadata["status"], "completed")
+        self.assertTrue(all(record["status"] == "completed" for record in records))
+        self.assertTrue((directory / "results_summary.html").exists())
+        with patch.object(scheduler_module.ExperimentScheduler, "prepare_and_generate",
+                          side_effect=RuntimeError("primary failure")), \
+                patch.object(provenance_module, "write_provenance", side_effect=OSError("provenance unavailable")), \
+                self.assertRaisesRegex(RuntimeError, "primary failure"):
+            self.invoke(["--resume", str(directory)])
+
+    def test_resume_retains_old_usage_until_retry_calls_finish_then_refreshes_cumulative_counts(self):
+        fixture = self.fixture
+        fixture.failure = lambda model, prompt: RuntimeError("one hosted attempt failed") if (
+            model == "hosted" and prompt == "SHORT/llm_only") else None
+        self.assertEqual(self.invoke(), 1)
+        directory, _, _ = self.saved()
+        cost = directory / "provenance/reported-usage-cost.json"
+        recovery = directory / "provenance/recovery-incidents.json"
+        before = {path: path.read_bytes() for path in (cost, recovery)}
+        self.assertEqual(json.loads(before[cost])["completed_hosted_output_count"], 11)
+        fixture.failure = None
+        model_factory = fixture.model_factory
+        def checked_factory(*args, **kwargs):
+            model = model_factory(*args, **kwargs)
+            completion = model.completion
+            def complete(**request):
+                self.assertEqual({path: path.read_bytes() for path in before}, before)
+                return completion(**request)
+            model.completion = complete
+            return model
+        fixture.model_factory = checked_factory
+        calls = len(fixture.calls)
+        self.assertEqual(self.invoke(["--resume", str(directory)]), 1)  # Historical error remains audited.
+        self.assertEqual(len(fixture.calls), calls + 1)
+        self.assertEqual(json.loads(cost.read_text())["completed_hosted_output_count"], 12)
+        self.assertEqual(json.loads(recovery.read_text())["run_restarts"], 1)
+
+    def test_rejected_resume_leaves_both_provenance_reports_unchanged(self):
+        self.assertEqual(self.invoke(), 0)
+        directory, _, _ = self.saved()
+        before = {path: path.read_bytes() for path in (directory / "provenance").iterdir()}
+        self.config.write_text(self.config.read_text() + "\n# configuration changed\n")
+        with self.assertRaisesRegex(ValueError, "configuration changed"):
+            self.invoke(["--resume", str(directory)])
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_cleanup_export_failure_does_not_mask_original_generation_failure(self):
         export = scheduler_module.ExperimentScheduler.export

@@ -229,9 +229,31 @@ Each new run writes a new directory; `--resume` reuses its existing directory:
 experiments/output/<Pacific timestamp>__<input stem>__<branch>/
 ├── run.json             # configuration, cohort, provenance, status and resource fingerprints
 ├── results.jsonl        # one line per patient: components, then variants → models → outputs/scores
+├── provenance/
+│   ├── reported-usage-cost.json # final captured API tokens and estimated USD
+│   └── recovery-incidents.json # resumptions and preparation-worker recovery history
 ├── jobs.sqlite3         # concurrent runner's durable job recovery; retain accompanying WAL/SHM files
 └── results_summary.html # generated automatically after a completed batch, including batches with errors
 ```
+
+The concurrent runner writes the two `provenance/` reports only on exit, after all
+model calls and resource cleanup finish. Resuming recalculates cumulative usage
+from canonical captures, deduplicating response IDs and retaining recorded prices
+and detailed recovery events. Usage with missing/invalid token counts is explicit;
+models without a recorded price are excluded with a limitation. Local inference
+does not incur API-credit costs. These are reported-token estimates, not invoices;
+they include no budget or prior-work allowance. `prepared_patient_count` counts
+prepared patients; `completed_hosted_output_count` counts completed hosted outputs,
+not API attempts. `usd_per_million_tokens` records the price assumptions.
+No `command.txt` or `launch.json` is generated. A hard kill can prevent finalization;
+a successful resume refreshes the reports. Provenance-save failures are surfaced
+without overwriting canonical results or masking an existing pipeline failure.
+
+Git exposes only `run.json`, `results.jsonl`, `results_summary.html`, and these two
+provenance reports for new output directories. Checkpoints, logs, PID files, and
+other operational files remain ignored. Keep reusable monitoring/graphics tools
+and progress histories outside the repository. Existing tracked historical outputs
+are unaffected by the ignore rules.
 
 `run.json.experiment` records every effective YAML setting/default plus config path/SHA-256 and registry reference. Schema version 4 stores component captures once per patient and variant references to their required captures. Run metadata snapshots selected definitions, effective settings, component/prompt identities and source fingerprints. `assessment_plan_models` retains registry path/SHA-256 and effective per-model upstream settings once per run, excluding resolved keys. Only selected and successfully initialized evidence resources are fingerprinted; unused/failed resources are `null`. Historical schemas remain readable by the collator.
 
@@ -241,6 +263,6 @@ Patient status is `completed` when all selected variant/model generations comple
 
 The runner's `RESULTS` block automatically calls [the existing collator](scripts/collate_med_copilot_results.py). Terminal and HTML summaries show each model's mean **top-ranked condition BERTScore_F1** by variant, choose the highest mean (ties retain config order), and report that variant's separate top-ranked condition/Plan mean, population standard deviation, min/max and scored count. Missing/skipped/error scores remain unavailable; counts expose differing scored subsets. The HTML retains all three ranks, six metrics per condition/Plan, patient details and paired comparisons against `llm_only`; it creates no combined condition/Plan score. Report generation needs only saved results and the fingerprint-matching label file, and can be repeated with `python scripts/collate_med_copilot_results.py experiments/output/<run-directory>`. A report-write failure preserves completed JSON artifacts, records `run.json.results_summary` failure metadata, and exits nonzero; interruptions preserve JSON without generating a report. The command exits successfully only for a completed run or user cancellation.
 
-Every response goes through the existing parser: malformed JSON, duplicate keys, nonfinite numbers, unexpected top-level keys, or a prediction count other than three produce `predictions: null`. Invalid fields become `null` without discarding other valid fields/ranks; no arrays are truncated and Markdown is not a fallback. Historical result files are not rewritten. `experiments/output/` remains gitignored. The runner locates its default model config and guideline artifacts independently of the launch directory. Offline tests mock external requests; live generation and provider compatibility remain unverified.
+Every response goes through the existing parser: malformed JSON, duplicate keys, nonfinite numbers, unexpected top-level keys, or a prediction count other than three produce `predictions: null`. Invalid fields become `null` without discarding other valid fields/ranks; no arrays are truncated and Markdown is not a fallback. Historical result files are not rewritten. Approved result/provenance files under `experiments/output/` remain visible to Git. The runner locates its default model config and guideline artifacts independently of the launch directory. Offline tests mock external requests; live generation and provider compatibility remain unverified by those tests.
 
 The [patient output schema](med_copilot/docs/output_schema.md) documents exact keyword replies, processed retrieval keywords, retained hybrid and cross-encoder IDs/scores, and per-stage provider response metadata. Captures survive subsequent failures and interruptions. They do not enter clinical prompts.

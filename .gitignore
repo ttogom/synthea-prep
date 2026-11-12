@@ -73,12 +73,19 @@ AGENTS.md
 
 med_copilot/docs/evaluation_literature_review.md
 
-# Generated experiment diagnostics and recovery databases
-/experiments/output/**/*.log
-/experiments/output/**/jobs.sqlite3
-/experiments/output/**/jobs.sqlite3-wal
-/experiments/output/**/jobs.sqlite3-shm
+# Keep run directories visible, exposing only approved results and provenance.
+# Other generated files (logs, checkpoints, launchers, monitors, PID files, etc.)
+# stay local. Existing tracked historical artifacts are unaffected.
+/experiments/output/*
+!/experiments/output/*/
+/experiments/output/*/*
+!/experiments/output/*/results.jsonl
+!/experiments/output/*/run.json
+!/experiments/output/*/results_summary.html
+!/experiments/output/*/provenance/
+/experiments/output/*/provenance/*
+!/experiments/output/*/provenance/reported-usage-cost.json
+!/experiments/output/*/provenance/recovery-incidents.json
 
-# Runtime coordination files
-/experiments/output/**/.run.lock
+# Runtime coordination outside experiment output directories.
 /med_copilot/data/patient_retrieval_so/.initialization.lock

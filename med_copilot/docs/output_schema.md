@@ -12,6 +12,53 @@ the same run with `--config CONFIG_PATH --resume RUN_DIRECTORY`. `--yes` skips
 interactive confirmation. The original `scripts/run_med_copilot.py` remains the
 serial runner with its existing CLI and checkpoint format.
 
+## Final usage and recovery provenance
+
+On exit, after model work and resource cleanup stop, the concurrent runner writes
+only `provenance/reported-usage-cost.json` and `provenance/recovery-incidents.json`.
+It does not generate command or launcher manifests. No generation, scoring, or
+Plan judging is invoked by provenance finalization. Validation rejection and user
+cancellation do not create or rewrite provenance. Failed/interrupted invocations
+can report their durably captured partial usage; hard kills cannot run finalizers.
+
+The cost report has these top-level fields:
+
+| Field | Meaning |
+| --- | --- |
+| `observed_at_pst` | Final report observation time in America/Los_Angeles. |
+| `prepared_patient_count` | Patients with all selected evidence components and exact prompts prepared. |
+| `completed_hosted_output_count` | Completed hosted variant/model outputs, independent of the number of call attempts or valid parsed fields. |
+| `usage` | `preparation_gpt`, `final_gpt`, and `embedding` response/token totals and estimated USD. |
+| `missing_or_malformed_usage` | Unique captured responses whose required token counts cannot be processed. |
+| `captured_usage_estimated_usd` | Sum of the three supported workload cost estimates. |
+| `usd_per_million_tokens` | Recorded input/output price assumptions, retained when resuming. |
+| `price_sources` | Recorded references for those assumptions; no live pricing lookup. |
+| `limitations` | Missing billing coverage, unpriced models, and other estimation qualifications. |
+| `deduplication` | Canonical-capture and response-ID counting policy. |
+
+Nested usage fields retain `responses`, `input_tokens`, `output_tokens` (chat only),
+and `estimated_usd`. Rates retain `gpt_4o_mini_input`, `gpt_4o_mini_output`, and
+`text_embedding_3_small_input`. GPT-4o-mini/date-version chat responses and
+text-embedding-3-small query embeddings use these prices. Other models are not
+silently assigned those rates: unpriced remote responses are named in limitations;
+loopback local generations are excluded from API-credit accounting. This is not a
+provider invoice, does not model cached-token discounts, and cannot include replies
+that were never durably saved. No budget or prior-work allowance fields are emitted.
+
+Only canonical component and final-model response lists are traversed; nested
+variant copies are ignored. Response IDs are deduplicated, including reused cached
+metadata. A later complete capture may supply missing usage for an earlier copy;
+conflicting valid usage for one ID fails finalization instead of guessing. ID-less
+captures are counted per canonical occurrence. A resume recomputes totals from the
+cumulative captures, rather than adding a second copy of prior totals.
+
+Recovery reports contain `run_restarts` and `events`. Resumptions come from saved
+`run.json.resumptions`; worker recovery events come from `preparation_recovery`.
+Existing detailed recovery events are retained. Reports are atomically replaced;
+source results and run metadata are not changed by the provenance writer. If
+writing fails after an otherwise successful run, the error is surfaced; an existing
+pipeline exception retains priority when both fail.
+
 JSONL escaping is ordinary JSON escaping: after `json.loads`, captured strings
 retain their original characters, whitespace, Unicode and embedded newlines.
 
