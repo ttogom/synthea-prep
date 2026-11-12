@@ -1,2 +1,4 @@
 med_copilot/data/patient_corpus/** filter=lfs diff=lfs merge=lfs -text
 med_copilot/data/patient_retrieval_so/** filter=lfs diff=lfs merge=lfs -text
+experiments/output/2026-11-12_022701PST__test_so__main/results.jsonl filter=lfs diff=lfs merge=lfs -text
+experiments/output/2026-11-12_022701PST__test_so__main/results_summary.html filter=lfs diff=lfs merge=lfs -text

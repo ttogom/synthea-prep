@@ -1,0 +1,41 @@
+{
+  "observed_at_pst": "2026-11-12T13:27:43-08:00",
+  "prepared_patient_count": 2378,
+  "completed_hosted_output_count": 9512,
+  "usage": {
+    "preparation_gpt": {
+      "responses": 7359,
+      "input_tokens": 31005116,
+      "output_tokens": 2152299,
+      "estimated_usd": 5.9421468
+    },
+    "final_gpt": {
+      "responses": 9512,
+      "input_tokens": 13308550,
+      "output_tokens": 1174229,
+      "estimated_usd": 2.7008199
+    },
+    "embedding": {
+      "responses": 2378,
+      "input_tokens": 425196,
+      "estimated_usd": 0.00850392
+    }
+  },
+  "missing_or_malformed_usage": 0,
+  "captured_usage_estimated_usd": 8.65147062,
+  "usd_per_million_tokens": {
+    "gpt_4o_mini_input": 0.15,
+    "gpt_4o_mini_output": 0.6,
+    "text_embedding_3_small_input": 0.02
+  },
+  "price_sources": [
+    "https://developers.openai.com/api/docs/models/gpt-4o-mini",
+    "https://developers.openai.com/api/docs/models/text-embedding-3-small"
+  ],
+  "limitations": [
+    "Reported-token pricing estimate, not provider invoice; uncached rates",
+    "Responses never durably saved cannot be included",
+    "Local model usage is excluded from API-credit costs; electricity/hardware costs are not estimated"
+  ],
+  "deduplication": "Canonical preparation captures and final hosted model response captures only; nested variants/results ignored; unique response IDs counted once where available; ID-less captures counted per canonical occurrence"
+}

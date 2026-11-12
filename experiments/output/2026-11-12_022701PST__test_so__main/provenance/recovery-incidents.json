@@ -1,0 +1,34 @@
+{
+  "run_restarts": 1,
+  "events": [
+    {
+      "event": "experiment_resume_started",
+      "attempt": "pendingresume-01",
+      "started_at": "2026-11-12T12:58:30.019292-08:00",
+      "original_stop_reason": "Original attempt completed with errors after 11 capped Gemma generation slots",
+      "original_python_exit_status": 1,
+      "original_tee_exit_status": 0,
+      "supervisor_pid": 79488,
+      "python_pid": 79539,
+      "log": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/launch_2026-11-12_022546PST__test_so__main/pendingresume-01/experiment-resume.log",
+      "status_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/launch_2026-11-12_022546PST__test_so__main/pendingresume-01/status.json",
+      "supervisor_output": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/launch_2026-11-12_022546PST__test_so__main/pendingresume-01/supervisor.out",
+      "audit_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/launch_2026-11-12_022546PST__test_so__main/pendingresume-01/resume-audit.json"
+    },
+    {
+      "event": "experiment_resume_completed",
+      "attempt": "pendingresume-01",
+      "verified_at": "2026-11-12T13:02:24.855756-08:00",
+      "python_exit_status": 1,
+      "tee_exit_status": 0,
+      "work_complete": true,
+      "historical_errors_preserved": 11,
+      "completed_generation_slots": 38048,
+      "scoring_patients": 2378,
+      "unchanged_prior_generation_payloads": 38037,
+      "new_completed_gemma_payloads": 11,
+      "audit_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/launch_2026-11-12_022546PST__test_so__main/pendingresume-01/resume-audit.json",
+      "note": "Exit 1 reflects preserved historical first-pass errors; no unfinished generation or ordinary scoring work remains. Plan judging remains deferred."
+    }
+  ]
+}
