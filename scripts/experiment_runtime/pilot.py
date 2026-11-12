@@ -482,6 +482,7 @@ def _project_plan_stage(metadata, records, manifest, models, variants, warnings)
     logical = {}
     scalar_status_counts = defaultdict(int)
     requests_complete = True
+    skipped_extras = 0
     for record in records:
         scalars = []
         for output in _outputs(record):
@@ -491,9 +492,18 @@ def _project_plan_stage(metadata, records, manifest, models, variants, warnings)
                 reference, generated = plan.get("reference_actions"), plan.get("generated_actions")
                 expects_calls = bool(generated) and plan.get("status") in ("scored", "error", "pending", "interrupted")
                 if expects_calls:
+                    zero_coverage = (isinstance(reference, list) and bool(reference)
+                        and plan.get("status") == "scored" and plan.get("reason") == "zero_reference_coverage"
+                        and plan.get("credits") == [0.0] * len(reference)
+                        and plan.get("score") == 0 and plan.get("weighted_score") == 0
+                        and plan.get("unsupported_extra_count") is None and plan.get("deduction") is None
+                        and len(judges) == len(reference)
+                        and all(judge.get("status") == "scored" and judge.get("credit") == 0 for judge in judges))
+                    skipped_extras += zero_coverage
                     requests_complete &= (isinstance(reference, list)
-                        and len(judges) == len(reference) + 1
-                        and [judge.get("call") for judge in judges] == ["action"] * len(reference) + ["extras"])
+                        and len(judges) == len(reference) + (not zero_coverage)
+                        and [judge.get("call") for judge in judges]
+                            == ["action"] * len(reference) + ([] if zero_coverage else ["extras"]))
                 elif judges:
                     requests_complete = False
                 scalars.extend(judges)
@@ -541,6 +551,7 @@ def _project_plan_stage(metadata, records, manifest, models, variants, warnings)
         "actual_calls": calls, "cache_hits": hits,
         "observed_cache_hit_fraction": hits / (calls + hits) if calls + hits else None,
         "pilot_logical_scalar_requests": pilot_logical, "weighted_full_logical_scalar_requests": full_logical,
+        "extras_calls_skipped_for_zero_coverage": skipped_extras,
         "theoretical_full_requests_before_empty_generation_skips": theoretical,
         "plan_entry_counts": entry_counts, "scalar_status_counts": dict(scalar_status_counts),
         "all_required_scalar_requests_present": bool(requests_complete),

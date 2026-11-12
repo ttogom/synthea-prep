@@ -171,12 +171,14 @@ def _saved_plan(entry, expected, judge, condition, patient):
         return False
     reference, generated = expected["reference_actions"], expected["generated_actions"]
     records = entry.get("judges")
-    if not isinstance(records, list) or len(records) != len(reference) + 1:
+    skipped_extras = entry.get("reason") == "zero_reference_coverage"
+    if not isinstance(records, list) or len(records) != len(reference) + (not skipped_extras):
         return False
     context = (condition, patient["subjective"], patient["objective"])
     requests = [("action", index, plan_action_messages(*context, action, generated))
                 for index, action in enumerate(reference, 1)]
-    requests.append(("extras", None, plan_extras_messages(*context, reference, generated)))
+    if not skipped_extras:
+        requests.append(("extras", None, plan_extras_messages(*context, reference, generated)))
     credits = []
     extras = None
     try:
@@ -197,8 +199,10 @@ def _saved_plan(entry, expected, judge, condition, patient):
                     return False
     except (ValueError, TypeError, KeyError):
         return False
-    deduction = DEDUCTION_PER_UNSUPPORTED_EXTRA * extras
-    score = plan_score(credits, deduction)
+    if skipped_extras and any(credits):
+        return False
+    deduction = None if skipped_extras else DEDUCTION_PER_UNSUPPORTED_EXTRA * extras
+    score = 0.0 if skipped_extras else plan_score(credits, deduction)
     return (entry.get("credits") == credits and entry.get("unsupported_extra_count") == extras
             and entry.get("deduction") == deduction and math.isclose(entry["score"], score)
             and math.isclose(entry["weighted_score"], score * expected["rank_weight"]))

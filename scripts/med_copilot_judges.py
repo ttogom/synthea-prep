@@ -5,10 +5,10 @@ review. The diagnosis score is a BioLORD-2023 clinical concept similarity score:
 embedding cosine between the labeled condition and the generated diagnosis, clipped
 to 0-1 (no LLM judge). It is not an accuracy or a probability. Plan correctness
 applies the treatment-plan rubric with the experiment's configured Plan judge:
-one scalar 0/0.5/1 call per reference action plus one call counting unsupported
-extra actions (0.5 deducted each). The judge sees only the labeled condition, the
-patient's S/O, and the reference and generated actions; the generator, evidence
-variant, and rank stay hidden.
+one scalar 0/0.5/1 call per reference action, then counts unsupported extra
+actions (0.5 deducted each) unless all reference credits are zero. The judge sees
+only the labeled condition, the patient's S/O, and the reference and generated
+actions; the generator, evidence variant, and rank stay hidden.
 
 Every completed judge call is appended to judge_responses.jsonl in the run
 directory before it is used. Valid judgements are reused, so a resumed
@@ -424,8 +424,10 @@ class CorrectnessJudges:
                 "rubric_sha256": hashlib.sha256(PLAN_RUBRIC.read_bytes()).hexdigest(),
                 "credit_values": list(CREDIT_VALUES),
                 "deduction_per_unsupported_extra": DEDUCTION_PER_UNSUPPORTED_EXTRA,
-                "implementation": ("one scalar 0/0.5/1 call per reference action plus one call counting "
-                                   "unsupported extra actions; deduction = 0.5 x that count"),
+                "implementation": ("one scalar 0/0.5/1 call per reference action; count unsupported extras "
+                                   "unless all reference credits are valid zeros; deduction = 0.5 x that count"),
+                "zero_reference_coverage": ("scores 0 without an extras call; unsupported_extra_count and "
+                                            "deduction stay null because they were not measured"),
                 "implementation_reason": ("a single call returning the full credits array, with the exact "
                                           "length stated and a JSON example of that length, returned valid "
                                           "arrays but local judges copied the example credits instead of "
@@ -581,9 +583,9 @@ class CorrectnessJudges:
         return entry
 
     def judge_plan(self, entry, condition, patient):
-        """Fill a pending plan_entry in place: one call per reference action, then one extras call.
+        """Judge each reference action, then extras unless valid zero credits fix the score at zero.
 
-        Every call is attempted so valid replies are saved even when another fails.
+        All action calls are attempted so valid replies are saved even when another fails.
         """
         if entry["status"] != "pending":
             return entry
@@ -601,6 +603,12 @@ class CorrectnessJudges:
                 record = self._ask(self.plan_judge, "plan_action",
                                    plan_action_messages(*context, action, generated), parse_action_judgement)
                 judges.append({"call": "action", "reference_item": number, **record})
+            if all(record["status"] == "scored" and record["credit"] == 0 for record in judges):
+                # Any nonnegative extras deduction leaves the floored score at zero.
+                entry.update(status="scored", reason="zero_reference_coverage", score=0.0, weighted_score=0.0,
+                             credits=[record["credit"] for record in judges], judges=judges,
+                             unsupported_extra_count=None, deduction=None)
+                return entry
             record = self._ask(self.plan_judge, "plan_extras",
                                plan_extras_messages(*context, reference, generated),
                                lambda content: parse_extras_judgement(content, len(generated)))
