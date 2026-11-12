@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import runpy
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -392,7 +393,7 @@ class HelperImportTests(unittest.TestCase):
             "repo_path", "run_status", "selected_reference_patient", "sha256_bundle",
             "sha256_file", "split_assessment_plan", "validate_guideline_tables",
             "model_response_metadata", "reference_patient_identity",
-            "ranked_reference_patients", "prepare_patient_output_capture",
+            "ranked_reference_patients", "prepare_patient_output_capture", "prepare_guideline_query",
             "capture_component", "component_needed", "prepare_variant_messages",
         ]), "Add direct tests when adding a public helper")
 
@@ -2375,6 +2376,613 @@ class ErrorRecordingTests(TemporaryRootTestCase):
         self.assertTrue(run.run_dir.is_absolute())
         H["record_error"](RuntimeError("after chdir"), run=run)
         self.assertEqual(len(self.saved_errors(run)), 1)
+
+
+class PrepareGuidelineQueryTests(unittest.TestCase):
+    def setUp(self):
+        self.client = Mock()
+        self.settings = {"question_model": "question-model"}
+        self.template = "Recorded findings: {conditions}"
+        self.so = "Subjective: sore throat. Objective: swollen tonsils."
+        self.capture = {"model_responses": {"guideline_questions": []}}
+
+    def response(self, content, number=1, finish_reason="stop", refusal=None):
+        return SimpleNamespace(model="reported-model", id=f"question-{number}",
+            choices=[SimpleNamespace(finish_reason=finish_reason,
+                                     message=SimpleNamespace(content=content, refusal=refusal))])
+
+    def prepare(self):
+        return H["prepare_guideline_query"](
+            self.client, self.settings, self.so, self.capture, template=self.template)
+
+    def test_first_clean_reply_is_checkpointed_exactly_with_metadata_and_parsed_questions(self):
+        raw = ' {"Key Questions": ["Which tests fit these findings?"]}\n'
+        self.client.chat.completions.create.return_value = self.response(raw)
+        function = H["prepare_guideline_query"]
+        with patch.dict(function.__globals__, checkpoint=Mock()) as namespace:
+            self.assertEqual(self.prepare(), raw)
+            self.assertEqual(self.capture["guideline_query"], raw)
+            self.assertEqual(self.capture["guideline_questions"], ["Which tests fit these findings?"])
+            namespace["checkpoint"].assert_called_once_with()
+        self.client.chat.completions.create.assert_called_once_with(
+            model="question-model", response_format={"type": "json_object"}, messages=[
+                {"role": "system", "content": "You are a clinical expert."},
+                {"role": "user", "content": self.template.format(conditions=self.so)},
+            ])
+        self.assertIsNone(self.capture["guideline_question_screen"])
+        self.assertEqual(self.capture["model_responses"]["guideline_questions"], [{
+            "reported_model": "reported-model", "response_id": "question-1", "token_usage": None}])
+
+    def test_unrecorded_diagnosis_retries_identical_request_and_keeps_both_responses(self):
+        first = '{"Key Questions": ["Treat hypertension?"]}'
+        second = '{"Key Questions": ["Which medications fit these findings?"]}'
+        self.client.chat.completions.create.side_effect = [self.response(first), self.response(second, 2)]
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=Mock()):
+            self.assertEqual(self.prepare(), second)
+        calls = self.client.chat.completions.create.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+        self.assertEqual(self.capture["guideline_question_screen"], {
+            "first_reply": first, "first_terms": ["hypertension"],
+            "retry_reply": second, "retry_terms": []})
+        self.assertEqual([x["response_id"] for x in self.capture["model_responses"]["guideline_questions"]],
+                         ["question-1", "question-2"])
+
+    def test_second_named_reply_is_scrubbed_and_exact_screened_query_is_reused(self):
+        first = '{"Key Questions": ["Treat hypertension?"]}'
+        retry = '{"Key Questions": ["Stage heart failure symptoms by NYHA?"]}'
+        expected = '{"Key Questions": ["Stage these findings by these findings?"]}'
+        self.client.chat.completions.create.side_effect = [self.response(first), self.response(retry, 2)]
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=Mock()) as namespace:
+            self.assertEqual(self.prepare(), expected)
+            before = deepcopy(self.capture)
+            self.assertEqual(self.prepare(), expected)
+            self.assertEqual(self.capture, before)
+            namespace["checkpoint"].assert_called_once_with()
+        self.assertEqual(self.client.chat.completions.create.call_count, 2)
+        self.assertEqual(self.capture["guideline_questions"], ["Stage these findings by these findings?"])
+        self.assertEqual(self.capture["guideline_question_screen"]["retry_reply"], retry)
+
+    def test_already_recorded_diagnosis_is_not_retried_or_removed(self):
+        self.so = "Recorded essential hypertension with elevated BP."
+        raw = '{"Key Questions": ["Treat high blood pressure?"]}'
+        self.client.chat.completions.create.return_value = self.response(raw)
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=Mock()):
+            self.assertEqual(self.prepare(), raw)
+        self.client.chat.completions.create.assert_called_once()
+
+    def test_malformed_question_json_is_preserved_and_reused_despite_null_parsed_questions(self):
+        raw = "EXACT malformed JSON\n  with whitespace"
+        self.client.chat.completions.create.return_value = self.response(raw)
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=Mock()):
+            self.assertEqual(self.prepare(), raw)
+            self.assertIsNone(self.capture["guideline_questions"])
+            self.assertEqual(self.prepare(), raw)
+        self.client.chat.completions.create.assert_called_once()
+
+    def test_unusable_saved_query_is_regenerated_instead_of_poisoning_every_resume(self):
+        raw = '{"Key Questions": ["Which tests fit?"]}'
+        for invalid in (None, "", " \n", 12, [], {}):
+            with self.subTest(cached=invalid):
+                self.capture = {"model_responses": {"guideline_questions": []}, "guideline_query": invalid}
+                self.client.reset_mock()
+                self.client.chat.completions.create.return_value = self.response(raw)
+                self.assertEqual(self.prepare(), raw)
+                self.client.chat.completions.create.assert_called_once()
+                self.assertEqual(self.capture["guideline_query"], raw)
+
+    def test_refused_empty_and_incomplete_replies_are_audited_but_never_cached(self):
+        for content, finish, refusal in ((None, "stop", None), ("", "stop", None),
+                (" \n", "stop", None), (None, "content_filter", "refused"),
+                ("partial query", "length", None), ("refused query", "stop", "refused")):
+            with self.subTest(content=content, finish=finish, refusal=refusal):
+                self.capture = {"model_responses": {"guideline_questions": []}}
+                self.client.chat.completions.create.return_value = self.response(
+                    content, finish_reason=finish, refusal=refusal)
+                with self.assertRaises(ValueError):
+                    self.prepare()
+                self.assertNotIn("guideline_query", self.capture)
+                self.assertEqual(self.capture["guideline_question_attempts"][-1], {
+                    "content": content, "finish_reason": finish, "refusal": refusal})
+
+    def test_failed_screening_retry_does_not_cache_query_and_can_recover(self):
+        good = '{"Key Questions": ["Which tests fit?"]}'
+        self.client.chat.completions.create.side_effect = [
+            self.response('{"Key Questions": ["Treat hypertension?"]}'),
+            self.response(None, 2, refusal="refused"), self.response(good, 3)]
+        with self.assertRaises(ValueError):
+            self.prepare()
+        self.assertNotIn("guideline_query", self.capture)
+        self.assertEqual(self.prepare(), good)
+        self.assertEqual(len(self.capture["guideline_question_attempts"]), 3)
+        self.assertEqual(self.client.chat.completions.create.call_count, 3)
+
+    def test_api_error_and_interruption_propagate_without_saving_a_completed_query(self):
+        for failure in (RuntimeError("model offline"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                self.client.reset_mock()
+                self.client.chat.completions.create.side_effect = failure
+                save = Mock()
+                with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=save), \
+                        self.assertRaises(type(failure)) as caught:
+                    self.prepare()
+                self.assertIs(caught.exception, failure)
+                self.assertNotIn("guideline_query", self.capture)
+                save.assert_not_called()
+                self.client.chat.completions.create.assert_called_once()
+
+    def test_checkpoint_failure_keeps_exact_obtained_query_and_propagates(self):
+        raw = '{"Key Questions": ["Which tests fit?"]}'
+        self.client.chat.completions.create.return_value = self.response(raw)
+        failure = H["RunMetadataError"]("disk full")
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=Mock(side_effect=failure)), \
+                self.assertRaises(H["RunMetadataError"]) as caught:
+            self.prepare()
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(self.capture["guideline_query"], raw)
+
+    def test_retry_failure_keeps_first_response_metadata_without_a_completed_query(self):
+        first = '{"Key Questions": ["Treat hypertension?"]}'
+        failure = RuntimeError("retry model offline")
+        self.client.chat.completions.create.side_effect = [self.response(first), failure]
+        save = Mock()
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=save), \
+                self.assertRaises(RuntimeError) as caught:
+            self.prepare()
+        self.assertIs(caught.exception, failure)
+        self.assertNotIn("guideline_query", self.capture)
+        self.assertEqual(self.client.chat.completions.create.call_count, 2)
+        self.assertEqual(self.capture["model_responses"]["guideline_questions"][0]["response_id"], "question-1")
+        save.assert_not_called()
+
+    def test_missing_choices_keeps_obtained_response_metadata_and_propagates(self):
+        self.client.chat.completions.create.return_value = SimpleNamespace(
+            model="reported-model", id="invalid-response", choices=[])
+        save = Mock()
+        with patch.dict(H["prepare_guideline_query"].__globals__, checkpoint=save), \
+                self.assertRaises(ValueError):
+            self.prepare()
+        self.assertNotIn("guideline_query", self.capture)
+        self.assertEqual(self.capture["model_responses"]["guideline_questions"][0]["response_id"],
+                         "invalid-response")
+        save.assert_not_called()
+
+
+
+class KeywordResumeTests(unittest.TestCase):
+    def setUp(self):
+        self.client = Mock()
+        self.raw = '{"symptoms":[" cough ","cough"],"diagnoses":[],"medications":[]}'
+        self.client.chat.completions.create.return_value = keyword_response(self.raw)
+        self.extractor = H["JSONKeywordExtractor"](self.client, "keyword-model")
+        self.retriever = SimpleNamespace(keyword_extractor=self.extractor)
+        self.component = {"component": "patient_retrieval", "status": "not_processed", "error": None,
+                          "outputs": {}, "capture": {"model_responses": {"keyword_extraction": []}}}
+        self.namespace = H["JSONKeywordExtractor"].extract.__wrapped__.__globals__
+
+    def invoke(self, text="patient findings", *, fail_after=False):
+        with H["capture_component"](self.component, retriever=self.retriever):
+            result = self.extractor.extract(text)
+            if fail_after:
+                raise RuntimeError("reranker failed")
+            self.component["outputs"]["example"] = "reference example"
+            return result
+
+    def test_success_saves_query_marker_and_checkpoints_before_component_completion(self):
+        snapshots = []
+        with patch.dict(self.namespace, checkpoint=lambda: snapshots.append(deepcopy(self.component))):
+            self.assertEqual(self.invoke(), ["cough"])
+        self.assertEqual(snapshots[0]["capture"]["_keyword_query"], "patient findings")
+        self.assertEqual(snapshots[0]["capture"]["retrieval_keywords"], ["cough"])
+        self.assertEqual(snapshots[0]["status"], "failed_incomplete")
+        self.assertEqual(snapshots[-1]["status"], "completed")
+
+    def test_retried_failed_component_reuses_keywords_and_restores_previous_flag(self):
+        self.extractor.reuse_capture = "outer-value"
+        with patch.dict(self.namespace, checkpoint=Mock()), redirect_stderr(io.StringIO()):
+            self.invoke(fail_after=True)
+            self.assertEqual(self.component["status"], "failed_incomplete")
+            self.component["status"] = "not_processed"
+            result = self.invoke()
+        self.assertEqual(result, ["cough"])
+        self.client.chat.completions.create.assert_called_once()
+        self.assertEqual(len(self.component["capture"]["model_responses"]["keyword_extraction"]), 1)
+        self.assertEqual(self.extractor.reuse_capture, "outer-value")
+        self.assertIsNone(self.extractor.capture_result)
+
+    def test_normal_extraction_refreshes_even_with_same_saved_query(self):
+        self.extractor.capture_result = self.component["capture"]
+        with patch.dict(self.namespace, checkpoint=Mock()):
+            self.extractor.extract("patient findings")
+            self.extractor.extract("patient findings")
+        self.assertEqual(self.client.chat.completions.create.call_count, 2)
+
+    def test_changed_query_is_not_reused(self):
+        with patch.dict(self.namespace, checkpoint=Mock()):
+            self.invoke()
+            self.component["status"] = "not_processed"
+            self.invoke("another patient")
+        self.assertEqual(self.client.chat.completions.create.call_count, 2)
+        self.assertEqual(self.component["capture"]["_keyword_query"], "another patient")
+
+    def test_missing_invalid_or_inconsistent_keyword_cache_is_refreshed(self):
+        for raw, keywords in ((None, ["cough"]), ("not JSON", ["cough"]),
+                              (self.raw, None), (self.raw, ["different"]),
+                              ('{"symptoms":null,"diagnoses":[],"medications":[]}', [])):
+            with self.subTest(raw=raw, keywords=keywords):
+                self.component["status"] = "not_processed"
+                self.component["capture"].update(
+                    _keyword_query="patient findings", keyword_extraction_raw=raw, retrieval_keywords=keywords)
+                self.client.chat.completions.create.reset_mock()
+                with patch.dict(self.namespace, checkpoint=Mock()):
+                    self.assertEqual(self.invoke(), ["cough"])
+                self.client.chat.completions.create.assert_called_once()
+
+    def test_reused_keyword_list_is_independent_of_saved_capture(self):
+        with patch.dict(self.namespace, checkpoint=Mock()):
+            self.invoke()
+            self.component["status"] = "not_processed"
+            self.invoke().append("mutated")
+        self.assertEqual(self.component["capture"]["retrieval_keywords"], ["cough"])
+
+    def test_failed_new_extraction_removes_old_success_marker(self):
+        capture = self.component["capture"]
+        self.extractor.capture_result = capture
+        with patch.dict(self.namespace, checkpoint=Mock()):
+            self.extractor.extract("patient findings")
+            self.client.chat.completions.create.side_effect = RuntimeError("offline")
+            with self.assertRaises(RuntimeError):
+                self.extractor.extract("another patient")
+        self.assertNotIn("_keyword_query", capture)
+        self.assertIsNone(capture["retrieval_keywords"])
+
+    def test_component_checkpoint_failure_propagates_after_hooks_are_restored(self):
+        failure = H["RunMetadataError"]("disk full")
+        with patch.dict(self.namespace, checkpoint=Mock(side_effect=failure)), \
+                self.assertRaises(H["RunMetadataError"]) as caught:
+            with H["capture_component"](self.component, retriever=self.retriever):
+                self.component["outputs"]["example"] = "saved"
+        self.assertIs(caught.exception, failure)
+        self.assertIsNone(self.extractor.capture_result)
+        self.assertFalse(self.extractor.reuse_capture)
+
+
+class ResumePersistenceTests(TemporaryRootTestCase):
+    def setUp(self):
+        TemporaryRootTestCase.setUp(self)
+        self.repo = self.root / "repo"
+        self.input = self.repo / "experiments/input/patient_records_so.jsonl"
+        self.input.parent.mkdir(parents=True)
+        self.input.write_text('{"id": "a"}\n', encoding="utf-8")
+        self.started = H["pacific_time"](datetime(2026, 10, 17, 22, 30, 45, tzinfo=timezone.utc))
+        self.finished = H["pacific_time"](datetime(2026, 10, 17, 22, 48, 12, tzinfo=timezone.utc))
+
+    start_four = SchemaFourExperimentRunTests.start_four
+    result_four = SchemaFourExperimentRunTests.result_four
+    plan = SchemaFourExperimentRunTests.plan
+    references = SchemaFourExperimentRunTests.references
+
+    def make_saved(self):
+        run = self.start_four()
+        label_path = self.input.with_name("labels.jsonl")
+        label_path.write_text("labels")
+        self.experiment = {"selected_models": ["mini", "llama"],
+                           "selected_variants": list(self.references())}
+        self.evaluation = {"selected_patient_ids": ["a", "b"],
+                           "labels_path": str(label_path),
+                           "labels_sha256": H["sha256_file"](label_path)}
+        self.models = {"selected_models": ["mini", "llama"], "config_sha256": "models"}
+        self.variants = {
+            "component_definitions": self.plan(),
+            "variant_definitions": {key: {"components": value} for key, value in self.references().items()},
+            "prompt_provenance": {"sha256": "prompt"}, "registry_provenance": {"sha256": "registry"}}
+        run.update(experiment=self.experiment, evaluation=self.evaluation,
+                   assessment_plan_models=self.models, **self.variants)
+        run.stop(self.finished)
+        return run
+
+    def resume(self, run):
+        return H["ExperimentRun"].resume(run.run_dir, root=self.repo,
+            experiment=self.experiment, evaluation=self.evaluation,
+            models=self.models, variants=self.variants)
+
+    def test_resume_is_readonly_and_recovers_failed_components_without_erasing_success(self):
+        run = self.make_saved()
+        path = run.run_dir / "results.jsonl"
+        rows = [json.loads(x) for x in path.read_text().splitlines()]
+        rows[0]["components"]["patient_retrieval"].update(status="failed_incomplete", error={"message": "failed"})
+        slot = rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]
+        slot.update(status="completed", assessment_plan_raw="saved", predictions=None)
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        original = {p.name: p.read_bytes() for p in run.run_dir.iterdir()}
+        resumed = self.resume(run)
+        self.assertEqual({p.name: p.read_bytes() for p in run.run_dir.iterdir()}, original)
+        current = resumed.patient_result("a")
+        self.assertEqual(current["components"]["patient_retrieval"]["status"], "not_processed")
+        self.assertEqual(current["variants"]["llm_only"]["assessment_plans"]["mini"], slot)
+        with self.assertRaises(ValueError):
+            resumed.patient_result("unknown")
+
+    def test_checkpoint_atomic_recovery_and_upsert_keep_one_row_per_patient(self):
+        run = self.make_saved()
+        resumed = self.resume(run)
+        current = resumed.patient_result("a")
+        current["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="checkpoint", predictions=None)
+        resumed.checkpoint()
+        path = run.run_dir / ".patient_checkpoint.json"
+        self.assertEqual(json.loads(path.read_text())["id"], "a")
+        recovered = self.resume(run)
+        restored = recovered.patient_result("a")
+        self.assertEqual(restored["variants"]["llm_only"]["assessment_plans"]["mini"]["assessment_plan_raw"],
+                         "checkpoint")
+        restored["status"] = "completed"
+        recovered.save_result(restored)
+        self.assertFalse(path.exists())
+        rows = [json.loads(x) for x in (run.run_dir / "results.jsonl").read_text().splitlines()]
+        self.assertEqual([r["id"] for r in rows], ["a", "b"])
+        self.assertEqual(rows[0], restored)
+        recovered.save_result(recovered.patient_result("b") | {"status": "completed"})
+        recovered.finish(self.finished)
+        self.assertEqual(recovered.metadata["status"], "completed")
+
+    def test_retrying_earlier_patient_cannot_replace_the_only_copy_of_recovered_later_work(self):
+        run = self.make_saved()
+        interrupted = self.resume(run)
+        later = interrupted.patient_result("b")
+        later["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="paid later response")
+        interrupted.checkpoint()
+        resumed = self.resume(run)
+        earlier = resumed.patient_result("a")
+        earlier["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="earlier retry response")
+        resumed.checkpoint()
+        # Another abrupt stop before save_result() must preserve both responses.
+        again = self.resume(run)
+        self.assertEqual(again._records["b"]["variants"]["llm_only"]["assessment_plans"]["mini"]
+                         ["assessment_plan_raw"], "paid later response")
+        self.assertEqual(again._records["a"]["variants"]["llm_only"]["assessment_plans"]["mini"]
+                         ["assessment_plan_raw"], "earlier retry response")
+
+    def test_failed_recovered_checkpoint_commit_does_not_replace_its_only_durable_copy(self):
+        run = self.make_saved()
+        interrupted = self.resume(run)
+        interrupted.patient_result("b")
+        interrupted.checkpoint()
+        path = run.run_dir / ".patient_checkpoint.json"
+        before = path.read_bytes()
+        resumed = self.resume(run)
+        with patch.object(os, "replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            resumed.patient_result("a")
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_fresh_result_is_flushed_before_checkpoint_deletion_and_directory_is_synced(self):
+        run = self.start_four()
+        current = run.patient_result("a")
+        current["status"] = "completed"
+        run.checkpoint()
+        checkpoint_path = run.run_dir / ".patient_checkpoint.json"
+        results_path = run.run_dir / "results.jsonl"
+        events = []
+        original_fsync, original_unlink = os.fsync, Path.unlink
+        def sync(descriptor):
+            info = os.fstat(descriptor)
+            if stat.S_ISDIR(info.st_mode):
+                events.append("directory_sync")
+            elif info.st_ino == results_path.stat().st_ino:
+                events.append("result_sync")
+                self.assertTrue(checkpoint_path.exists())
+                self.assertEqual(json.loads(results_path.read_text()), current)
+            return original_fsync(descriptor)
+        def unlink(path, *args, **kwargs):
+            if path == checkpoint_path:
+                events.append("checkpoint_unlink")
+            return original_unlink(path, *args, **kwargs)
+        with patch.object(os, "fsync", side_effect=sync), patch.object(Path, "unlink", new=unlink):
+            run.save_result(current)
+        self.assertLess(events.index("result_sync"), events.index("checkpoint_unlink"))
+        self.assertIn("directory_sync", events[events.index("checkpoint_unlink") + 1:])
+        self.assertFalse(checkpoint_path.exists())
+
+    def test_atomic_checkpoint_syncs_both_snapshot_file_and_directory(self):
+        run = self.start_four()
+        run.patient_result("a")
+        events = []
+        original_fsync = os.fsync
+        def sync(descriptor):
+            events.append("directory" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file")
+            return original_fsync(descriptor)
+        with patch.object(os, "fsync", side_effect=sync):
+            run.checkpoint()
+        self.assertEqual(events, ["file", "directory"])
+        self.assertEqual(json.loads((run.run_dir / ".patient_checkpoint.json").read_text())["id"], "a")
+
+    def test_failed_result_fsync_keeps_checkpoint_and_blocks_further_appends(self):
+        run = self.start_four()
+        current = run.patient_result("a")
+        current["status"] = "completed"
+        run.checkpoint()
+        checkpoint_path = run.run_dir / ".patient_checkpoint.json"
+        before = checkpoint_path.read_bytes()
+        with patch.object(os, "fsync", side_effect=OSError("flush failed")), self.assertRaises(OSError):
+            run.save_result(current)
+        self.assertEqual(checkpoint_path.read_bytes(), before)
+        self.assertIn("a", run.unsaved)
+        self.assertFalse(run.results_writable)
+
+    def test_resource_requirements_follow_only_unfinished_evidence(self):
+        run = self.make_saved()
+        resumed = self.resume(run)
+        self.assertTrue(resumed.needs_resource("patient_retrieval"))
+        self.assertFalse(resumed.needs_resource("guidelines"))
+        for patient_id in ("a", "b"):
+            current = resumed.patient_result(patient_id)
+            current["components"]["patient_retrieval"]["status"] = "completed"
+            resumed.save_result({**current, "status": "completed"})
+        self.assertFalse(resumed.needs_resource("patient_retrieval"))
+
+    def test_new_checkpoint_overrides_completed_patient_but_stale_checkpoint_does_not(self):
+        run = self.make_saved()
+        resumed = self.resume(run)
+        current = resumed.patient_result("a")
+        current["status"] = "completed"
+        resumed.save_result(current)
+        resumed = self.resume(run)
+        current = resumed.patient_result("a")
+        slot = current["variants"]["llm_only"]["assessment_plans"]["mini"]
+        slot["assessment_plan_raw"] = "new score checkpoint"
+        resumed.checkpoint()
+        path = run.run_dir / ".patient_checkpoint.json"
+        snapshot = path.read_bytes()
+        recovered = self.resume(run)
+        self.assertEqual(recovered.patient_result("a")["variants"]["llm_only"]["assessment_plans"]["mini"]
+                         ["assessment_plan_raw"], "new score checkpoint")
+        current["status"] = "completed"
+        resumed.save_result(current)
+        (run.run_dir / ".patient_checkpoint.json").write_bytes(snapshot)
+        self.assertEqual(self.resume(run).patient_result("a")["status"], "completed")
+
+    def test_start_adopts_validated_resume_and_discards_only_provisional_run(self):
+        run = self.make_saved()
+        resumed = self.resume(run)
+        provisional = H["RunFile"].begin(self.root / "temporary-output", started_at=self.finished)
+        old_folder = provisional.run_dir
+        started = H["ExperimentRun"].start(
+            self.repo / "experiments/output", root=self.repo, input_path=self.input,
+            started_at=self.finished, branch="new-branch", commit="new-commit",
+            patient_ids=["a", "b"], run_file=provisional, resume=resumed)
+        self.assertIs(started, resumed)
+        self.assertEqual(started.run_dir, run.run_dir)
+        self.assertFalse(old_folder.exists())
+        self.assertEqual(started.metadata["started_at"], run.metadata["started_at"])
+        self.assertEqual(started.metadata["resumptions"][-1]["git_commit"], "new-commit")
+        self.assertEqual(started.metadata["status"], "running")
+
+    def test_resume_rejects_invalid_nested_state_and_semantically_invalid_json_tail(self):
+        run = self.make_saved()
+        path = run.run_dir / "results.jsonl"
+        original = path.read_bytes()
+        rows = [json.loads(line) for line in original.splitlines()]
+        for change in (
+                lambda row: row.update(components=[]),
+                lambda row: row["variants"].update(llm_only=None),
+                lambda row: row["components"].update(patient_retrieval=None),
+                lambda row: row["variants"]["llm_only"]["assessment_plans"].update(mini=None)):
+            invalid = deepcopy(rows)
+            change(invalid[0])
+            path.write_text("".join(json.dumps(row) + "\n" for row in invalid))
+            with self.assertRaises(ValueError):
+                self.resume(run)
+        path.write_bytes(original + b'{"id":"a","id":"b"}')
+        with self.assertRaises(ValueError):
+            self.resume(run)
+
+    def test_checkpoint_failure_preserves_previous_atomic_snapshot(self):
+        run = self.make_saved()
+        resumed = self.resume(run)
+        resumed.patient_result("a")
+        resumed.checkpoint()
+        path = run.run_dir / ".patient_checkpoint.json"
+        original = path.read_bytes()
+        with patch.object(H["os"], "replace", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            resumed.checkpoint()
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(sorted(p.name for p in run.run_dir.iterdir()),
+                         [".patient_checkpoint.json", "results.jsonl", "run.json"])
+
+    def test_resume_rejects_duplicate_foreign_and_corrupt_checkpoints(self):
+        run = self.make_saved()
+        original = (run.run_dir / "results.jsonl").read_bytes()
+        for bad in (original + original, b"not JSON\n", b'{"id":"other"}\n'):
+            with self.subTest(result=bad[:20]):
+                (run.run_dir / "results.jsonl").write_bytes(bad)
+                with self.assertRaises(ValueError):
+                    self.resume(run)
+        (run.run_dir / "results.jsonl").write_bytes(original)
+        (run.run_dir / ".patient_checkpoint.json").write_text('{"id":"other"}')
+        with self.assertRaises(ValueError):
+            self.resume(run)
+
+    def test_resume_accepts_valid_final_line_without_newline_and_recovers_torn_tail(self):
+        run = self.make_saved()
+        path = run.run_dir / "results.jsonl"
+        original = path.read_bytes()
+        path.write_bytes(original.rstrip(b"\n"))
+        self.assertEqual(self.resume(run).patient_result("b")["id"], "b")
+        path.write_bytes(original + b'{"id":')
+        self.assertEqual(self.resume(run).patient_result("b")["id"], "b")
+        self.assertEqual(path.read_bytes(), original + b'{"id":')
+
+    def test_resume_validates_inputs_settings_and_schema_without_writes(self):
+        run = self.make_saved()
+        before = {p.name: p.read_bytes() for p in run.run_dir.iterdir()}
+        self.experiment = {**self.experiment, "temperature": 0}
+        with self.assertRaisesRegex(ValueError, "experiment"):
+            self.resume(run)
+        self.assertEqual({p.name: p.read_bytes() for p in run.run_dir.iterdir()}, before)
+
+    def test_resume_changed_judge_alias_names_required_setting_without_writes(self):
+        run = self.make_saved()
+        self.experiment["plan_judge"] = "original_judge"
+        run.update(experiment=self.experiment)
+        before = {p.name: p.read_bytes() for p in run.run_dir.iterdir()}
+        self.experiment = {**self.experiment, "plan_judge": "replacement"}
+        with self.assertRaisesRegex(ValueError, "plan_judge.*original_judge.*experiment.yaml"):
+            self.resume(run)
+        self.assertEqual({p.name: p.read_bytes() for p in run.run_dir.iterdir()}, before)
+
+    def test_serialization_failure_does_not_discard_last_durable_checkpoint(self):
+        original = self.make_saved()
+        run = self.resume(original)
+        current = run.patient_result("a")
+        current["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="already paid")
+        run.checkpoint()
+        checkpoint = run.run_dir / ".patient_checkpoint.json"
+        snapshot, results = checkpoint.read_bytes(), (run.run_dir / "results.jsonl").read_bytes()
+        current["components"]["patient_retrieval"]["capture"]["graphrag_context"] = object()
+        run.stop(self.finished, current)
+        self.assertTrue(checkpoint.exists())
+        self.assertEqual(checkpoint.read_bytes(), snapshot)
+        self.assertEqual((run.run_dir / "results.jsonl").read_bytes(), results)
+        restored = self.resume(original).patient_result("a")
+        self.assertEqual(restored["variants"]["llm_only"]["assessment_plans"]["mini"]
+                         ["assessment_plan_raw"], "already paid")
+
+    def test_serialization_failure_without_checkpoint_keeps_previous_saved_patient_work(self):
+        original = self.make_saved()
+        path = original.run_dir / "results.jsonl"
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"].update(
+            status="completed", assessment_plan_raw="older paid response")
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        run = self.resume(original)
+        current = run.patient_result("a")
+        current["components"]["patient_retrieval"]["capture"]["graphrag_context"] = float("nan")
+        run.stop(self.finished, current)
+        restored = self.resume(original).patient_result("a")
+        self.assertEqual(restored["variants"]["llm_only"]["assessment_plans"]["mini"]
+                         ["assessment_plan_raw"], "older paid response")
+
+    def test_malformed_saved_execution_fields_are_rejected_without_writes(self):
+        original = self.make_saved()
+        path = original.run_dir / "results.jsonl"
+        saved = path.read_bytes()
+        for mutate in (
+                lambda row: row["variants"]["llm_only"].pop("assessment_plan_prompts"),
+                lambda row: row["variants"]["llm_only"]["assessment_plans"]["mini"].pop("assessment_plan_raw"),
+                lambda row: row["variants"]["llm_only"]["assessment_plans"]["mini"].update(predictions=True),
+                lambda row: row["components"]["patient_retrieval"]["capture"].pop("model_responses"),
+                lambda row: row["components"]["patient_retrieval"]["capture"]["model_responses"].update(
+                    keyword_extraction=None)):
+            rows = [json.loads(line) for line in saved.splitlines()]
+            mutate(rows[0])
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            before = {p.name: p.read_bytes() for p in original.run_dir.iterdir()}
+            with self.assertRaises(ValueError):
+                self.resume(original)
+            self.assertEqual({p.name: p.read_bytes() for p in original.run_dir.iterdir()}, before)
 
 
 if __name__ == "__main__":

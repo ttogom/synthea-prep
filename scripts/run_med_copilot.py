@@ -36,7 +36,7 @@ try:
     from scripts.med_copilot_observability import capture_graphrag_responses
     from scripts.med_copilot_scoring import PatientScorer, parse_scoring_args
     from scripts.med_copilot_models import AssessmentPlanModels
-    from scripts.med_copilot_judges import JUDGE_FILE, PLAN_JUDGE_MODEL, CorrectnessJudges
+    from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges
     from scripts.collate_med_copilot_results import generate_report, load_report_data, format_top_rank_summary
     from graphrag.cli.query import run_local_search
     from med_copilot.prompts.diagnosis_plan import (
@@ -51,6 +51,7 @@ try:
         component_needed,
         error_scope,
         prepare_variant_messages,
+        prepare_guideline_query,
         JSONKeywordExtractor,
         format_assessment_plans,
         git_branch,
@@ -122,41 +123,8 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
                     component, error_metadata=assessment_models.error_metadata,
                     credential_names=experiment.required_credentials) as capture:
                 with pipeline_stage("guideline_question_generation"):
-                    key_questions_instance = KEY_QUESTIONS_TEMPLATE.format(conditions=s_o)
-                    messages = [
-                        {"role": "system", "content": "You are a clinical expert."},
-                        {"role": "user", "content": key_questions_instance},
-                    ]
-                    key_response = client.chat.completions.create(
-                        model=settings["question_model"], response_format={"type": "json_object"},
-                        messages=messages,
-                    )
-                    capture["model_responses"]["guideline_questions"].append(
-                        model_response_metadata(key_response)
-                    )
-                    key_questions = key_response.choices[0].message.content
-
-                    # Screen against the patient's S/O. Retry once with the same request.
-                    capture["guideline_question_screen"] = None
-                    found = find_diagnosis_terms(key_questions, s_o)
-                    if found:
-                        screen = {"first_reply": key_questions, "first_terms": found}
-                        retry_response = client.chat.completions.create(
-                            model=settings["question_model"], response_format={"type": "json_object"},
-                            messages=messages,
-                        )
-                        capture["model_responses"]["guideline_questions"].append(
-                            model_response_metadata(retry_response)
-                        )
-                        key_questions = retry_response.choices[0].message.content
-                        found = find_diagnosis_terms(key_questions, s_o)
-                        screen.update(retry_reply=key_questions, retry_terms=found)
-                        if found:
-                            key_questions = remove_diagnosis_terms(key_questions, found)
-                        capture["guideline_question_screen"] = screen
-
-                    # GraphRAG receives the screened raw JSON; parse only for capture.
-                    capture["guideline_questions"] = parse_guideline_questions(key_questions)
+                    key_questions = prepare_guideline_query(
+                        client, settings, s_o, capture, template=KEY_QUESTIONS_TEMPLATE)
                 print("\n========== KEY QUESTIONS ==========\n")
                 print(key_questions)
                 # Vendored table loading uses cwd instead of the storage root.
@@ -211,9 +179,10 @@ def main(argv=None, run_file=None):
             experiment.presenting_evidence_only = args.presenting_evidence_only
         with pipeline_stage("startup"):
             branch, commit = git_branch(ROOT), git_commit(ROOT)
-            run_file.move(experiment.experiment_output,
-                          make_run_name(run_file.started_at, experiment.patient_input, branch))
-            run_file.update(branch=branch, git_commit=commit)
+            if not args.resume:
+                run_file.move(experiment.experiment_output,
+                              make_run_name(run_file.started_at, experiment.patient_input, branch))
+                run_file.update(branch=branch, git_commit=commit)
         with pipeline_stage("input_loading"):
             patients = load_patient_records(experiment.patient_input)
             scorer = PatientScorer(
@@ -234,6 +203,16 @@ def main(argv=None, run_file=None):
                   "Fix the errors above and restart the script.", file=sys.stderr)
             run_file.fail(exc, stage="startup")
             return "configuration_error"
+        try:
+            resume = ExperimentRun.resume(
+                args.resume, root=ROOT, experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
+                models=assessment_models.metadata(ROOT), variants=experiment.variant_metadata(ROOT)) if args.resume else None
+            if resume is not None:
+                CorrectnessJudges.validate_resume(resume.metadata, ROOT, plan_judge=experiment.plan_judge)
+        except (OSError, ValueError) as exc:
+            print(f"Cannot resume run: {exc}", file=sys.stderr)
+            run_file.discard()
+            return "resume_error"
         if not confirm_experiment(experiment, assessment_models.metadata(ROOT), ROOT, scorer.metadata(ROOT)):
             # Cancelling is not a failure: leave no run directory behind.
             run_file.discard()
@@ -248,7 +227,8 @@ def main(argv=None, run_file=None):
             patient_ids=[patient["id"] for patient in patients],
             model_ids=assessment_models.model_ids, variant_ids=experiment.selected_variants,
             component_plan=experiment.component_plan, variant_components=experiment.variant_components,
-            run_file=run_file, redact=lambda text: redact_secrets(assessment_models.redact(text), credentials),
+            run_file=run_file, resume=resume,
+            redact=lambda text: redact_secrets(assessment_models.redact(text), credentials),
         )
     except BaseException as exc:
         if isinstance(exc, SystemExit) and exc.code in (0, None):
@@ -263,21 +243,21 @@ def main(argv=None, run_file=None):
     try:
         # Preliminary single-model midterm metric: BioLORD-2023 clinical concept similarity score
         # for diagnoses (not an accuracy or probability) and one
-        # local Plan judge (PLAN_JUDGE_MODEL), loaded on its own unless it is also a generator.
+        # configured Plan judge, loaded on its own unless it is also a generator.
         # If it cannot be loaded, Plans are marked judge_unavailable; the run continues.
         judge_models = assessment_models
-        if PLAN_JUDGE_MODEL not in assessment_models.model_ids:
+        if experiment.plan_judge not in assessment_models.model_ids:
             try:
-                judge_models = AssessmentPlanModels(experiment.model_config, [PLAN_JUDGE_MODEL],
+                judge_models = AssessmentPlanModels(experiment.model_config, [experiment.plan_judge],
                                                     temperature=experiment.temperature,
                                                     max_retries=experiment.max_retries)
             except (OSError, ValueError) as exc:
                 judge_models = None
-                print(f"Plan judge {PLAN_JUDGE_MODEL} unavailable; Plans will not be judged: {exc}",
+                print(f"Plan judge {experiment.plan_judge} unavailable; Plans will not be judged: {exc}",
                       file=sys.stderr)
         scorer.attach_judges(CorrectnessJudges(
             judge_models.judge if judge_models else None, judge_models.model_ids if judge_models else (),
-            run.run_dir / JUDGE_FILE, generator_models=assessment_models.model_ids,
+            run.run_dir / JUDGE_FILE, plan_judge=experiment.plan_judge, generator_models=assessment_models.model_ids,
             judge_model_config=judge_models.metadata(ROOT) if judge_models else None))
         run.update(experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
                    assessment_plan_models=assessment_models.metadata(ROOT),
@@ -287,7 +267,7 @@ def main(argv=None, run_file=None):
 # A failure here is fatal: the run stops as failed_incomplete.
 # ---------------------------------------------------------------------
         corpus_records, retriever, reranker = [], None, None
-        if experiment.needs_patient_retrieval:
+        if experiment.needs_patient_retrieval and run.needs_resource("patient_retrieval"):
             with pipeline_stage("startup"):
                 encoder = retrieval_startup.encoder_for(experiment)
             with pipeline_stage("corpus_loading"):
@@ -311,7 +291,7 @@ def main(argv=None, run_file=None):
                     )
                     reranker = CrossEncoderReranker(model_name=experiment.patient_reranker_model)
         guideline_output = experiment.guidelines / "output"
-        if experiment.needs_guidelines:
+        if experiment.needs_guidelines and run.needs_resource("guidelines"):
             with pipeline_stage("retrieval_initialization"):
                 validate_guideline_tables(guideline_output)
 
@@ -335,10 +315,7 @@ def main(argv=None, run_file=None):
 # ---------------------------------------------------------------------
         for number, patient in enumerate(patients, 1):
             print(f"\n========== PATIENT {number}/{len(patients)}: {patient['id']} ==========")
-            current = new_patient_result(patient["id"], model_ids=assessment_models.model_ids,
-                                         variant_ids=experiment.selected_variants,
-                                         component_plan=experiment.component_plan,
-                                         variant_components=experiment.variant_components)
+            current = run.patient_result(patient["id"])
             with error_scope(run, patient_id=patient["id"]):
                 try:
                     process_patient(patient, current, corpus_records, retriever, reranker,

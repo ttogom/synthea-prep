@@ -8,6 +8,7 @@ launch directory. There are no model/config CLI overrides.
 | Experiment setting | Meaning |
 | --- | --- |
 | `selected_models` | Nonempty, unique registry aliases, in execution order. |
+| `plan_judge` | Nonblank registry alias used for Plan correctness. Reuses a selected generating model, or loads the judge separately. Defaults to `ollama_qwen2_5_14b` for older configs. |
 | `temperature` | Shared final-model temperature, finite number from 0 to 2. |
 | `max_retries` | Shared upstream final-model retry setting, integer at least 1. |
 | `max_patients` | Sample up to N eligible patients without replacement using seed 42; positive integer or `null` for all. Selected patients run in input order. |
@@ -57,8 +58,8 @@ The Ollama entries reuse the upstream OpenAI-compatible adapter at
 `http://localhost:11434/v1` and request `json_schema` output. Keep that server
 running; no key variable is needed for these entries. `ollama_qwen2_5_14b`
 (`qwen2.5:14b`) is registered as the preliminary Plan-correctness judge
-(`PLAN_JUDGE_MODEL` in `scripts/med_copilot_judges.py`); it is loaded separately
-and is not a selected generating model. Optional hosted/local
+(the shipped `plan_judge` in `experiment.yaml`); it is loaded separately
+because it is not a selected generating model. Optional hosted/local
 Llama 3.3 70B entries remain registered. The shipped `max_patients: null` means every eligible sample patient is run. The sample cohort has 10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-plan filter: 80 final requests before retries with four variants and four models. Shared component calls are additional and are not repeated for each variant/model.
 
 Patient retrieval needs `OPENAI_API_KEY`. Guidelines need `OPENAI_API_KEY` and
@@ -77,6 +78,10 @@ response, EOF or Ctrl+C cancels without run artifacts or generation calls.
 `run.json.experiment` records every setting and its effective value (including
 applied defaults), config path/source SHA-256 and model-registry reference. The
 registry has its own fingerprint and effective upstream settings snapshot.
+Every change to `experiment.yaml`, including comments, whitespace, or spelling
+out an existing default, blocks a full runner resume because its exact source
+SHA-256 must match. Plan-judge selection is checked by alias; its model-registry
+settings are saved for provenance but are not separately compared for the judge.
 Resolved keys are never saved. Keep validation, behavior, metadata and tests in
 sync when adding settings. Older four-setting configs default to the combined
 variant, sample paths, presenting-evidence filtering enabled, and recorded-plan

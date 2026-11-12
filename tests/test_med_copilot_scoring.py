@@ -51,8 +51,7 @@ class FakeSimilarity:
 
 def setUpModule():
     # Never load the real BioLORD model, and judge Plans with a fake selected model.
-    for target, value in (("scripts.med_copilot_judges.BioLordSimilarity", FakeSimilarity),
-                          ("scripts.med_copilot_judges.PLAN_JUDGE_MODEL", "llama")):
+    for target, value in (("scripts.med_copilot_judges.BioLordSimilarity", FakeSimilarity),):
         patcher = patch(target, value)
         patcher.start()
         unittest.addModuleCleanup(patcher.stop)
@@ -663,7 +662,7 @@ class PatientScorerTests(unittest.TestCase):
 
 class ScoringArgumentTests(unittest.TestCase):
     def test_config_and_model_cli_overrides_are_rejected(self):
-        self.assertEqual(vars(parse_scoring_args([])), {"presenting_evidence_only": None})
+        self.assertEqual(vars(parse_scoring_args([])), {"presenting_evidence_only": None, "resume": None})
         for option in ("--config", "--experiment-config", "--model-config", "--models"):
             with self.subTest(option=option), redirect_stderr(StringIO()) as stderr:
                 with self.assertRaises(SystemExit) as failure:
@@ -692,6 +691,14 @@ class ScoringArgumentTests(unittest.TestCase):
     def test_none_uses_process_arguments(self):
         with patch.object(sys, "argv", ["runner", "--presenting-evidence-only", "false"]):
             self.assertFalse(parse_scoring_args().presenting_evidence_only)
+
+    def test_resume_takes_an_existing_run_path_without_changing_cohort_default(self):
+        args = parse_scoring_args(["--resume", "saved runs/patient run"])
+        self.assertEqual(args.resume, Path("saved runs/patient run"))
+        self.assertIsNone(args.presenting_evidence_only)
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as failure:
+            parse_scoring_args(["--resume"])
+        self.assertEqual(failure.exception.code, 2)
 
 
 class VariantScoringTests(unittest.TestCase):
@@ -855,7 +862,7 @@ class CorrectnessScoringTests(unittest.TestCase):
     def judged(self, record, models=None):
         models = models or FakeJudgeModels()
         scorer = self.scorer()
-        scorer.attach_judges(CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE))
+        scorer.attach_judges(CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE, plan_judge="llama"))
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
             scorer.score_result(record)
         return scorer, models
@@ -952,6 +959,153 @@ class CorrectnessScoringTests(unittest.TestCase):
         self.assertEqual(entries[2]["condition"]["status"], "scored")
 
 
+class IncrementalScoringTests(unittest.TestCase):
+    """A runner restart completes only unfinished scoring, including partial ranks."""
+
+    setUp = PatientScorerTests.setUp
+    write_labels = PatientScorerTests.write_labels
+    scorer = PatientScorerTests.scorer
+    result = PatientScorerTests.result
+
+    def test_completed_nested_model_scores_are_unchanged_and_make_no_calls(self):
+        output = self.result()
+        record = {"id": "patient-a", "variants": {"baseline": {"assessment_plans": {"mini": output}}}}
+        scorer = self.scorer()
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(record)
+        before = deepcopy(record)
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=AssertionError("completed metric repeated")) as evaluate:
+            self.assertIs(scorer.score_result(record), record)
+        evaluate.assert_not_called()
+        self.assertEqual(record, before)
+
+    def test_interrupted_scoring_reuses_earlier_fields_and_finishes_remaining_fields(self):
+        output = self.result()
+        scorer = self.scorer()
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics, KeyboardInterrupt()]):
+            with self.assertRaises(KeyboardInterrupt):
+                scorer.score_result(output)
+        first = deepcopy(output["evaluation"][0]["condition"])
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_result(output)
+        self.assertEqual(evaluate.call_count, 5)
+        self.assertEqual(evaluate.call_args_list[0].args, (["Rest,  Drink fluids "], ["P"]))
+        self.assertEqual(output["evaluation"][0]["condition"], first)
+        self.assertTrue(all(e[field]["status"] == "scored" for e in output["evaluation"]
+                            for field in ("condition", "plan")))
+
+    def test_failed_field_is_retried_without_repeating_other_five_fields(self):
+        output = self.result()
+        scorer = self.scorer()
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics, RuntimeError("temporary failure")] + [self.metrics] * 4):
+            scorer.score_result(output)
+        before = deepcopy(output["evaluation"])
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_result(output)
+        self.assertEqual(evaluate.call_count, 1)
+        before[0]["plan"] = output["evaluation"][0]["plan"]
+        self.assertEqual(output["evaluation"], before)
+
+    def test_scored_but_invalid_metrics_are_recomputed_instead_of_reused(self):
+        output = self.result()
+        scorer = self.scorer()
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(output)
+        output["evaluation"][1]["condition"]["metrics"].pop("BLEU")
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_result(output)
+        self.assertEqual(evaluate.call_count, 1)
+        self.assertEqual(output["evaluation"][1]["condition"]["metrics"], self.metrics)
+
+    def test_correctness_retry_preserves_successful_diagnoses_and_other_plans(self):
+        output = self.result()
+        scorer = self.scorer()
+        models = FakeJudgeModels()
+        judges = CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE, plan_judge="llama")
+        scorer.attach_judges(judges)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(output)
+        before = deepcopy(output["evaluation"])
+        output["evaluation"][1]["plan_correctness"].update(status="error", reason="judge_failed", score=None)
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=AssertionError("text scoring repeated")) as evaluate, \
+                patch.object(judges.similarity, "cosine", side_effect=AssertionError("diagnosis scoring repeated")) as similarity:
+            scorer.score_result(output)
+        evaluate.assert_not_called()
+        similarity.assert_not_called()
+        self.assertEqual(output["evaluation"], before)
+        self.assertEqual(len(models.requests), 3)  # All retry requests reuse valid judge responses.
+
+    def test_unavailable_correctness_is_retried_when_judge_becomes_available(self):
+        output = self.result()
+        scorer = self.scorer()
+        unavailable = CorrectnessJudges(None, (), self.directory / JUDGE_FILE, plan_judge="llama")
+        scorer.attach_judges(unavailable)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(output)
+        self.assertEqual(output["evaluation"][0]["plan_correctness"]["reason"], "judge_unavailable")
+        models = FakeJudgeModels()
+        scorer.attach_judges(CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE, plan_judge="llama"))
+        with patch.object(Evaluator, "evaluate_metrics") as evaluate:
+            scorer.score_result(output)
+        evaluate.assert_not_called()
+        self.assertTrue(all(e["plan_correctness"]["status"] == "scored" for e in output["evaluation"]))
+
+    def test_checkpoint_after_each_text_field_retains_progress_before_next_metric(self):
+        output = self.result()
+        snapshots = []
+        with patch("scripts.med_copilot_scoring.checkpoint", create=True,
+                   side_effect=lambda: snapshots.append(deepcopy(output))) as checkpoint, \
+                patch.object(Evaluator, "evaluate_metrics", side_effect=[self.metrics, KeyboardInterrupt()]):
+            with self.assertRaises(KeyboardInterrupt):
+                self.scorer().score_result(output)
+        self.assertGreaterEqual(checkpoint.call_count, 1)
+        self.assertEqual(snapshots[0]["evaluation"][0]["condition"]["status"], "scored")
+        self.assertEqual(snapshots[0]["evaluation"][0]["plan"]["status"], "pending")
+
+    def test_explicit_rescore_recalculates_completed_text_and_diagnosis_scores(self):
+        output = self.result()
+        scorer = self.scorer()
+        models = FakeJudgeModels()
+        judges = CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE, plan_judge="llama")
+        scorer.attach_judges(judges)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(output)
+        replacement = {name: 0.125 for name in METRIC_NAMES}
+        with patch.object(Evaluator, "evaluate_metrics", return_value=replacement) as evaluate, \
+                patch.object(judges.similarity, "cosine", return_value=0.25) as similarity:
+            scorer.score_result(output, rescore=True)
+        self.assertEqual(evaluate.call_count, 6)
+        self.assertEqual(similarity.call_count, 3)
+        self.assertEqual(output["evaluation"][0]["condition"]["metrics"], replacement)
+        self.assertEqual(output["evaluation"][0]["diagnosis_correctness"]["score"], 0.25)
+        self.assertEqual(len(models.requests), 3)
+
+    def test_checkpoint_write_failure_propagates_instead_of_becoming_a_metric_error(self):
+        output = self.result()
+        with patch("scripts.med_copilot_scoring.checkpoint", side_effect=RuntimeError("checkpoint failed")), \
+                patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            with self.assertRaisesRegex(RuntimeError, "checkpoint failed"):
+                self.scorer().score_result(output)
+        self.assertEqual(evaluate.call_count, 1)
+        self.assertEqual(output["evaluation"][0]["condition"]["status"], "scored")
+
+    def test_invalid_scored_correctness_is_recomputed(self):
+        output = self.result()
+        scorer = self.scorer()
+        models = FakeJudgeModels()
+        judges = CorrectnessJudges(models.judge, models.model_ids, self.directory / JUDGE_FILE, plan_judge="llama")
+        scorer.attach_judges(judges)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_result(output)
+        output["evaluation"][0]["diagnosis_correctness"].update(score=2.0, weighted_score=2.0)
+        with patch.object(Evaluator, "evaluate_metrics") as evaluate, \
+                patch.object(judges.similarity, "cosine", return_value=0.25) as similarity:
+            scorer.score_result(output)
+        evaluate.assert_not_called()
+        similarity.assert_called_once()
+        self.assertEqual(output["evaluation"][0]["diagnosis_correctness"]["score"], 0.25)
+
+
 class ResumeEvaluationTests(unittest.TestCase):
     setUp = PatientScorerTests.setUp
     write_labels = PatientScorerTests.write_labels
@@ -963,6 +1117,7 @@ class ResumeEvaluationTests(unittest.TestCase):
         self.run_dir.mkdir()
         scorer = self.scorer()
         metadata = {"run_name": "run", "status": "completed", "errors": [],
+                    "experiment": {"plan_judge": "llama"},
                     "evaluation": {"selected_patient_ids": [patient["id"] for patient in scorer.patients]}}
         (self.run_dir / "run.json").write_text(json.dumps(metadata), encoding="utf-8")
         record = {"id": "patient-a", "status": "completed", "variants": {"llm_only": {"assessment_plans": {
@@ -1037,6 +1192,18 @@ class ResumeEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cohort"):
             self.resume(FakeJudgeModels())
 
+    def test_evaluation_only_command_still_recalculates_all_previously_saved_text_scores(self):
+        self.write_run()
+        self.resume(FakeJudgeModels())
+        replacement = {name: 0.125 for name in METRIC_NAMES}
+        with patch.object(Evaluator, "evaluate_metrics", return_value=replacement) as evaluate:
+            resume_evaluation(self.run_dir, self.scorer(), FakeJudgeModels(), root=self.directory)
+        self.assertEqual(evaluate.call_count, len(JUDGE_MODELS) * 6)
+        record, _ = self.saved()
+        self.assertTrue(all(e[field]["metrics"] == replacement
+                            for output in record["variants"]["llm_only"]["assessment_plans"].values()
+                            for e in output["evaluation"] for field in ("condition", "plan")))
+
 
 RESUME_SCRIPT = ROOT / "scripts/resume_med_copilot_evaluation.py"
 
@@ -1056,7 +1223,7 @@ class ResumeCommandTests(unittest.TestCase):
         self.metadata = {
             "run_name": "run", "status": "completed", "errors": [], "schema_version": 4,
             "input": {"file": "input.jsonl", "sha256": sha(self.input_path)},
-            "experiment": {"selected_variants": ["llm_only"], "temperature": 1, "max_retries": 3},
+            "experiment": {"selected_variants": ["llm_only"], "temperature": 1, "max_retries": 3, "plan_judge": "llama"},
             "assessment_plan_models": {"config_file": "models.yaml", "selected_models": list(JUDGE_MODELS),
                                        "models": {}},
             "evaluation": {"labels_path": "labels.jsonl", "labels_sha256": sha(self.labels_path),
@@ -1070,7 +1237,7 @@ class ResumeCommandTests(unittest.TestCase):
             for patient_id in ("patient-b", "patient-a")]
         (self.run_dir / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
-    def command(self, *argv, reply=None, models=None):
+    def command(self, *argv, reply=None, models=None, models_factory=None):
         """Run the command's main(); return (exit status, stdout, stderr, fake models)."""
         models = models or FakeJudgeModels(reply)
         namespace = runpy.run_path(str(RESUME_SCRIPT), run_name="resume_command")
@@ -1078,7 +1245,7 @@ class ResumeCommandTests(unittest.TestCase):
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics), \
                 redirect_stderr(stderr), patch("sys.stdout", stdout):
             status = namespace["main"](list(argv) or [str(self.run_dir)], root=self.directory,
-                                       models_factory=lambda *args, **kwargs: models)
+                                       models_factory=models_factory or (lambda *args, **kwargs: models))
         return status, stdout.getvalue(), stderr.getvalue(), models
 
     def saved(self):
@@ -1100,6 +1267,22 @@ class ResumeCommandTests(unittest.TestCase):
         self.assertIn("correctness", run["evaluation"])
         self.assertEqual(self.command()[0], 0)
         self.assertEqual(self.command()[3].requests, [])  # Fully resumed: nothing is requested again.
+
+    def test_evaluation_resume_uses_the_judge_alias_recorded_in_experiment_metadata(self):
+        self.build_run()
+        self.metadata["experiment"]["plan_judge"] = "custom_judge"
+        (self.run_dir / "run.json").write_text(json.dumps(self.metadata))
+        generators, judge = FakeJudgeModels(), FakeJudgeModels()
+        judge.model_ids = ("custom_judge",)
+        requested = []
+        def factory(config, selected_models, **kwargs):
+            requested.append(selected_models)
+            return judge if selected_models == ["custom_judge"] else generators
+        status, _, stderr, _ = self.command(models=generators, models_factory=factory)
+        self.assertEqual((status, stderr), (0, ""))
+        self.assertEqual(requested, [list(JUDGE_MODELS), ["custom_judge"]])
+        self.assertEqual({model for model, _ in judge.requests}, {"custom_judge"})
+        self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["plan"]["judge_model"], "custom_judge")
 
     def test_invalid_run_directories_exit_one_without_scoring(self):
         self.build_run()

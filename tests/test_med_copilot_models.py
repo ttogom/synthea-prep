@@ -83,6 +83,52 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         models.generate(self.messages, result)
         return models, result
 
+    def test_resume_reuses_received_reply_after_interruption_during_local_parsing(self):
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        for _ in range(2):
+            with patch("scripts.med_copilot_models.parse_condition_plan", side_effect=KeyboardInterrupt()), \
+                    self.assertRaises(KeyboardInterrupt):
+                models.generate(self.messages, result)
+            result = json.loads(json.dumps(result))
+            self.assertEqual(self.transport.call_count, 1)
+        saved = json.loads(json.dumps(result))  # Exercise the persisted representation.
+        raw = saved["assessment_plans"]["mini"]["assessment_plan_raw"]
+        self.assertIsInstance(raw, str)
+        self.assertEqual(self.transport.call_count, 1)
+        self.load_models(["mini", "llama"]).generate(self.messages, saved)
+        self.assertEqual(self.transport.call_count, 2)  # Only the unstarted sibling needs a request.
+        first = saved["assessment_plans"]["mini"]
+        self.assertEqual(first["status"], "completed")
+        self.assertEqual(first["assessment_plan_raw"], raw)
+        self.assertIsNotNone(first["predictions"])
+        self.assertEqual(len(first["model_responses"]), 1)
+
+    def test_resume_retries_parsing_failure_without_repeating_completed_api_call(self):
+        models = self.load_models()
+        result = new_patient_result("p", model_ids=models.model_ids)
+        with patch("scripts.med_copilot_models.parse_condition_plan", side_effect=RuntimeError("parser failed")):
+            models.generate(self.messages, result)
+        self.assertEqual(result["assessment_plans"]["mini"]["status"], "failed_incomplete")
+        models.generate(self.messages, result)
+        self.assertEqual(self.transport.call_count, 1)
+        self.assertEqual(result["assessment_plans"]["mini"]["status"], "completed")
+
+    def test_resume_requests_replacement_for_truncated_or_refused_replies(self):
+        for finish, refusal in (("length", None), ("stop", "refused")):
+            with self.subTest(finish=finish, refusal=refusal):
+                self.transport.reset_mock()
+                reply = response("rejected")
+                reply.choices[0].finish_reason = finish
+                reply.choices[0].message.refusal = refusal
+                self.transport.return_value = reply
+                models, result = self.generate()
+                self.assertEqual(result["assessment_plans"]["mini"]["status"], "failed_incomplete")
+                self.transport.return_value = response("healthy")
+                models.generate(self.messages, result)
+                self.assertEqual(self.transport.call_count, 2)
+                self.assertEqual(result["assessment_plans"]["mini"]["predictions"][0]["condition"], "healthy0")
+
     def test_reuses_real_upstream_config_factory_and_preserves_provider_response(self):
         with patch.object(ModelFactory, "create_chat_model", wraps=ModelFactory.create_chat_model) as factory:
             models, result = self.generate()
@@ -112,6 +158,109 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), "")
         self.assertTrue(all(item["assessment_plan_raw"] is not None
                             for item in result["assessment_plans"].values()))
+
+    def test_resume_skips_completed_sibling_and_checkpoints_only_new_generation(self):
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        completed = result["assessment_plans"]["mini"]
+        completed.update(status="completed", assessment_plan_raw="saved reply",
+                         predictions=[{"condition": "saved", "plan": ["saved action"]}],
+                         evaluation=[{"saved": "score"}])
+        saved = deepcopy(completed)
+        snapshots = []
+        with patch("scripts.med_copilot_models.checkpoint", create=True,
+                   side_effect=lambda: snapshots.append(deepcopy(result))):
+            models.generate(self.messages, result)
+        self.transport.assert_called_once()
+        self.assertEqual(self.transport.call_args.kwargs["model"], "groq/llama-3.3-70b-versatile")
+        self.assertEqual(completed, saved)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0]["assessment_plans"]["llama"]["status"], "completed")
+
+    def test_resume_preserves_completed_but_invalid_generation_without_requests(self):
+        models = self.load_models()
+        result = new_patient_result("p", model_ids=models.model_ids)
+        result["assessment_plans"]["mini"].update(status="completed", assessment_plan_raw="invalid JSON")
+        saved = deepcopy(result["assessment_plans"]["mini"])
+        with patch("scripts.med_copilot_models.checkpoint", create=True) as checkpoint:
+            models.generate(self.messages, result)
+        self.transport.assert_not_called()
+        checkpoint.assert_not_called()
+        self.assertEqual(result["assessment_plans"]["mini"], saved)
+        self.assertEqual(result["status"], "completed")
+
+    def test_resume_retries_interrupted_slot_without_repeating_earlier_model(self):
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        self.transport.side_effect = [response("first"), KeyboardInterrupt()]
+        snapshots = []
+        with patch("scripts.med_copilot_models.checkpoint", create=True,
+                   side_effect=lambda: snapshots.append(deepcopy(result))):
+            with self.assertRaises(KeyboardInterrupt):
+                models.generate(self.messages, result)
+        first = deepcopy(result["assessment_plans"]["mini"])
+        self.assertEqual([snapshot["assessment_plans"]["llama"]["status"]
+                          for snapshot in snapshots], ["not_processed", "failed_incomplete"])
+        self.assertEqual(result["assessment_plans"]["llama"]["error"]["type"], "KeyboardInterrupt")
+        self.transport.reset_mock()
+        self.transport.side_effect = None
+        self.transport.return_value = response("retried")
+        with patch("scripts.med_copilot_models.checkpoint", create=True) as checkpoint:
+            models.generate(self.messages, result)
+        self.transport.assert_called_once()
+        self.assertEqual(self.transport.call_args.kwargs["model"], "groq/llama-3.3-70b-versatile")
+        checkpoint.assert_called_once_with()
+        self.assertEqual(result["assessment_plans"]["mini"], first)
+        self.assertIsNone(result["assessment_plans"]["llama"]["error"])
+        self.assertEqual(result["assessment_plans"]["llama"]["predictions"][0]["condition"], "retried0")
+        self.assertEqual(result["status"], "completed")
+
+    def test_failed_calls_checkpoint_failure_and_successful_sibling(self):
+        self.transport.side_effect = [RuntimeError("temporary failure"), response("good")]
+        snapshots = []
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        with patch("scripts.med_copilot_models.checkpoint", create=True,
+                   side_effect=lambda: snapshots.append(deepcopy(result))):
+            models.generate(self.messages, result)
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(snapshots[0]["assessment_plans"]["mini"]["error"]["type"], "RuntimeError")
+        self.assertEqual(snapshots[1]["assessment_plans"]["llama"]["status"], "completed")
+
+    def test_checkpoint_write_failure_stops_before_requesting_another_model(self):
+        models = self.load_models(["mini", "llama"])
+        result = new_patient_result("p", model_ids=models.model_ids)
+        with patch("scripts.med_copilot_models.checkpoint", create=True,
+                   side_effect=OSError("checkpoint is unwritable")):
+            with self.assertRaisesRegex(OSError, "checkpoint is unwritable"):
+                models.generate(self.messages, result)
+        self.transport.assert_called_once()
+        self.assertEqual(result["assessment_plans"]["mini"]["status"], "completed")
+        self.assertEqual(result["assessment_plans"]["llama"]["status"], "not_processed")
+
+    def test_retry_discards_failed_attempt_payload_and_scores_but_keeps_response_history(self):
+        models = self.load_models()
+        for reply in (response("new"), RuntimeError("retry failed before response")):
+            with self.subTest(reply=type(reply).__name__):
+                result = new_patient_result("p", model_ids=models.model_ids)
+                output = result["assessment_plans"]["mini"]
+                output.update(status="failed_incomplete", error={"type": "OldFailure"},
+                              predictions=[{"condition": "old", "plan": ["old action"]}],
+                              assessment_plan_raw="old partial reply", evaluation=[{"old": "score"}],
+                              model_responses=[{"response_id": "old-response"}])
+                self.transport.side_effect = reply if isinstance(reply, Exception) else None
+                self.transport.return_value = reply
+                models.generate(self.messages, result)
+                self.assertIsNone(output["evaluation"])
+                self.assertEqual(output["model_responses"][0], {"response_id": "old-response"})
+                if isinstance(reply, Exception):
+                    self.assertIsNone(output["predictions"])
+                    self.assertIsNone(output["assessment_plan_raw"])
+                    self.assertEqual(len(output["model_responses"]), 1)
+                else:
+                    self.assertEqual(output["predictions"][0]["condition"], "new0")
+                    self.assertEqual(len(output["model_responses"]), 2)
 
     def test_shipped_registry_defaults_and_all_hosted_local_examples_use_upstream(self):
         experiment = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")

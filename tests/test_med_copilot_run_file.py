@@ -12,10 +12,11 @@ import json
 import os
 from pathlib import Path
 import runpy
+import stat
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,6 +128,52 @@ class RunFileTests(unittest.TestCase):
             run.stop(STARTED)
         self.assertIn("Could not mark run.json as stopped", stderr.getvalue())
         self.assertEqual(self.read(run)["status"], "running")
+
+    def test_metadata_file_is_synced_before_replacement_then_directory_is_synced(self):
+        events = []
+        original_sync, original_replace = os.fsync, os.replace
+        def sync(descriptor):
+            events.append("directory_sync" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file_sync")
+            return original_sync(descriptor)
+        def replace(source, destination):
+            events.append("replace")
+            return original_replace(source, destination)
+        with patch.object(os, "fsync", side_effect=sync), patch.object(os, "replace", side_effect=replace):
+            R["write_run_json"](self.root, {"status": "completed"})
+        self.assertEqual(events, ["file_sync", "replace", "directory_sync"])
+        self.assertEqual(json.loads((self.root / "run.json").read_text()), {"status": "completed"})
+
+    def test_failed_metadata_flush_preserves_previous_file_and_removes_temporary_file(self):
+        R["write_run_json"](self.root, {"status": "running"})
+        before = (self.root / "run.json").read_bytes()
+        with patch.object(os, "fsync", side_effect=OSError("flush failed")), self.assertRaises(OSError):
+            R["write_run_json"](self.root, {"status": "completed"})
+        self.assertEqual((self.root / "run.json").read_bytes(), before)
+        self.assertEqual([path.name for path in self.root.iterdir()], ["run.json"])
+
+    def test_directory_sync_closes_descriptor_even_when_flush_fails(self):
+        with patch.object(os, "open", return_value=123), patch.object(os, "close") as close, \
+                patch.object(os, "fsync", side_effect=OSError("directory flush failed")), self.assertRaises(OSError):
+            R["_fsync_directory"](self.root)
+        close.assert_called_once_with(123)
+
+
+class CheckpointTests(unittest.TestCase):
+    def test_checkpoint_only_calls_the_active_run(self):
+        run = Mock()
+        R["checkpoint"]()
+        run.checkpoint.assert_not_called()
+        with R["error_scope"](run, patient_id="a"):
+            R["checkpoint"]()
+        run.checkpoint.assert_called_once_with()
+        R["checkpoint"]()
+        run.checkpoint.assert_called_once_with()
+
+    def test_checkpoint_write_failure_is_fatal(self):
+        run = Mock()
+        run.checkpoint.side_effect = OSError("disk full")
+        with R["error_scope"](run, patient_id="a"), self.assertRaises(R["RunMetadataError"]):
+            R["checkpoint"]()
 
 
 if __name__ == "__main__":

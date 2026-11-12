@@ -761,6 +761,7 @@ class PipelineSettingsTests(unittest.TestCase):
     def test_legacy_config_gets_all_effective_pipeline_defaults_and_metadata(self):
         config = ExperimentConfig(self.path)
         expected = {
+            "plan_judge": "ollama_qwen2_5_14b",
             "guidelines": "med_copilot/data/guidelines",
             "experiment_output": "experiments/output",
             "patient_corpus": "med_copilot/data/patient_corpus/reference_patients.json",
@@ -777,7 +778,7 @@ class PipelineSettingsTests(unittest.TestCase):
         for field, value in expected.items():
             self.assertEqual(config.metadata(ROOT)[field], value)
             self.assertEqual(getattr(config, field), ROOT / value if field in PATH_SETTINGS else value)
-        self.assertEqual(len(config.metadata(ROOT)), 27)  # 24 effective settings + three provenance fields
+        self.assertEqual(len(config.metadata(ROOT)), 28)  # 25 effective settings + three provenance fields
 
     def test_paths_resolve_from_repo_root_and_absolute_paths_are_preserved_from_other_cwd(self):
         for field in PATH_SETTINGS:
@@ -795,7 +796,7 @@ class PipelineSettingsTests(unittest.TestCase):
         bad_values = {field: [None, "", "  ", [], 3, False] for field in (
             "guidelines", "experiment_output", "patient_corpus", "patient_retrieval_artifacts_dir",
             "guideline_question_model", "patient_embedding_model", "patient_keyword_model", "patient_reranker_model",
-            "guideline_response_type")}
+            "guideline_response_type", "plan_judge")}
         bad_values.update({
             "patient_retrieval_alpha": [None, "0.5", True, -0.1, 1.1, float("nan"), float("inf"), []],
             "patient_retrieval_top_k": [None, 0, -1, True, 1.0, "20"],
@@ -822,6 +823,15 @@ class PipelineSettingsTests(unittest.TestCase):
                 metadata = ExperimentConfig(self.path).metadata(ROOT)
                 for field, value in self.data.items():
                     self.assertEqual(metadata[field], value)
+
+    def test_plan_judge_is_configurable_independently_of_generating_models_and_is_recorded(self):
+        self.data["plan_judge"] = "custom_judge"
+        self.write()
+        config = ExperimentConfig(self.path)
+        self.assertEqual(config.plan_judge, "custom_judge")
+        self.assertEqual(config.selected_models, ["mini"])
+        self.assertEqual(config.metadata(ROOT)["plan_judge"], "custom_judge")
+        self.assertEqual(config.metadata(ROOT)["config_sha256"], hashlib.sha256(self.path.read_bytes()).hexdigest())
 
     def test_new_pipeline_fields_do_not_expand_the_confirmation_display(self):
         self.data.update(PIPELINE_DEFAULTS)

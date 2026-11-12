@@ -11,9 +11,10 @@ from pathlib import Path
 from random import Random
 
 from med_copilot.upstream.evaluate_metrics import Evaluator
+from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges, diagnosis_entry, plan_entry
 from scripts.med_copilot_run_file import (
-    RUN_FILE, RunFile, RunMetadataError, error_scope, pipeline_stage, record_error,
+    RUN_FILE, RunFile, RunMetadataError, checkpoint, error_scope, pipeline_stage, record_error,
 )
 
 
@@ -39,6 +40,8 @@ def parse_scoring_args(argv=None):
         type=_boolean_argument, metavar="true|false",
         help="Override the experiment cohort filter (otherwise use experiment.yaml).",
     )
+    parser.add_argument("--resume", type=Path, default=None, metavar="RUN_DIRECTORY",
+                        help="Continue an existing run without repeating completed work.")
     return parser.parse_args(argv)
 
 
@@ -56,6 +59,30 @@ def _empty_entry(status, error=None):
 
 def _exception_data(exc):
     return {"type": type(exc).__name__, "message": str(exc)}
+
+
+def _scored_text_entry(entry):
+    """Reuse only complete, finite metric payloads from a saved successful field."""
+    if not isinstance(entry, dict) or entry.get("status") != "scored":
+        return False
+    metrics = entry.get("metrics")
+    return (isinstance(metrics, dict) and set(metrics) == set(METRIC_NAMES)
+            and all(not isinstance(value, bool) and isinstance(value, Real)
+                    and math.isfinite(value) for value in metrics.values()))
+
+
+def _scored_correctness_entry(entry, expected):
+    """Keep successful correctness only when it belongs to the same prediction."""
+    if (not isinstance(entry, dict) or entry.get("status") != "scored"
+            or expected["status"] == "unavailable"):
+        return False
+    identity = ("reference", "generated", "normalized_reference", "normalized_generated") if (
+        "normalized_reference" in expected) else ("reference_actions", "generated_actions")
+    return (all(entry.get(key) == expected.get(key) for key in (*identity, "method", "rank_weight"))
+            and all(not isinstance(entry.get(key), bool) and isinstance(entry.get(key), Real)
+                    and math.isfinite(entry[key]) for key in ("score", "weighted_score"))
+            and 0 <= entry["score"] <= 1
+            and math.isclose(entry["weighted_score"], entry["score"] * expected["rank_weight"]))
 
 
 class PatientScorer:
@@ -218,34 +245,43 @@ class PatientScorer:
             },
         }
 
-    def score_result(self, result):
-        """Score each ranked pair independently, preserving the generated payload."""
+    def score_result(self, result, *, rescore=False):
+        """Complete unfinished fields; rescore=True deliberately recalculates saved scores."""
         if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
                 or result["id"] not in self._selected_ids):
             raise ValueError("Result must name a selected input patient")
         if "variants" in result:
             for variant in result["variants"].values():
-                self.score_result({"id": result["id"], "assessment_plans": variant["assessment_plans"]})
+                self.score_result({"id": result["id"], "assessment_plans": variant["assessment_plans"]},
+                                  rescore=rescore)
         elif "assessment_plans" in result:
             for output in result["assessment_plans"].values():
                 if output["status"] == "completed":
-                    self._score_predictions(result["id"], output)
+                    self._score_predictions(result["id"], output, rescore=rescore)
         else:
-            self._score_predictions(result["id"], result)
+            self._score_predictions(result["id"], result, rescore=rescore)
         return result
 
-    def _score_predictions(self, patient_id, result):
+    def _score_predictions(self, patient_id, result, *, rescore=False):
         label = self._labels[patient_id]
+        saved = result.get("evaluation") if not rescore else None
+        if (not isinstance(saved, list) or len(saved) != 3
+                or any(not isinstance(entry, dict) or entry.get("rank") != index + 1
+                       for index, entry in enumerate(saved))):
+            saved = [{} for _ in range(3)]
         result["evaluation"] = [
-            {"rank": rank, **{field: _empty_entry("pending") for field in ("condition", "plan")}}
+            {"rank": rank, **{field: saved[rank - 1][field] if _scored_text_entry(
+                saved[rank - 1].get(field)) else _empty_entry("pending") for field in ("condition", "plan")}}
             for rank in range(1, 4)
         ]
         if self.judges is not None:
             # Text metrics fill every rank first; correctness scoring then runs per rank.
             judged = [self._correctness_entries(label, result.get("predictions"), index)
                       for index in range(3)]
-            for evaluation, (diagnosis, plan) in zip(result["evaluation"], judged):
-                evaluation.update(diagnosis_correctness=diagnosis, plan_correctness=plan)
+            for evaluation, previous, (diagnosis, plan) in zip(result["evaluation"], saved, judged):
+                for key, expected in (("diagnosis_correctness", diagnosis), ("plan_correctness", plan)):
+                    evaluation[key] = previous[key] if _scored_correctness_entry(
+                        previous.get(key), expected) else expected
         references = {
             "condition": label["condition"].replace("_", " "),
             "plan": ", ".join(label["plan"]),
@@ -253,12 +289,16 @@ class PatientScorer:
         predictions = result.get("predictions")
         for index, evaluation in enumerate(result["evaluation"]):
             for field in ("condition", "plan"):
+                if evaluation[field]["status"] == "scored":
+                    continue
                 if field == "plan" and label["plan"] == ["none recorded"]:
                     evaluation[field] = _empty_entry("skipped_no_recorded_plan")
+                    checkpoint()
                     continue
                 reference = references[field]
                 if not reference.strip():
                     evaluation[field] = _empty_entry("missing_reference")
+                    checkpoint()
                     continue
                 try:
                     if predictions is None:
@@ -301,12 +341,18 @@ class PatientScorer:
                 except BaseException as exc:
                     evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
                     raise
+                finally:
+                    checkpoint()
         if self.judges is not None:
             patient = self._patients[patient_id]
             for evaluation in result["evaluation"]:
-                self.judges.score_diagnosis(evaluation["diagnosis_correctness"])
-                self.judges.judge_plan(evaluation["plan_correctness"],
-                                       label["condition"].replace("_", " "), patient)
+                if evaluation["diagnosis_correctness"]["status"] == "pending":
+                    self.judges.score_diagnosis(evaluation["diagnosis_correctness"])
+                    checkpoint()
+                if evaluation["plan_correctness"]["status"] == "pending":
+                    self.judges.judge_plan(evaluation["plan_correctness"],
+                                           label["condition"].replace("_", " "), patient)
+                    checkpoint()
         return result
 
     @staticmethod
@@ -359,6 +405,8 @@ def resume_evaluation(run_dir, scorer, models, *, root, judge_models=None):
     run_file.redact = models.redact
     judge_models = judge_models or models
     judges = CorrectnessJudges(judge_models.judge, judge_models.model_ids, run_dir / JUDGE_FILE,
+                               plan_judge=(metadata.get("experiment") or {}).get(
+                                   "plan_judge", PIPELINE_DEFAULTS["plan_judge"]),
                                generator_models=models.model_ids,
                                judge_model_config=(judge_models.metadata(root)
                                                    if hasattr(judge_models, "metadata") else None))
@@ -368,7 +416,7 @@ def resume_evaluation(run_dir, scorer, models, *, root, judge_models=None):
     for record in records:
         with error_scope(run_file, patient_id=record["id"]), pipeline_stage("scoring"):
             try:
-                scorer.score_result(record)
+                scorer.score_result(record, rescore=True)
             except RunMetadataError:
                 raise
             except Exception as exc:

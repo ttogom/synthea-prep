@@ -13,6 +13,7 @@ from scripts.med_copilot_config import configured_model_credentials, read_yaml_c
 from scripts.med_copilot_helpers import (
     model_response_metadata, parse_condition_plan, record_error, redact_secrets, repo_path,
 )
+from scripts.med_copilot_run_file import checkpoint
 
 
 class AssessmentPlanModels:
@@ -113,33 +114,46 @@ class AssessmentPlanModels:
         """
         for model_id, model in self._models.items():
             output = result["assessment_plans"][model_id]
-            output["status"] = "failed_incomplete"
+            if output["status"] == "completed":
+                continue
+            received = output.get("_generation_reply_complete") is True
+            output.update(status="failed_incomplete", error=None, predictions=None,
+                          evaluation=None)
+            if not received:
+                output["assessment_plan_raw"] = None
             try:
-                mode = self._settings[model_id]["output_mode"]
-                options = {}
-                if mode != "prompt":
-                    options["response_format"] = (deepcopy(CONDITION_PLAN_RESPONSE_FORMAT)
-                                                  if mode == "json_schema" else {"type": "json_object"})
-                response = model.completion(
-                    messages=deepcopy(messages), stream=False, drop_params=False, **options,
-                )
-                output["model_responses"].append(model_response_metadata(response))
-                choice = response.choices[0]
-                content = choice.message.content
-                output["assessment_plan_raw"] = content
-                if getattr(choice.message, "refusal", None):
-                    raise ValueError("Assessment/Plan generation was refused")
-                finish = getattr(choice, "finish_reason", None)
-                if finish not in (None, "stop"):
-                    raise ValueError("Assessment/Plan generation did not complete")
+                if not received:
+                    mode = self._settings[model_id]["output_mode"]
+                    options = {}
+                    if mode != "prompt":
+                        options["response_format"] = (deepcopy(CONDITION_PLAN_RESPONSE_FORMAT)
+                                                      if mode == "json_schema" else {"type": "json_object"})
+                    response = model.completion(
+                        messages=deepcopy(messages), stream=False, drop_params=False, **options,
+                    )
+                    output["model_responses"].append(model_response_metadata(response))
+                    choice = response.choices[0]
+                    output["assessment_plan_raw"] = choice.message.content
+                    if getattr(choice.message, "refusal", None):
+                        raise ValueError("Assessment/Plan generation was refused")
+                    finish = getattr(choice, "finish_reason", None)
+                    if finish not in (None, "stop"):
+                        raise ValueError("Assessment/Plan generation did not complete")
+                    # If local parsing is interrupted, the existing checkpoint
+                    # retains a usable reply without charging for another call.
+                    output["_generation_reply_complete"] = True
+                content = output["assessment_plan_raw"]
                 output.update(parse_condition_plan(content))
                 output["status"] = "completed"
+                output.pop("_generation_reply_complete", None)
             except Exception as exc:
                 output["error"] = self.error_metadata(exc)
                 record_error(exc)
             except BaseException as exc:
                 output["error"] = {"type": type(exc).__name__, "message": "Generation interrupted"}
                 raise
+            finally:
+                checkpoint()
             # BaseException propagates to ExperimentRun.stop, preserving this slot
             # as failed and later models as not_processed.
         result["status"] = ("completed" if all(

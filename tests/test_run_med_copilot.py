@@ -135,6 +135,8 @@ def schema3_view(record):
                                     if stage != "assessment_plan"}
     for component in record["components"].values():
         for field, value in component["capture"].items():
+            if field in ("_keyword_query", "guideline_query", "guideline_question_attempts"):
+                continue  # Resume/audit captures have no historical schema-3 field.
             if field == "model_responses":
                 for stage, entries in value.items():
                     projected[field][stage].extend(deepcopy(entries))
@@ -715,7 +717,7 @@ class PipelineFixture:
         modules["scripts.collate_med_copilot_results"] = report_module
         modules["scripts.med_copilot_scoring"].PatientScorer = NoopPatientScorer
         modules["scripts.med_copilot_scoring"].parse_scoring_args = lambda argv=None: SimpleNamespace(
-            presenting_evidence_only=None)
+            presenting_evidence_only=None, resume=None)
         modules["med_copilot.upstream.evaluate_metrics"].Evaluator = SimpleNamespace(
             evaluate_metrics=evaluate_metrics)
         for name in ["graphrag", "graphrag.cli", "templates"]:
@@ -849,7 +851,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             dirs = self.run_dirs()
             self.assertEqual(len(dirs), 1, dirs)
             run_dir = dirs[0]
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (run_dir / name).exists()})
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (run_dir / name).exists()})
         run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
         self.assertTrue(text == "" or text.endswith("\n"))
@@ -4115,7 +4117,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(evaluation["settings"]["aggregation"], "per_patient_per_rank_per_field_singleton")
         self.assertEqual(fixture.input_path.read_bytes(), input_bytes)
         self.assertEqual(fixture.labels_path.read_bytes(), label_bytes)
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (run_dir / name).exists()})
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (run_dir / name).exists()})
 
     def test_default_filter_joins_shuffled_superset_labels_by_id_and_keeps_input_order(self):
         fixture = self.fixture
@@ -4570,7 +4572,7 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         [directory] = self.run_dirs()
         run = json.loads((directory / "run.json").read_text())
         records = [json.loads(line) for line in (directory / "results.jsonl").read_text().split("\n") if line]
-        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl") if (directory / name).exists()})
+        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (directory / name).exists()})
         for record in records:
             self.assertEqual(list(record), V4_RESULT_FIELDS if "components" in record else V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
             self.assertNotIn("assessment_plan", schema3_view(record)["model_responses"])
@@ -6201,6 +6203,510 @@ VARIANTS["custom_guidelines_variant"] = VariantSpec(
         for variant in later["variants"].values():
             self.assertTrue(all(slot["status"] == "not_processed" for slot in variant["assessment_plans"].values()))
         self.assertFalse((self.run_dirs()[0] / "results_summary.html").exists())
+
+
+class RunnerResumeTests(unittest.TestCase):
+    """Full-pipeline recovery with real persistence and mocked external services."""
+    load_runner = RunMedCopilotTests.load_runner
+    run_dirs = RunMedCopilotTests.run_dirs
+    label = MultiModelIntegrationTests.label
+    reply = MultiModelIntegrationTests.reply
+    write_config = MultiModelIntegrationTests.write_config
+
+    def setUp(self):
+        VariantIntegrationTests.setUp(self)
+
+    def saved(self):
+        [folder] = self.run_dirs()
+        return folder, json.loads((folder / "run.json").read_text()), [
+            json.loads(line) for line in (folder / "results.jsonl").read_text().splitlines() if line]
+
+    def invoke(self, runner, folder=None):
+        with self.fixture.runtime():
+            return runner["main"]([] if folder is None else ["--resume", str(folder)])
+
+    def interrupt_generation(self, runner, *, patients=("FIRST", "LATER")):
+        fixture = self.fixture
+        fixture.write_patients([dict(id=name, subjective=name, objective="O") for name in patients])
+        fixture.write_labels([self.label(name) for name in patients])
+        def interrupted(request):
+            if request["model"].startswith("groq/"):
+                raise KeyboardInterrupt()
+            return self.reply(request)
+        fixture.final_reply = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        return self.saved()
+
+    def test_resume_fills_only_missing_generations_and_keeps_completed_evidence_and_identity(self):
+        fixture, runner = self.fixture, self.load_runner()
+        folder, old, [first, later] = self.interrupt_generation(runner)
+        completed = deepcopy(first["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"])
+        completed_evidence = deepcopy(first["components"])
+        fixture.final_reply = self.reply
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        same_folder, new, rows = self.saved()
+        self.assertEqual(same_folder, folder)
+        self.assertEqual([r["id"] for r in rows], ["FIRST", "LATER"])
+        self.assertEqual(new["started_at"], old["started_at"])
+        self.assertEqual(new["git_commit"], old["git_commit"])
+        self.assertEqual(new["branch"], old["branch"])
+        self.assertEqual(new["input"], old["input"])
+        self.assertEqual(rows[0]["components"], completed_evidence)
+        slot = rows[0]["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+        for key in ("status", "assessment_plan_raw", "predictions", "model_responses"):
+            self.assertEqual(slot[key], completed[key])
+        self.assertEqual(rows[0]["variants"]["llm_only"]["assessment_plans"]["llama"]["error"], None)
+        self.assertEqual(sum(c[0] == "search" for c in fixture.retrieval_calls), 2)
+        self.assertEqual(len(fixture.graph_calls), 2)
+        finals = [c for c in fixture.calls if "/" in c["model"]]
+        self.assertEqual(len(finals), 17)  # 16 completed + one interrupted attempt.
+        self.assertTrue((folder / "results_summary.html").exists())
+        self.assertFalse((folder / ".patient_checkpoint.json").exists())
+        self.assertEqual(new["resumptions"][-1]["git_commit"], fixture.commit)
+        definition = new["resumptions"][-1]["component_definitions"]["patient_retrieval"]
+        self.assertEqual(definition["implementation_sha256"],
+                         hashlib.sha256(fixture.script.read_bytes()).hexdigest())
+
+    def test_completed_resume_performs_no_generation_retrieval_or_scoring_calls(self):
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, _, rows = self.saved()
+        before = deepcopy(rows)
+        f = self.fixture
+        counts = [len(v) for v in (f.calls, f.retrieval_calls, f.graph_calls, f.judge_calls,
+                                  f.scoring_calls, f.biolord_texts)]
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual(self.saved()[2], before)
+        self.assertEqual([len(v) for v in (f.calls, f.retrieval_calls, f.graph_calls, f.judge_calls,
+                                          f.scoring_calls, f.biolord_texts)], counts)
+
+    def test_scoring_resume_keeps_completed_fields_and_generations(self):
+        runner = self.load_runner()
+        f = self.fixture
+        def interrupted(ref, candidate, lang):
+            if len(f.scoring_calls) == 4:
+                raise KeyboardInterrupt()
+            return f.metric_values.copy()
+        f.scoring_reply = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, [row] = self.saved()
+        saved = deepcopy(row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"])
+        generation_count = len(f.calls)
+        f.scoring_reply = None
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual(len(f.calls), generation_count)
+        final = self.saved()[2][0]["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+        for field in ("condition", "plan"):
+            self.assertEqual(final["evaluation"][0][field], saved["evaluation"][0][field])
+        self.assertEqual(len(f.scoring_calls), 49)  # 48 successful fields + interrupted attempt.
+
+    def test_failed_guidelines_resume_reuses_exact_completed_question_query(self):
+        runner, f = self.load_runner(), self.fixture
+        f.failure = "graph"
+        self.invoke(runner)
+        folder, _, [row] = self.saved()
+        questions = [c for c in f.calls if c["model"] == "gpt-4o-mini"]
+        f.failure = None
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual([c for c in f.calls if c["model"] == "gpt-4o-mini"], questions)
+        self.assertEqual(sum(c[0] == "search" for c in f.retrieval_calls), 1)
+        self.assertEqual(self.saved()[2][0]["status"], "completed")
+
+    def test_invalid_resume_and_changed_inputs_leave_original_artifacts_untouched(self):
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, _, rows = self.saved()
+        original = {p.name: p.read_bytes() for p in folder.iterdir()}
+        f = self.fixture
+        for target, mutate in (
+                (f.input_path, lambda p: p.write_text(p.read_text() + "\n")),
+                (f.labels_path, lambda p: p.write_text(p.read_text() + "\n")),
+                (f.experiment_config, lambda p: p.write_text(p.read_text().replace("temperature: 1", "temperature: 0"))),
+                (f.model_config, lambda p: p.write_text(p.read_text().replace("model: gpt-4o-mini", "model: changed-model"))),
+                (f.prompt_module, lambda p: p.write_text(p.read_text() + "\n")),
+                (f.root / "med_copilot/data/patient_corpus/reference_patients.json",
+                 lambda p: p.write_text(p.read_text() + "\n"))):
+            with self.subTest(file=target.name):
+                before = target.read_bytes()
+                mutate(target)
+                try:
+                    current_runner = self.load_runner()
+                    with f.runtime():
+                        self.assertEqual(current_runner["main"](["--resume", str(folder)]), "resume_error")
+                    self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir()}, original)
+                    self.assertEqual(self.run_dirs(), [folder])
+                finally:
+                    target.write_bytes(before)
+        self.assertEqual(sum(c[0] == "search" for c in f.retrieval_calls), 1)
+
+    def test_resume_rejects_corrupt_duplicate_and_foreign_result_rows(self):
+        runner = self.load_runner()
+        self.invoke(runner)
+        folder, _, [row] = self.saved()
+        result = folder / "results.jsonl"
+        valid = result.read_bytes()
+        for bad in (valid + valid, b'{"id":\n' + valid,
+                    (json.dumps({**row, "id": "FOREIGN"}) + "\n").encode()):
+            with self.subTest(contents=bad[:30]):
+                result.write_bytes(bad)
+                original = {p.name: p.read_bytes() for p in folder.iterdir()}
+                self.assertEqual(self.invoke(runner, folder), "resume_error")
+                self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir()}, original)
+                self.assertEqual(self.run_dirs(), [folder])
+        result.write_bytes(valid)
+
+    def test_resume_allows_added_inactive_model_alias_and_retains_registry_provenance(self):
+        runner = self.load_runner()
+        self.invoke(runner)
+        folder, old, _ = self.saved()
+        f = self.fixture
+        data = yaml.safe_load(f.model_config.read_text())
+        data["models"]["unused"] = {"type": "chat", "model_provider": "openai", "model": "unused"}
+        f.model_config.write_text(yaml.safe_dump(data, sort_keys=False))
+        self.assertEqual(self.invoke(self.load_runner(), folder), "completed")
+        self.assertEqual(self.saved()[1]["assessment_plan_models"], old["assessment_plan_models"])
+
+    def test_resume_after_reranking_interruption_reuses_completed_keyword_request(self):
+        runner, f = self.load_runner(), self.fixture
+        f.failure, f.error = "reranking", KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, _ = self.saved()
+        self.assertEqual(len(f.keyword_calls), 1)
+        f.failure = None
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual(len(f.keyword_calls), 1)
+
+    def test_resume_fills_missing_correctness_provenance_and_records_current_judge_state(self):
+        runner = self.load_runner()
+        self.invoke(runner)
+        folder, metadata, _ = self.saved()
+        metadata["evaluation"].pop("correctness")
+        (folder / "run.json").write_text(json.dumps(metadata))
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        updated = self.saved()[1]
+        self.assertIn("correctness", updated["evaluation"])
+        self.assertIn("correctness", updated["resumptions"][-1])
+        self.assertEqual(updated["input"], metadata["input"])
+
+    def test_cancelling_resume_preserves_old_run_exactly(self):
+        runner = self.load_runner()
+        folder, _, _ = self.interrupt_generation(runner)
+        original = {p.name: p.read_bytes() for p in folder.iterdir()}
+        self.fixture.confirm_input.return_value = "n"
+        self.assertEqual(self.invoke(runner, folder), "cancelled")
+        self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir()}, original)
+        self.assertEqual(self.run_dirs(), [folder])
+
+    def test_checkpoint_recovers_hard_stop_before_patient_row_was_appended(self):
+        runner, f = self.load_runner(), self.fixture
+        snapshots = []
+        def interrupted(request):
+            if request["model"].startswith("groq/"):
+                [folder] = self.run_dirs()
+                snapshots.append((folder / ".patient_checkpoint.json").read_bytes())
+                raise KeyboardInterrupt()
+            return self.reply(request)
+        f.final_reply = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, _ = self.saved()
+        (folder / ".patient_checkpoint.json").write_bytes(snapshots[0])
+        (folder / "results.jsonl").write_text("")  # Simulate an abrupt kill, no graceful stop.
+        f.final_reply = self.reply
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual(sum(c[0] == "search" for c in f.retrieval_calls), 1)
+        self.assertEqual(len(f.graph_calls), 1)
+        self.assertEqual(len([c for c in f.calls if "/" in c["model"]]), 9)
+
+    def test_second_interruption_preserves_existing_later_patient_work(self):
+        runner, f = self.load_runner(), self.fixture
+        f.write_patients([dict(id=name, subjective=name, objective="O") for name in ("FIRST", "LATER")])
+        f.write_labels([self.label(name) for name in ("FIRST", "LATER")])
+        self.invoke(runner)
+        folder, _, rows = self.saved()
+        later = deepcopy(rows[1])
+        rows[0]["variants"]["llm_only"]["assessment_plans"]["llama"].update(
+            status="failed_incomplete", evaluation=None)
+        rows[0]["variants"]["llm_only"]["status"] = "failed_incomplete"
+        rows[0]["status"] = "failed_incomplete"
+        (folder / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        f.final_reply = lambda request: (_ for _ in ()).throw(KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner, folder)
+        self.assertEqual(self.saved()[2][1], later)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "Abrupt process-exit regression requires fork")
+    def test_two_abrupt_process_exits_preserve_later_checkpoint_while_retrying_earlier_patient(self):
+        f = self.fixture
+        f.write_patients([dict(id=name, subjective=name, objective="O") for name in ("FIRST", "LATER")])
+        f.write_labels([self.label(name) for name in ("FIRST", "LATER")])
+        failed = set()
+        def initial_reply(request):
+            text = request["messages"][-1]["content"]
+            if request["model"].startswith("groq/"):
+                if "FIRST" in text and not failed:
+                    failed.add(True)
+                    raise RuntimeError("transient earlier model failure")
+                if "LATER" in text:
+                    os._exit(71)
+            return self.reply(request)
+        def abrupt_run(runner, folder, expected_exit):
+            child = os.fork()
+            if child == 0:
+                try:
+                    self.invoke(runner, folder)
+                finally:
+                    os._exit(99)  # A failure to reach the intended crash point fails the parent test.
+            _, status = os.waitpid(child, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), expected_exit)
+        f.final_reply = initial_reply
+        abrupt_run(self.load_runner(), None, 71)
+        folder, _, rows = self.saved()
+        self.assertEqual([row["id"] for row in rows], ["FIRST"])
+        first_checkpoint = json.loads((folder / ".patient_checkpoint.json").read_text())
+        self.assertEqual(first_checkpoint["id"], "LATER")
+        saved_later_slot = first_checkpoint["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+        self.assertEqual(saved_later_slot["status"], "completed")
+        f.final_reply = self.reply
+        runner = self.load_runner()
+        run_class = runner["ExperimentRun"]
+        original_checkpoint = run_class.checkpoint
+        def exit_after_earlier_retry_checkpoint(run):
+            original_checkpoint(run)
+            if run.current and run.current["id"] == "FIRST":
+                slot = run.current["variants"]["llm_only"]["assessment_plans"]["llama"]
+                if slot["status"] == "completed":
+                    os._exit(72)
+        with patch.object(run_class, "checkpoint", new=exit_after_earlier_retry_checkpoint):
+            abrupt_run(runner, folder, 72)
+        self.assertEqual(json.loads((folder / ".patient_checkpoint.json").read_text())["id"], "FIRST")
+        self.assertEqual(self.invoke(self.load_runner(), folder), "completed")
+        # Child processes leave only files behind; these lists count third-attempt work.
+        self.assertEqual(f.retrieval_calls, [])
+        self.assertEqual(f.graph_calls, [])
+        self.assertEqual(len(f.calls), 7)  # Only the seven unsaved LATER generations remain.
+        _, _, final_rows = self.saved()
+        self.assertEqual([row["id"] for row in final_rows], ["FIRST", "LATER"])
+        self.assertEqual(final_rows[1]["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+                         ["model_responses"], saved_later_slot["model_responses"])
+
+    def test_unusable_guideline_reply_fails_locally_and_healthy_resume_regenerates_questions(self):
+        f, runner = self.fixture, self.load_runner()
+        f.completion_responses["questions"] = SimpleNamespace(
+            choices=[SimpleNamespace(finish_reason="content_filter",
+                                     message=SimpleNamespace(content=None, refusal="refused"))])
+        self.assertEqual(self.invoke(runner), "completed_with_errors")
+        folder, _, [row] = self.saved()
+        component = row["components"]["guidelines"]
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertNotIn("guideline_query", component["capture"])
+        self.assertEqual(component["capture"]["guideline_question_attempts"][-1]["refusal"], "refused")
+        independent = deepcopy(row["variants"]["llm_only"]["assessment_plans"])
+        self.assertEqual(f.graph_calls, [])
+        f.completion_responses.pop("questions")
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        final = self.saved()[2][0]
+        self.assertEqual(final["variants"]["llm_only"]["assessment_plans"], independent)
+        self.assertEqual(len(final["components"]["guidelines"]["capture"]["guideline_question_attempts"]), 2)
+        self.assertEqual(len(f.graph_calls), 1)
+        self.assertEqual(sum(call[0] == "search" for call in f.retrieval_calls), 1)
+        self.assertEqual(len([call for call in f.calls if call["model"] == "gpt-4o-mini"]), 2)
+
+    def test_changed_plan_judge_alias_is_rejected_before_confirmation_or_artifact_changes(self):
+        runner = self.load_runner()
+        folder, _, _ = self.interrupt_generation(runner)
+        before = {path.name: path.read_bytes() for path in folder.iterdir()}
+        counts = [len(self.fixture.calls), len(self.fixture.judge_calls), self.fixture.confirm_input.call_count]
+        self.experiment["plan_judge"] = "replacement_judge"
+        self.write_config()
+        self.assertEqual(self.invoke(self.load_runner(), folder), "resume_error")
+        self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
+        self.assertEqual([len(self.fixture.calls), len(self.fixture.judge_calls),
+                          self.fixture.confirm_input.call_count], counts)
+        self.assertIn("ollama_qwen2_5_14b", self.fixture.stderr.getvalue())
+        self.experiment.pop("plan_judge")  # Restore the recorded default, including YAML source identity.
+        self.write_config()
+        self.fixture.final_reply = self.reply
+        self.assertEqual(self.invoke(self.load_runner(), folder), "completed")
+
+    def test_any_experiment_yaml_edit_blocks_resume_even_when_effective_settings_match(self):
+        runner, f = self.load_runner(), self.fixture
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, metadata, _ = self.saved()
+        original = f.experiment_config.read_bytes()
+        artifacts = {path.name: path.read_bytes() for path in folder.iterdir()}
+        counts = [len(f.calls), len(f.judge_calls), f.confirm_input.call_count]
+        explicit_default = yaml.safe_load(original)
+        explicit_default["plan_judge"] = metadata["experiment"]["plan_judge"]
+        for modified in (original + b"# changed comment\n", original + b" \n",
+                         yaml.safe_dump(explicit_default, sort_keys=False).encode()):
+            with self.subTest(source=modified[-60:]):
+                try:
+                    f.experiment_config.write_bytes(modified)
+                    with f.runtime():
+                        current = runner["ExperimentConfig"](f.experiment_config).metadata(f.root)
+                    self.assertEqual({key: value for key, value in current.items() if key != "config_sha256"},
+                                     {key: value for key, value in metadata["experiment"].items()
+                                      if key != "config_sha256"})
+                    self.assertEqual(self.invoke(runner, folder), "resume_error")
+                    self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, artifacts)
+                    self.assertEqual([len(f.calls), len(f.judge_calls), f.confirm_input.call_count], counts)
+                finally:
+                    f.experiment_config.write_bytes(original)
+        self.assertEqual(self.invoke(runner, folder), "completed")
+
+    def test_same_judge_alias_allows_registry_model_endpoint_and_output_changes_on_resume(self):
+        f = self.fixture
+        alias = "ollama_qwen2_5_14b"
+        original = {"type": "chat", "model_provider": "openai", "model": "original-judge",
+                    "api_base": "http://localhost:11434/v1", "output_mode": "json_object"}
+        self.config["models"][alias] = deepcopy(original)
+        self.write_config()
+        def interrupt_judging(request):
+            if len(f.judge_calls) == 2:
+                raise KeyboardInterrupt()
+        f.judge_reply = interrupt_judging
+        with self.assertRaises(KeyboardInterrupt):
+            self.invoke(self.load_runner())
+        folder, _, _ = self.saved()
+        cache = folder / "judge_responses.jsonl"
+        cached_lines = cache.read_bytes()
+        self.assertEqual(len(cached_lines.splitlines()), 1)
+        old_count = len(f.judge_calls)
+        self.config["models"][alias].update(model="replacement-judge", api_base="http://other-server/v1",
+                                            output_mode="prompt")
+        self.write_config()
+        f.judge_reply = None
+        self.assertEqual(self.invoke(self.load_runner(), folder), "completed")
+        self.assertTrue(cache.read_bytes().startswith(cached_lines))
+        self.assertEqual({call["model"] for call in f.judge_calls[old_count:]}, {"openai/replacement-judge"})
+        self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["plan"]["judge_model"], alias)
+
+    def test_configured_plan_judge_can_reuse_a_generating_model_and_records_every_setting(self):
+        self.experiment["plan_judge"] = "llama"
+        self.write_config()
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        _, metadata, _ = self.saved()
+        self.assertEqual(metadata["experiment"]["plan_judge"], "llama")
+        self.assertEqual(metadata["evaluation"]["correctness"]["plan"]["judge_model"], "llama")
+        self.assertEqual(len(self.fixture.model_configs), 2)  # No duplicate judge model initialization.
+        self.assertEqual({call["model"] for call in self.fixture.judge_calls}, {"groq/llama-3.3-70b-versatile"})
+        for key in yaml.safe_load(self.fixture.experiment_config.read_text()):
+            self.assertIn(key, metadata["experiment"])
+
+    def test_configured_separate_judge_is_loaded_and_recorded(self):
+        self.experiment["plan_judge"] = "custom_judge"
+        self.config["models"]["custom_judge"] = {
+            "type": "chat", "model_provider": "openai", "model": "custom-judge-model",
+            "api_base": "http://localhost:11434/v1", "output_mode": "json_object"}
+        self.write_config()
+        self.assertEqual(self.invoke(self.load_runner()), "completed")
+        _, metadata, _ = self.saved()
+        self.assertEqual(metadata["experiment"]["plan_judge"], "custom_judge")
+        plan = metadata["evaluation"]["correctness"]["plan"]
+        self.assertEqual(plan["judge_model"], "custom_judge")
+        self.assertEqual(plan["judge_model_config"]["selected_models"], ["custom_judge"])
+        self.assertEqual(len(self.fixture.model_configs), 3)
+        self.assertEqual({call["model"] for call in self.fixture.judge_calls}, {"openai/custom-judge-model"})
+        self.assertEqual(metadata["assessment_plan_models"]["selected_models"], self.experiment["selected_models"])
+
+    def test_unknown_configured_judge_keeps_generations_and_diagnosis_scoring(self):
+        self.experiment["plan_judge"] = "missing_judge"
+        self.write_config()
+        self.assertEqual(self.invoke(self.load_runner()), "completed")
+        _, metadata, [row] = self.saved()
+        self.assertEqual(metadata["experiment"]["plan_judge"], "missing_judge")
+        self.assertFalse(metadata["evaluation"]["correctness"]["plan"]["judge_available"])
+        self.assertEqual(self.fixture.judge_calls, [])
+        slot = row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+        self.assertEqual(slot["status"], "completed")
+        self.assertEqual(slot["evaluation"][0]["diagnosis_correctness"]["status"], "scored")
+        self.assertEqual(slot["evaluation"][0]["plan_correctness"]["reason"], "judge_unavailable")
+
+    def test_result_fsync_failure_preserves_recovery_snapshot_for_restart(self):
+        runner, f = self.load_runner(), self.fixture
+        original_fsync = os.fsync
+        failed = []
+        def fail_result_flush(descriptor):
+            paths = list(f.output.glob("*/results.jsonl"))
+            if paths and not failed and os.fstat(descriptor).st_ino == paths[0].stat().st_ino:
+                failed.append(True)
+                raise OSError("result flush failed")
+            return original_fsync(descriptor)
+        with patch.object(os, "fsync", side_effect=fail_result_flush), self.assertRaises(OSError):
+            self.invoke(runner)
+        folder, metadata, _ = self.saved()
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertTrue((folder / ".patient_checkpoint.json").exists())
+        # Model a machine losing the unflushed append. The checkpoint must suffice.
+        (folder / "results.jsonl").write_text("")
+        before = [len(f.calls), len(f.retrieval_calls), len(f.graph_calls), len(f.scoring_calls)]
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual([len(f.calls), len(f.retrieval_calls), len(f.graph_calls), len(f.scoring_calls)], before)
+
+    def test_local_parse_interruption_resumes_received_reply_without_another_api_call(self):
+        runner, f = self.load_runner(), self.fixture
+        models_namespace = runner["AssessmentPlanModels"].generate.__globals__
+        with patch.dict(models_namespace, parse_condition_plan=Mock(side_effect=KeyboardInterrupt())), \
+                self.assertRaises(KeyboardInterrupt):
+            self.invoke(runner)
+        folder, _, [row] = self.saved()
+        saved = deepcopy(row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"])
+        self.assertTrue(saved["_generation_reply_complete"])
+        self.assertEqual(len(saved["model_responses"]), 1)
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        final = self.saved()[2][0]["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
+        self.assertEqual(final["assessment_plan_raw"], saved["assessment_plan_raw"])
+        self.assertEqual(final["model_responses"], saved["model_responses"])
+        self.assertEqual(final["status"], "completed")
+        self.assertNotIn("_generation_reply_complete", final)
+        self.assertEqual(len([call for call in f.calls if "/" in call["model"]]), 8)
+        self.assertEqual(len(f.graph_calls), 1)
+
+    def test_unserializable_inflight_patient_keeps_all_checkpointed_generations(self):
+        runner, f = self.load_runner(), self.fixture
+        original_process = runner["process_patient"]
+        def bad_capture(patient, result, *args):
+            original_process(patient, result, *args)
+            result["components"]["guidelines"]["capture"]["graphrag_context"] = object()
+        with patch.dict(runner["main"].__globals__, process_patient=bad_capture), \
+                self.assertRaises(runner["RunMetadataError"]):
+            self.invoke(runner)
+        folder, metadata, rows = self.saved()
+        self.assertEqual(metadata["status"], "failed_incomplete")
+        self.assertEqual(rows, [])
+        self.assertTrue((folder / ".patient_checkpoint.json").exists())
+        counts = [len(f.calls), len(f.retrieval_calls), len(f.graph_calls)]
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual([len(f.calls), len(f.retrieval_calls), len(f.graph_calls)], counts)
+        self.assertEqual(self.saved()[2][0]["status"], "completed")
+
+    def test_corrupt_saved_execution_fields_are_rejected_before_requests_or_writes(self):
+        runner, f = self.load_runner(), self.fixture
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, _, [row] = self.saved()
+        path = folder / "results.jsonl"
+        original = path.read_bytes()
+        counts = [len(f.calls), len(f.retrieval_calls), len(f.graph_calls), len(f.scoring_calls)]
+        for mutate in (
+                lambda saved: saved["variants"]["llm_only"].pop("assessment_plan_prompts"),
+                lambda saved: saved["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"].pop("predictions"),
+                lambda saved: saved["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"].update(predictions=True),
+                lambda saved: saved["components"]["guidelines"]["capture"]["model_responses"].update(
+                    guideline_questions=None)):
+            invalid = deepcopy(row)
+            mutate(invalid)
+            path.write_text(json.dumps(invalid) + "\n")
+            artifacts = {p.name: p.read_bytes() for p in folder.iterdir()}
+            self.assertEqual(self.invoke(runner, folder), "resume_error")
+            self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir()}, artifacts)
+            self.assertEqual([len(f.calls), len(f.retrieval_calls), len(f.graph_calls), len(f.scoring_calls)], counts)
+        path.write_bytes(original)
+
 
 if __name__ == "__main__":
     unittest.main()

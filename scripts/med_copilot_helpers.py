@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from textwrap import indent
 
 import yaml
@@ -18,11 +19,12 @@ import yaml
 # Run naming, run.json, and error recording are standard-library only so the
 # runner can use them before its heavy imports; re-exported for callers.
 from scripts.med_copilot_run_file import (
-    PACIFIC, RUN_FILE, RUN_STAGES, RunFile, RunMetadataError, create_run_dir, error_scope,
+    PACIFIC, RUN_FILE, RUN_STAGES, RunFile, RunMetadataError, checkpoint, create_run_dir, error_scope,
     make_run_name, pacific_now, pacific_time, path_safe_branch, pipeline_stage, record_error,
-    redact_secrets, write_run_json,
+    redact_secrets, write_run_json, _fsync_directory,
 )
 from scripts.med_copilot_variants import COMPONENTS, VARIANTS
+from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
 
 
 RESULTS_FILE = "results.jsonl"
@@ -401,7 +403,7 @@ def capture_component(component, *, error_metadata=None, corpus_records=(), retr
         raise ValueError("Component was already attempted; shared components must be scheduled once")
     previous = []
     extractor = getattr(retriever, "keyword_extractor", None)
-    for target, names in ((extractor, ("capture_result",)),
+    for target, names in ((extractor, ("capture_result", "reuse_capture")),
                           (retriever, ("ranked_candidates", "on_ranking", "alpha")),
                           (reranker, ("ranked_candidates", "on_ranking"))):
         if target is not None:
@@ -410,6 +412,8 @@ def capture_component(component, *, error_metadata=None, corpus_records=(), retr
     component["status"] = "failed_incomplete"
     try:
         prepare_patient_output_capture(component["capture"], corpus_records, retriever, reranker)
+        if extractor is not None:
+            extractor.reuse_capture = "_keyword_query" in component["capture"]
         yield component["capture"]
         expected = COMPONENTS[component["component"]].outputs
         if any(name not in component["outputs"] or not isinstance(component["outputs"][name], str)
@@ -417,6 +421,8 @@ def capture_component(component, *, error_metadata=None, corpus_records=(), retr
             raise ValueError("Component did not publish its declared string outputs")
         component["status"] = "completed"
     except Exception as exc:
+        if isinstance(exc, RunMetadataError):
+            raise
         error = error_metadata(exc) if error_metadata else {"type": type(exc).__name__, "message": str(exc)}
         error["message"] = redact_secrets(error["message"], [os.environ.get(key) for key in credential_names])
         component["error"] = error
@@ -431,6 +437,7 @@ def capture_component(component, *, error_metadata=None, corpus_records=(), retr
                 setattr(target, name, value)
             elif hasattr(target, name):
                 delattr(target, name)
+        checkpoint()
 
 
 def component_needed(experiment, component_id, result):
@@ -447,6 +454,9 @@ def prepare_variant_messages(experiment, variant_id, s_o, result, output, *, tem
                              error_metadata=None):
     """Resolve component bindings and save exact final messages, or fail this variant."""
     try:
+        if all(slot["status"] == "completed" for slot in output["assessment_plans"].values()):
+            output.update(status="completed", error=None)
+            return None
         variant = VARIANTS[variant_id]
         references = experiment.variant_components[variant_id]
         unavailable = [name for name, instance in references.items()
@@ -455,13 +465,17 @@ def prepare_variant_messages(experiment, variant_id, s_o, result, output, *, tem
             output.update(status="failed_incomplete", error={
                 "type": "EvidenceUnavailable", "message": "Required evidence failed: " + ", ".join(unavailable)})
             return None
-        values = {field: result["components"][references[component]]["outputs"][name]
-                  for field, (component, name) in variant.bindings.items()}
-        prompt = templates[variant.prompt_key].format(conditions=s_o, **values)
-        messages = [{"role": "system", "content": "You are a clinical expert."},
-                    {"role": "user", "content": prompt}]
+        saved = output["assessment_plan_prompts"]
+        if saved is None:
+            values = {field: result["components"][references[component]]["outputs"][name]
+                      for field, (component, name) in variant.bindings.items()}
+            prompt = templates[variant.prompt_key].format(conditions=s_o, **values)
+            saved = {"system": "You are a clinical expert.", "user": prompt}
+        messages = [{"role": role, "content": saved[role]} for role in ("system", "user")]
+        prompt = saved["user"]
         output["assessment_plan_prompts"] = {"system": messages[0]["content"], "user": prompt}
         output["status"] = "failed_incomplete"
+        output["error"] = None
         return messages
     except Exception as exc:
         output.update(status="failed_incomplete", error=(error_metadata(exc) if error_metadata else
@@ -492,6 +506,63 @@ def parse_guideline_questions(response):
     if not isinstance(questions, list) or not all(isinstance(q, str) for q in questions):
         return None
     return questions
+
+
+def _guideline_question_reply(client, settings, messages, capture):
+    response = client.chat.completions.create(
+        model=settings["question_model"], response_format={"type": "json_object"}, messages=messages)
+    capture["model_responses"]["guideline_questions"].append(model_response_metadata(response))
+    choices = getattr(response, "choices", None)
+    choice = choices[0] if choices else None
+    message = getattr(choice, "message", None)
+    content, refusal = getattr(message, "content", None), getattr(message, "refusal", None)
+    finish = getattr(choice, "finish_reason", None)
+    capture.setdefault("guideline_question_attempts", []).append({
+        "content": content if isinstance(content, str) else None,
+        "refusal": refusal if isinstance(refusal, str) else None,
+        "finish_reason": finish if isinstance(finish, str) else None,
+    })
+    if choice is None or message is None:
+        raise ValueError("Guideline question generation returned no message")
+    if refusal:
+        raise ValueError("Guideline question generation was refused")
+    if finish not in (None, "stop"):
+        raise ValueError("Guideline question generation did not complete")
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Guideline question generation returned empty or non-text content")
+    return content
+
+
+def prepare_guideline_query(client, settings, s_o, capture, *, template):
+    """Generate and checkpoint the exact screened query, or reuse its saved value.
+
+    The raw query is authoritative even when the optional parsed questions are
+    unavailable. Its presence marks a completed step before GraphRAG starts.
+    """
+    cached = capture.get("guideline_query")
+    if isinstance(cached, str) and cached.strip():
+        return cached
+    capture.pop("guideline_query", None)
+    with pipeline_stage("guideline_question_generation"):
+        messages = [
+            {"role": "system", "content": "You are a clinical expert."},
+            {"role": "user", "content": template.format(conditions=s_o)},
+        ]
+        query = _guideline_question_reply(client, settings, messages, capture)
+        capture["guideline_question_screen"] = None
+        found = find_diagnosis_terms(query, s_o)
+        if found:
+            screen = {"first_reply": query, "first_terms": found}
+            query = _guideline_question_reply(client, settings, messages, capture)
+            found = find_diagnosis_terms(query, s_o)
+            screen.update(retry_reply=query, retry_terms=found)
+            if found:
+                query = remove_diagnosis_terms(query, found)
+            capture["guideline_question_screen"] = screen
+        capture["guideline_questions"] = parse_guideline_questions(query)
+        capture["guideline_query"] = query
+        checkpoint()
+        return query
 
 
 def _unique_json_object(pairs):
@@ -597,6 +668,7 @@ class ExperimentRun:
 
     def __init__(self, run_file, patient_ids, model_ids=None, variant_ids=None,
                  component_plan=None, variant_components=None):
+        patient_ids = list(patient_ids)
         self.file = run_file
         self.unsaved = list(patient_ids)
         self.statuses = []
@@ -605,14 +677,238 @@ class ExperimentRun:
         self.variant_ids = None if variant_ids is None else tuple(variant_ids)
         self.component_plan = deepcopy(component_plan)
         self.variant_components = deepcopy(variant_components)
+        self.current = None
+        self._records = None
+        self._patient_ids = list(patient_ids)
+        self._recovered_checkpoint = False
+
+    @classmethod
+    def resume(cls, directory, *, root, experiment, evaluation, models, variants):
+        """Validate and read a schema-4 run without changing any saved artifacts."""
+        directory, root = Path(directory).resolve(), Path(root).resolve()
+        def read_json(text):
+            return json.loads(text, object_pairs_hook=_unique_json_object,
+                              parse_constant=_reject_json_constant, parse_float=_finite_json_float)
+        metadata = read_json((directory / RUN_FILE).read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict) or metadata.get("schema_version") != 4:
+            raise ValueError("Resume requires a schema-4 run with saved experiment metadata")
+        def same(name, saved, current):
+            if saved != current:
+                raise ValueError(f"Cannot resume: {name} changed since the run")
+        saved_experiment = metadata.get("experiment") or {}
+        if "plan_judge" in saved_experiment and saved_experiment["plan_judge"] != experiment.get("plan_judge"):
+            raise ValueError("Cannot resume: set plan_judge to "
+                             f"{saved_experiment['plan_judge']!r} in experiments/configs/experiment.yaml")
+        same("experiment", metadata.get("experiment"), experiment)
+        same("model configuration",
+             {k: v for k, v in (metadata.get("assessment_plan_models") or {}).items() if k != "config_sha256"},
+             {k: v for k, v in models.items() if k != "config_sha256"})
+        saved_evaluation = metadata.get("evaluation") or {}
+        for key, value in evaluation.items():
+            same(f"evaluation.{key}", saved_evaluation.get(key), value)
+        for name, current in variants.items():
+            saved = deepcopy(metadata.get(name))
+            current = deepcopy(current)
+            # Adding resume changes the runner implementation itself. Preserve its
+            # original hash and record the new code identity in resumptions instead.
+            if name == "component_definitions":
+                for definitions in (saved, current):
+                    if isinstance(definitions, dict):
+                        for spec in definitions.values():
+                            if spec.get("implementation") == "scripts/run_med_copilot.py":
+                                spec.pop("implementation_sha256", None)
+            same(name, saved, current)
+        try:
+            same("patient input", metadata["input"]["sha256"],
+                 sha256_file(root / metadata["input"]["file"]))
+            same("labels", saved_evaluation["labels_sha256"],
+                 sha256_file(root / saved_evaluation["labels_path"]))
+            ids = saved_evaluation["selected_patient_ids"]
+            if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids):
+                raise ValueError("Invalid saved patient cohort")
+            for resource, spec in (metadata.get("reference_data") or {}).items():
+                if spec is None:
+                    continue
+                if resource == "patient_retrieval":
+                    entries = [("corpus", root / spec["corpus_file"])]
+                    if spec["artifacts_directory"] is not None:
+                        entries.extend((name, root / spec["artifacts_directory"] / name)
+                                       for name in ("embeddings.npy", "index.faiss", "matching.json"))
+                elif resource == "guidelines":
+                    path = root / spec["directory"]
+                    entries = guideline_resource_files(path, path / "settings.yaml", path / "output")
+                else:
+                    raise ValueError(f"Unknown saved resource: {resource}")
+                same(resource, spec["sha256"], sha256_bundle(entries) if entries is not None else None)
+            plan = ((saved_evaluation.get("correctness") or {}).get("plan") or {})
+            if plan.get("rubric_file"):
+                same("plan rubric", plan["rubric_sha256"], sha256_file(root / plan["rubric_file"]))
+        except (KeyError, TypeError) as exc:
+            raise ValueError("Incomplete resume metadata") from exc
+        component_plan = {key: {field: spec[field] for field in ("component", "settings")}
+                          for key, spec in variants["component_definitions"].items()}
+        references = {key: spec["components"] for key, spec in variants["variant_definitions"].items()}
+        run = cls(RunFile(directory, metadata), ids, experiment["selected_models"],
+                  experiment["selected_variants"], component_plan, references)
+        run._resume_provenance = deepcopy({"assessment_plan_models": models, **variants})
+        run._records = {}
+        def accept(row):
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str) or row["id"] not in ids:
+                raise ValueError("Result names an unknown patient")
+            if row.get("status") not in (*PATIENT_STATUSES, None):
+                raise ValueError("Invalid saved patient status")
+            fresh = new_patient_result(row["id"], model_ids=run.model_ids, variant_ids=run.variant_ids,
+                                       component_plan=component_plan, variant_components=references)
+            if (not isinstance(row.get("components"), dict) or not isinstance(row.get("variants"), dict)
+                    or set(row["components"]) != set(fresh["components"])
+                    or set(row["variants"]) != set(run.variant_ids)):
+                raise ValueError("Saved patient components or variants do not match the run")
+            for key, component in row["components"].items():
+                expected = fresh["components"][key]
+                if (not isinstance(component, dict) or component.get("component") != expected["component"]
+                        or component.get("settings") != expected["settings"]
+                        or component.get("status") not in PATIENT_STATUSES
+                        or not isinstance(component.get("capture"), dict)
+                        or not isinstance(component.get("outputs"), dict)):
+                    raise ValueError("Invalid saved evidence component")
+                responses = component["capture"].get("model_responses")
+                if (not isinstance(responses, dict)
+                        or not set(expected["capture"]["model_responses"]) <= set(responses)
+                        or any(not isinstance(items, list) or any(not isinstance(item, dict) for item in items)
+                               for items in responses.values())):
+                    raise ValueError("Invalid saved evidence response capture")
+                if component["status"] == "completed" and any(
+                        not isinstance(component["outputs"].get(output), str)
+                        for output in COMPONENTS[component["component"]].outputs):
+                    raise ValueError("Completed evidence is missing its published outputs")
+            for key, variant in row["variants"].items():
+                if (not isinstance(variant, dict) or variant.get("components") != references[key]
+                        or not set(fresh["variants"][key]) <= set(variant)
+                        or not isinstance(variant.get("assessment_plans"), dict)
+                        or set(variant.get("assessment_plans", {})) != set(run.model_ids)
+                        or variant.get("status") not in PATIENT_STATUSES):
+                    raise ValueError("Invalid saved variant")
+                for slot in variant["assessment_plans"].values():
+                    if (not isinstance(slot, dict) or not set(new_model_result()) <= set(slot)
+                            or slot.get("status") not in PATIENT_STATUSES
+                            or not isinstance(slot.get("model_responses"), list)
+                            or any(not isinstance(item, dict) for item in slot["model_responses"])
+                            or slot["predictions"] is not None and (
+                                not isinstance(slot["predictions"], list) or len(slot["predictions"]) != 3
+                                or any(not isinstance(item, dict) for item in slot["predictions"]))
+                            or slot["evaluation"] is not None and not isinstance(slot["evaluation"], list)
+                            or "_generation_reply_complete" in slot
+                            and type(slot["_generation_reply_complete"]) is not bool):
+                        raise ValueError("Invalid saved generation state")
+                prompt = variant.get("assessment_plan_prompts")
+                if prompt is not None and (not isinstance(prompt, dict)
+                        or set(prompt) != {"system", "user"}
+                        or not all(isinstance(text, str) for text in prompt.values())):
+                    raise ValueError("Invalid saved generation prompt")
+            return row
+        data = (directory / RESULTS_FILE).read_bytes()
+        lines = data.split(b"\n")
+        for index, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                row = read_json(line.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                if index == len(lines) - 1 and not data.endswith(b"\n"):
+                    break  # A torn last append is recoverable from the atomic checkpoint.
+                raise ValueError("Malformed saved results.jsonl") from None
+            row = accept(row)
+            if row["id"] in run._records:
+                raise ValueError("Duplicate saved patient result")
+            run._records[row["id"]] = row
+        checkpoint_path = directory / ".patient_checkpoint.json"
+        if checkpoint_path.exists():
+            row = read_json(checkpoint_path.read_text(encoding="utf-8"))
+            base_hash = row.pop("_base_results_sha256", None) if isinstance(row, dict) else None
+            row = accept(row)
+            if (base_hash == hashlib.sha256(data).hexdigest()
+                    or row["id"] not in run._records
+                    or base_hash is None and run._records[row["id"]].get("status") != "completed"):
+                run._records[row["id"]] = row
+                run._recovered_checkpoint = True
+        return run
+
+    def needs_resource(self, name):
+        """Whether unfinished evidence still requires this shared runtime resource."""
+        if self._records is None:
+            return True
+        for patient_id in self._patient_ids:
+            record = self._records.get(patient_id)
+            for key, spec in self.component_plan.items():
+                if name in COMPONENTS[spec["component"]].resources and (
+                        record is None or record["components"][key]["status"] != "completed"):
+                    return True
+        return False
+
+    def patient_result(self, patient_id):
+        """Select the saved patient or a fresh record, rearming only failed evidence."""
+        if patient_id not in self.unsaved:
+            raise ValueError("Patient is not awaiting execution")
+        if self._recovered_checkpoint:
+            # Validation/cancellation stay read-only. Before execution can replace
+            # the sole checkpoint, durably commit every recovered patient first.
+            self._write_records(self._records)
+            self._recovered_checkpoint = False
+        current = deepcopy((self._records or {}).get(patient_id))
+        if current is None:
+            current = new_patient_result(patient_id, model_ids=self.model_ids, variant_ids=self.variant_ids,
+                                         component_plan=self.component_plan, variant_components=self.variant_components)
+        for component in current.get("components", {}).values():
+            if component["status"] != "completed":
+                component.update(status="not_processed", error=None)
+        self.current = current
+        self._checkpoint_base = sha256_file(self.run_dir / RESULTS_FILE)
+        return current
+
+    def _atomic_write(self, destination, text):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.run_dir,
+                                             prefix=".checkpoint-", delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+            _fsync_directory(self.run_dir)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def _write_records(self, records):
+        self._atomic_write(self.run_dir / RESULTS_FILE, "".join(
+            json.dumps(records[key], ensure_ascii=False, allow_nan=False) + "\n"
+            for key in self._patient_ids if key in records))
+
+    def checkpoint(self):
+        """Atomically save the in-flight patient after each completed unit of work."""
+        if self.current is not None:
+            snapshot = {**self.current, "status": "failed_incomplete",
+                        "_base_results_sha256": self._checkpoint_base}
+            self._atomic_write(self.run_dir / ".patient_checkpoint.json",
+                               json.dumps(snapshot, ensure_ascii=False, allow_nan=False) + "\n")
 
     @classmethod
     def start(cls, output_root, *, root, input_path, started_at, branch, commit, patient_ids,
               model_ids=None, variant_ids=None, component_plan=None, variant_components=None,
-              run_file=None, redact=None):
+              run_file=None, redact=None, resume=None):
         """Start a run, adopting an already named run_file (and its started_at) if given."""
         model_ids = None if model_ids is None else tuple(model_ids)
         variant_ids = None if variant_ids is None else tuple(variant_ids)
+        if resume is not None:
+            if run_file is not None:
+                run_file.discard()
+            resume.file.redact = redact or resume.file.redact
+            resume.update(status="running", finished_at=None,
+                          resumptions=[*resume.metadata.get("resumptions", []), {
+                              "started_at": started_at.isoformat(), "branch": branch, "git_commit": commit,
+                              **resume._resume_provenance}])
+            return resume
         if run_file is None:
             run_file = RunFile.begin(output_root, started_at=started_at,
                                      run_name=make_run_name(started_at, input_path, branch))
@@ -647,6 +943,19 @@ class ExperimentRun:
         return self.file.redact
 
     def update(self, **fields):
+        if self._records is not None:
+            correctness = (fields.get("evaluation") or {}).get("correctness")
+            if correctness is not None:
+                original = self.metadata["evaluation"]
+                fields["evaluation"] = {**original, "correctness": original.get("correctness", correctness)}
+                fields["resumptions"] = deepcopy(self.metadata.get("resumptions", []))
+                if fields["resumptions"]:
+                    fields["resumptions"][-1]["correctness"] = correctness
+            for name in ("experiment", "evaluation", "assessment_plan_models", "reference_data",
+                         "variant_definitions", "component_definitions", "registry_provenance", "prompt_provenance"):
+                if name in fields and self.metadata.get(name) is not None:
+                    if name != "evaluation" or correctness is None:
+                        fields.pop(name)  # Keep the original run's provenance.
         self.file.update(**fields)
 
     def add_error(self, entry):
@@ -663,14 +972,26 @@ class ExperimentRun:
             raise RuntimeError("results.jsonl is no longer writable after an earlier failure")
         line = json.dumps(result, ensure_ascii=False, allow_nan=False) + "\n"
         try:
-            with (self.run_dir / RESULTS_FILE).open("a", encoding="utf-8") as results:
-                results.write(line)
+            if self._records is not None:
+                records = {**self._records, result["id"]: result}
+                self._write_records(records)
+                self._records = records
+            else:
+                with (self.run_dir / RESULTS_FILE).open("a", encoding="utf-8") as results:
+                    results.write(line)
+                    results.flush()
+                    os.fsync(results.fileno())
+                _fsync_directory(self.run_dir)
         except BaseException:
             # A failed append may leave a partial line; never append after it.
             self.results_writable = False
             raise
         self.unsaved.remove(result["id"])
         self.statuses.append(result["status"])
+        if self.current is not None and self.current["id"] == result["id"]:
+            (self.run_dir / ".patient_checkpoint.json").unlink(missing_ok=True)
+            _fsync_directory(self.run_dir)
+            self.current = None
 
     def finish(self, finished_at):
         """Finalize a run whose every patient has a saved result."""
@@ -688,21 +1009,29 @@ class ExperimentRun:
         """
         if current is not None and current["id"] in self.unsaved and self.results_writable:
             current = {**current, "status": "failed_incomplete"}
-            for record in (current, new_patient_result(
-                    current["id"], "failed_incomplete", self.model_ids, self.variant_ids,
-                    component_plan=self.component_plan, variant_components=self.variant_components)):
+            fallback = deepcopy((self._records or {}).get(current["id"])) or new_patient_result(
+                current["id"], "failed_incomplete", self.model_ids, self.variant_ids,
+                component_plan=self.component_plan, variant_components=self.variant_components)
+            fallback["status"] = "failed_incomplete"
+            for record in (current, fallback):
                 try:
                     self.save_result(record)
                     break
                 except Exception:
                     if not self.results_writable:
                         break
+                    if (self.run_dir / ".patient_checkpoint.json").exists():
+                        # Never replace a durable snapshot with an empty fallback
+                        # when the in-memory patient cannot be serialized.
+                        self.results_writable = False
+                        break
         for patient_id in list(self.unsaved):
             if not self.results_writable:
                 break
             try:
-                self.save_result(new_patient_result(patient_id, "not_processed", self.model_ids, self.variant_ids,
-                                 component_plan=self.component_plan, variant_components=self.variant_components))
+                self.save_result(deepcopy((self._records or {}).get(patient_id)) or new_patient_result(
+                    patient_id, "not_processed", self.model_ids, self.variant_ids,
+                    component_plan=self.component_plan, variant_components=self.variant_components))
             except Exception:
                 break
         self.file.stop(finished_at)
@@ -720,11 +1049,21 @@ class JSONKeywordExtractor:
         self.client = client
         self.model = model
         self.capture_result = None
+        self.reuse_capture = False
 
     @pipeline_stage("keyword_extraction")
     def extract(self, text):
         capture = self.capture_result
+        if self.reuse_capture and capture is not None and capture.get("_keyword_query") == text:
+            try:
+                keywords = self._terms(capture.get("keyword_extraction_raw"))
+            except ValueError:
+                pass
+            else:
+                if capture.get("retrieval_keywords") == keywords:
+                    return list(keywords)
         if capture is not None:
+            capture.pop("_keyword_query", None)
             capture["keyword_extraction_raw"] = None
             capture["retrieval_keywords"] = None
         prompt = f"""
@@ -765,7 +1104,16 @@ Text:
             raise ValueError(
                 f"Keyword extraction did not complete (finish_reason={choice.finish_reason})"
             )
-        content = choice.message.content
+        keywords = self._terms(choice.message.content)
+        if capture is not None:
+            capture["retrieval_keywords"] = list(keywords)
+            capture["_keyword_query"] = text
+            checkpoint()
+        return keywords
+
+    @staticmethod
+    def _terms(content):
+        """Validate and normalize a successful raw extraction before storing or reusing it."""
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Keyword extraction returned empty or non-text content")
         try:
@@ -781,6 +1129,4 @@ Text:
                 raise ValueError(f"Keyword extraction {category} must be a list of strings")
             keywords.extend(term.strip() for term in terms)
         keywords = list(dict.fromkeys(keywords))
-        if capture is not None:
-            capture["retrieval_keywords"] = list(keywords)
         return keywords

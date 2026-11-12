@@ -4,7 +4,7 @@ PRELIMINARY: this is the provisional midterm metric, to be revised after group
 review. The diagnosis score is a BioLORD-2023 clinical concept similarity score: the
 embedding cosine between the labeled condition and the generated diagnosis, clipped
 to 0-1 (no LLM judge). It is not an accuracy or a probability. Plan correctness
-applies the treatment-plan rubric with one local judge model (PLAN_JUDGE_MODEL):
+applies the treatment-plan rubric with the experiment's configured Plan judge:
 one scalar 0/0.5/1 call per reference action plus one call counting unsupported
 extra actions (0.5 deducted each). The judge sees only the labeled condition, the
 patient's S/O, and the reference and generated actions; the generator, evidence
@@ -26,14 +26,11 @@ import re
 
 from med_copilot.prompts.correctness_judges import PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE
 from scripts.med_copilot_helpers import model_response_metadata, repo_path
-from scripts.med_copilot_run_file import pacific_now, record_error
+from scripts.med_copilot_run_file import RunMetadataError, pacific_now, record_error, _fsync_directory
 
 
 METRIC_STATUS = "preliminary single-model midterm metric"
 JUDGE_FILE = "judge_responses.jsonl"
-# The one local Plan judge for the preliminary metric: an alias in condition_plan_models.yaml.
-# It is loaded separately when it is not one of the selected generating models.
-PLAN_JUDGE_MODEL = "ollama_qwen2_5_14b"
 # A judge that fails the balanced validation sample (correct vs off-target vs placeholder
 # Plans) is marked EXPERIMENTAL_UNVALIDATED: its scores are saved per prediction for review,
 # excluded from every reported aggregate, and never presented as accuracy.
@@ -58,6 +55,10 @@ DIAGNOSIS_ABBREVIATIONS = {
     "CHF": "congestive heart failure",
     "COPD": "chronic obstructive pulmonary disease",
 }
+DIAGNOSIS_NORMALIZATION_RULE = (
+    "before encoding, both texts expand each abbreviation as a whole word in any "
+    "case, then trim and collapse whitespace; originals are kept as reference/"
+    "generated and the encoded texts as normalized_reference/normalized_generated")
 _ABBREVIATION = re.compile(r"\b(" + "|".join(DIAGNOSIS_ABBREVIATIONS) + r")\b", re.IGNORECASE)
 CREDIT_VALUES = (0, 0.5, 1)
 DEDUCTION_PER_UNSUPPORTED_EXTRA = 0.5
@@ -258,6 +259,7 @@ class JudgeCache:
             handle.write(line)
             handle.flush()
             os.fsync(handle.fileno())
+        _fsync_directory(self.path.parent)
         if entry.get("valid") is True:
             self.entries[entry["key"]] = entry
 
@@ -272,17 +274,53 @@ class CorrectnessJudges:
     request, and message); judge requests are asked again when evaluation resumes.
     """
 
-    def __init__(self, complete, model_ids, cache_path, *, similarity=None, plan_judge=None,
+    def __init__(self, complete, model_ids, cache_path, *, plan_judge, similarity=None,
                  generator_models=None, judge_model_config=None):
         self.complete = complete
         self.model_ids = tuple(model_ids)
-        self.plan_judge = plan_judge or PLAN_JUDGE_MODEL
+        if not isinstance(plan_judge, str) or not plan_judge.strip():
+            raise ValueError("plan_judge must be a nonempty registry alias")
+        self.plan_judge = plan_judge
         self.generator_models = None if generator_models is None else tuple(generator_models)
         self.judge_model_config = judge_model_config
         self.similarity = similarity if similarity is not None else BioLordSimilarity()
         self.cache = JudgeCache(cache_path)
         self.calls = 0
         self.cache_hits = 0
+
+    @staticmethod
+    def validate_resume(metadata, root, *, plan_judge):
+        """Reject changed scoring semantics before opening models, caches, or output files."""
+        correctness = (metadata.get("evaluation") or {}).get("correctness")
+        if correctness is None:
+            return
+        expected = {
+            "diagnosis": {
+                "model": BIOLORD_MODEL,
+                "model_revision": BIOLORD_REVISION,
+                "normalization": {"rule": DIAGNOSIS_NORMALIZATION_RULE,
+                                  "abbreviations": dict(DIAGNOSIS_ABBREVIATIONS)},
+            },
+            "plan": {
+                "judge_model": plan_judge,
+                "judge_temperature": JUDGE_TEMPERATURE,
+                "rubric_file": repo_path(PLAN_RUBRIC, root),
+                "rubric_sha256": hashlib.sha256(PLAN_RUBRIC.read_bytes()).hexdigest(),
+                "action_prompt_template_sha256": hashlib.sha256(PLAN_ACTION_JUDGE_TEMPLATE.encode()).hexdigest(),
+                "extras_prompt_template_sha256": hashlib.sha256(PLAN_EXTRAS_JUDGE_TEMPLATE.encode()).hexdigest(),
+                "credit_values": list(CREDIT_VALUES),
+                "deduction_per_unsupported_extra": DEDUCTION_PER_UNSUPPORTED_EXTRA,
+            },
+            "rank_weighting": {
+                "formula": "1 / rank",
+                "weights": {str(rank): rank_weight(rank) for rank in (1, 2, 3)},
+            },
+        }
+        for group, settings in expected.items():
+            saved = correctness.get(group) if isinstance(correctness, dict) else None
+            for key, value in settings.items():
+                if not isinstance(saved, dict) or saved.get(key) != value:
+                    raise ValueError(f"Cannot resume: correctness.{group}.{key} changed since the run")
 
     def metadata(self, root):
         return {
@@ -298,9 +336,7 @@ class CorrectnessJudges:
                 "model_revision": BIOLORD_REVISION,
                 "compared": ["labeled condition (underscores replaced by spaces)", "generated diagnosis"],
                 "normalization": {
-                    "rule": ("before encoding, both texts expand each abbreviation as a whole word in any "
-                             "case, then trim and collapse whitespace; originals are kept as reference/"
-                             "generated and the encoded texts as normalized_reference/normalized_generated"),
+                    "rule": DIAGNOSIS_NORMALIZATION_RULE,
                     "abbreviations": dict(DIAGNOSIS_ABBREVIATIONS),
                 },
                 "score": "cosine similarity clipped to [0, 1]; the raw cosine is kept as cosine_similarity",
@@ -406,14 +442,21 @@ class CorrectnessJudges:
             parsed = parse(entry["content"])
         except JudgeResponseError as exc:
             entry["error"] = {"type": type(exc).__name__, "message": str(exc)}
-            self.cache.add(entry)
+            self._save_response(entry)
             record.update(status="invalid_response", error=entry["error"])
             self._record(JudgeResponseError(f"{label} replied invalidly: {exc}"), exc)
             return record
         entry["valid"] = True
-        self.cache.add(entry)
+        self._save_response(entry)
         record.update(status="scored", **parsed)
         return record
+
+    def _save_response(self, entry):
+        """Stop the run if a completed judge response cannot be saved durably."""
+        try:
+            self.cache.add(entry)
+        except OSError as exc:
+            raise RunMetadataError("Could not save judge response") from exc
 
     @staticmethod
     def _record(error, cause):

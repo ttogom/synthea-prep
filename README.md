@@ -45,11 +45,39 @@ python tests/test_run_med_copilot.py
 python scripts/run_med_copilot.py
 # Include patients without presenting evidence as well:
 python scripts/run_med_copilot.py --presenting-evidence-only false
+# Continue an interrupted run, including missing generations and scores:
+python scripts/run_med_copilot.py --resume experiments/output/<run-directory>
 # Finish an interrupted evaluation without repeating completed judge calls:
 python scripts/resume_med_copilot_evaluation.py experiments/output/<run directory>
 ```
 
-Besides the six text metrics, each prediction gets a **preliminary single-model midterm** correctness metric (to be revised after group review). The diagnosis score is a BioLORD-2023 **clinical concept similarity score** (embedding cosine clipped to 0–1; not an accuracy or probability) between the labeled condition and the generated diagnosis (`FremyCompany/BioLORD-2023`, about 420 MB, downloaded from Hugging Face on first use). Abbreviations HTN, CHF, and COPD are expanded before encoding. Plan correctness uses one local judge, `ollama_qwen2_5_14b` (`PLAN_JUDGE_MODEL` in `scripts/med_copilot_judges.py`; run `ollama pull qwen2.5:14b`, about 9 GB, and allow roughly 10 GB of free memory): one 0/0.5/1 call per reference action plus one call counting unsupported extra actions. The judge is loaded separately from the generating models; if it cannot be loaded, Plans are marked `judge_unavailable` and diagnoses are still scored. No OpenAI judge requests are made. Both scores are reported unweighted and weighted by 1 / rank, never combined. One patient makes at most 48 × (reference actions + 1) local judge requests; identical requests are sent once. See the preliminary correctness section of [med_copilot/docs/output_schema.md](med_copilot/docs/output_schema.md).
+`--resume` continues a schema-4 run in its existing directory. It preserves
+completed evidence, exact final prompts, completed model responses, successful
+scores, and valid judge calls; failed or unstarted work is retried. Keep the
+experiment settings, selected model definitions, input/label files, prompts,
+scoring rules, and reference resources unchanged. Any edit to `experiment.yaml`,
+including comments or whitespace, blocks a resume. Plan-judge selection is
+checked by the `plan_judge` alias; judge registry definitions are retained for
+provenance without a separate comparison. Adding an unused model alias is
+allowed. If the original run used a cohort CLI override, supply the same
+override when resuming. Validation and cancellation leave the existing run
+untouched. Original provenance is retained; `run.json.resumptions` records each
+resume's code identity, current source/model fingerprints, and correctness configuration.
+
+An atomic `.patient_checkpoint.json` saves the current patient between completed
+stages, model calls, and score fields, and is removed after the patient row is
+flushed to disk. File replacements and checkpoint removal also sync their
+directory entries. A recovered checkpoint is committed before execution can
+replace it with another patient's checkpoint, preserving work across repeated
+abrupt exits. Keyword extraction and completed, nonblank screened guideline
+queries are also reused when their evidence component needs retrying. Refused,
+empty, or incomplete question replies are audited and requested again on resume.
+A request interrupted before its
+response was durably saved may run again. Do not run multiple processes against
+the same output directory. The separate evaluation-resume command intentionally
+recalculates text metrics and BioLORD scores without generating new predictions.
+
+Besides the six text metrics, each prediction gets a **preliminary single-model midterm** correctness metric (to be revised after group review). The diagnosis score is a BioLORD-2023 **clinical concept similarity score** (embedding cosine clipped to 0–1; not an accuracy or probability) between the labeled condition and the generated diagnosis (`FremyCompany/BioLORD-2023`, about 420 MB, downloaded from Hugging Face on first use). Abbreviations HTN, CHF, and COPD are expanded before encoding. Plan correctness uses one local judge, `ollama_qwen2_5_14b` (selected by `plan_judge` in `experiments/configs/experiment.yaml`; run `ollama pull qwen2.5:14b`, about 9 GB, and allow roughly 10 GB of free memory): one 0/0.5/1 call per reference action plus one call counting unsupported extra actions. The judge is loaded separately from the generating models; if it cannot be loaded, Plans are marked `judge_unavailable` and diagnoses are still scored. No OpenAI judge requests are made. Both scores are reported unweighted and weighted by 1 / rank, never combined. One patient makes at most 48 × (reference actions + 1) local judge requests; identical requests are sent once. See the preliminary correctness section of [med_copilot/docs/output_schema.md](med_copilot/docs/output_schema.md).
 
 The runner automatically loads `.env` from the repository root before initializing model clients, even when launched from another directory. [`.env.example`](.env.example) lists the supported credential-variable names. Set `OPENAI_API_KEY` there; `GRAPHRAG_API_KEY=${OPENAI_API_KEY}` reuses it for guidelines, or you can supply a separate key. Add other provider keys only when selecting models that need them. Existing exported environment variables take precedence over `.env`. The local `.env` file is gitignored; keep actual tokens out of the model YAML.
 

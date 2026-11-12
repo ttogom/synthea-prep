@@ -19,6 +19,7 @@ from scripts.med_copilot_variants import COMPONENTS, VARIANTS, ComponentSpec, Va
 
 # Defaults preserve older experiment files; the shipped YAML spells out each field.
 PIPELINE_DEFAULTS = {
+    "plan_judge": "ollama_qwen2_5_14b",  # Historical default for configs that omit the setting.
     "guidelines": "med_copilot/data/guidelines",
     "experiment_output": "experiments/output",
     "patient_corpus": "med_copilot/data/patient_corpus/reference_patients.json",
@@ -97,7 +98,7 @@ class ExperimentConfig:
             if type(data[field]) is not bool:
                 raise ValueError(f"{field} must be a boolean")
         for field in ("guideline_question_model", "patient_embedding_model", "patient_keyword_model",
-                      "patient_reranker_model", "guideline_response_type"):
+                      "patient_reranker_model", "guideline_response_type", "plan_judge"):
             if not isinstance(data[field], str) or not data[field].strip():
                 raise ValueError(f"{field} must be a nonempty string")
         for field in ("patient_retrieval_top_k", "patient_rerank_top_k"):

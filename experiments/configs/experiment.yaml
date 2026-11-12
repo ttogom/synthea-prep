@@ -40,6 +40,7 @@ selected_models:  # Model aliases, in execution order; tokens stay in .env/the e
   - ollama_healthcare
   - ollama_llama3
   - ollama_gemma2_2b
+plan_judge: ollama_qwen2_5_14b  # Registry alias for Plan correctness; reused if also a generator.
 temperature: 1  # Shared temperature for final model calls.
 max_retries: 3  # Shared upstream retry setting for final model calls.
 

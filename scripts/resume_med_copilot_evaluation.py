@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 load_dotenv(ROOT / ".env", override=False)
 
 from scripts.collate_med_copilot_results import generate_report
-from scripts import med_copilot_judges
+from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.med_copilot_scoring import PatientScorer, resume_evaluation
@@ -69,7 +69,7 @@ def _prepare(run_dir, root, models_factory):
         root / models_metadata["config_file"], models_metadata["selected_models"],
         temperature=experiment["temperature"], max_retries=experiment["max_retries"],
     )
-    judge = med_copilot_judges.PLAN_JUDGE_MODEL
+    judge = experiment.get("plan_judge", PIPELINE_DEFAULTS["plan_judge"])
     # The preliminary Plan judge is loaded on its own unless it is also a generator. If it
     # cannot be loaded, Plans are marked judge_unavailable and diagnoses are still scored.
     judge_models = models

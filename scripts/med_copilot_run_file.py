@@ -65,24 +65,36 @@ def make_run_name(started_at, input_path, branch):
     return f"{_timestamp(started_at)}__{Path(input_path).stem}__{path_safe_branch(branch)}"
 
 
+def _fsync_directory(directory):
+    """Persist created, replaced, or removed directory entries before proceeding."""
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _make_dirs(path):
     """Create path and any missing parents; return those created, deepest first."""
     path = Path(path).resolve()
     missing = [directory for directory in (path, *path.parents) if not directory.exists()]
     path.mkdir(parents=True, exist_ok=True)
+    for directory in reversed(missing):
+        _fsync_directory(directory.parent)
     return missing
 
 
 def create_run_dir(output_root, run_name):
     """Create a new run directory, never reusing an existing one."""
     output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
+    _make_dirs(output_root)
     run_dir = output_root / run_name
     try:
         run_dir.mkdir()
     except FileExistsError as exc:
         raise FileExistsError(errno.EEXIST, "Run directory already exists; refusing to overwrite",
                               str(run_dir)) from exc
+    _fsync_directory(output_root)
     return run_dir
 
 
@@ -91,9 +103,12 @@ def write_run_json(run_dir, metadata):
     run_dir = Path(run_dir)
     temporary = run_dir / f".{RUN_FILE}.tmp"
     try:
-        temporary.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, allow_nan=False)
-                             + "\n", encoding="utf-8")
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(metadata, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temporary, run_dir / RUN_FILE)
+        _fsync_directory(run_dir)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -104,6 +119,17 @@ def write_run_json(run_dir, metadata):
 
 class RunMetadataError(RuntimeError):
     """run.json could not be updated, so the run cannot continue safely."""
+
+
+def checkpoint():
+    """Persist the active patient's completed work, if a runner owns this scope."""
+    run = (_ERROR_SCOPE.get() or {}).get("run")
+    save = getattr(run, "checkpoint", None)
+    if save is not None:
+        try:
+            save()
+        except (OSError, ValueError, TypeError) as exc:
+            raise RunMetadataError("Could not save patient checkpoint") from exc
 
 
 def redact_secrets(text, secrets):
@@ -225,6 +251,7 @@ class RunFile:
         if run_name is None:
             run_dir = Path(tempfile.mkdtemp(prefix=f"{_timestamp(started_at)}__starting-",
                                             dir=output_root))
+            _fsync_directory(output_root)
         else:
             run_dir = create_run_dir(output_root, run_name)
         run = cls(run_dir, {

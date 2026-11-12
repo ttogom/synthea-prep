@@ -7,6 +7,7 @@ BioLordSanityOrderingTests uses the pinned BioLORD-2023 when it is already cache
 """
 
 import json
+from copy import deepcopy
 from pathlib import Path
 import re
 import sys
@@ -20,18 +21,20 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from med_copilot.prompts.correctness_judges import (
     PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE, PLAN_JUDGE_TEMPLATE,
 )
 from scripts.med_copilot_judges import (
     BIOLORD_MODEL, BIOLORD_REVISION, DIAGNOSIS_ABBREVIATIONS, EXPERIMENTAL_UNVALIDATED, JUDGE_FILE,
-    METRIC_STATUS, PLAN_JUDGE_MODEL, PLAN_VALIDATION_STATUS, BioLordSimilarity,
+    METRIC_STATUS, PLAN_VALIDATION_STATUS, BioLordSimilarity,
     CorrectnessJudges, JudgeCache, diagnosis_entry, diagnosis_score, normalize_diagnosis, parse_action_judgement,
     parse_extras_judgement,
     plan_action_messages, plan_entry, plan_extras_messages, rank_weight, unavailable_plan_reason,
 )
-from scripts.med_copilot_run_file import RunFile, error_scope, pipeline_stage
+from scripts.med_copilot_run_file import RunFile, RunMetadataError, error_scope, pipeline_stage
 
+DEFAULT_PLAN_JUDGE = PIPELINE_DEFAULTS["plan_judge"]
 MODELS = ("gpt_4o_mini", "ollama_healthcare", "ollama_llama3", "ollama_gemma2_2b")
 JUDGE = MODELS[2]
 LABEL_CONDITION = "acute viral pharyngitis"
@@ -438,6 +441,24 @@ class MalformedJudgementTests(JudgeTestCase):
 
 
 class JudgeFailureTests(JudgeTestCase):
+    def test_judge_cache_write_failure_is_fatal_for_valid_and_malformed_responses(self):
+        for content in ('{"credit": 1}', 'not json'):
+            with self.subTest(content=content):
+                judges, fake, _ = self.judges(lambda messages: content)
+                run = RunFile.begin(self.directory / "output")
+                original = (run.run_dir / "run.json").read_bytes()
+                entry = plan_entry(1, ["Culture", "Rest"], ["Culture"])
+                failure = OSError("judge response disk full")
+                with patch.object(judges.cache, "add", side_effect=failure), \
+                        error_scope(run, patient_id="patient-a"), pipeline_stage("scoring"):
+                    with self.assertRaisesRegex(RunMetadataError, "Could not save judge response") as caught:
+                        judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+                self.assertIs(caught.exception.__cause__, failure)
+                self.assertEqual(len(fake.requests), 1)  # No later action or extras requests.
+                self.assertEqual((run.run_dir / "run.json").read_bytes(), original)
+                self.assertEqual(judges.cache.entries, {})
+                self.assertFalse(self.cache.exists())
+
     def test_failed_call_is_saved_under_the_scoring_stage_and_other_calls_are_kept(self):
         run = RunFile.begin(self.directory / "output")
         base = replies()
@@ -538,8 +559,105 @@ class ResumptionTests(JudgeTestCase):
         self.assertEqual(len(fake.requests), 2)
         self.assertEqual(judges.cache_hits, 2)
 
+    def test_judge_cache_directory_flush_failure_is_fatal_before_reply_can_be_reused(self):
+        judges, fake, _ = self.judges()
+        with patch("scripts.med_copilot_judges._fsync_directory", side_effect=OSError("directory flush failed")), \
+                self.assertRaises(RunMetadataError):
+            judges.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(judges.cache.entries, {})
+        self.assertEqual(len(self.cache.read_text().splitlines()), 1)  # Kept for recovery/auditing.
+
+
+class ResumeValidationTests(JudgeTestCase):
+    def saved(self):
+        judges = CorrectnessJudges(None, [DEFAULT_PLAN_JUDGE], self.cache, plan_judge=DEFAULT_PLAN_JUDGE)
+        return {"evaluation": {"correctness": judges.metadata(ROOT)}}
+
+    def test_identical_semantics_validate_without_models_cache_calls_or_writes(self):
+        metadata = self.saved()
+        before = deepcopy(metadata)
+        with patch("scripts.med_copilot_judges.JudgeCache", side_effect=AssertionError("cache touched")), \
+                patch("scripts.med_copilot_judges.BioLordSimilarity", side_effect=AssertionError("model touched")):
+            CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+        self.assertEqual(metadata, before)
+        self.assertFalse(self.cache.exists())
+
+    def test_changed_scoring_semantics_are_rejected(self):
+        original = self.saved()
+        cases = [
+            (("diagnosis", "model"), "different-encoder"),
+            (("diagnosis", "model_revision"), "different-revision"),
+            (("diagnosis", "normalization", "abbreviations"), {}),
+            (("diagnosis", "normalization", "rule"), "different rule"),
+            (("plan", "judge_model"), "different-judge"),
+            (("plan", "judge_temperature"), 1),
+            (("plan", "rubric_sha256"), "different-rubric"),
+            (("plan", "action_prompt_template_sha256"), "different-action-prompt"),
+            (("plan", "extras_prompt_template_sha256"), "different-extras-prompt"),
+            (("plan", "credit_values"), [0, 1]),
+            (("plan", "deduction_per_unsupported_extra"), 1),
+            (("rank_weighting", "formula"), "1 / rank squared"),
+            (("rank_weighting", "weights"), {"1": 1, "2": 0.25, "3": 1 / 9}),
+        ]
+        for path, value in cases:
+            with self.subTest(setting=".".join(path)):
+                metadata = deepcopy(original)
+                target = metadata["evaluation"]["correctness"]
+                for part in path[:-1]:
+                    target = target[part]
+                target[path[-1]] = value
+                with self.assertRaisesRegex(ValueError, "correctness"):
+                    CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+        self.assertFalse(self.cache.exists())
+
+    def test_availability_and_runtime_status_can_change_without_changing_scores(self):
+        metadata = self.saved()
+        correctness = metadata["evaluation"]["correctness"]
+        correctness.update(status="interrupted", selected_models=[])
+        correctness["plan"].update(judge_available=False, judge_model_config=None,
+                                   validation_status="unavailable", reporting="unavailable")
+        CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+
+    def test_legacy_without_correctness_and_malformed_correctness_metadata(self):
+        for metadata in ({}, {"evaluation": {}}, {"evaluation": {"correctness": None}}):
+            with self.subTest(metadata=metadata):
+                CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+        for correctness in ([], "invalid", {}, {"diagnosis": None}):
+            with self.subTest(correctness=correctness), self.assertRaisesRegex(ValueError, "correctness"):
+                CorrectnessJudges.validate_resume({"evaluation": {"correctness": correctness}}, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+
+    def test_changed_runtime_prompt_is_rejected_against_saved_prompt_hash(self):
+        metadata = self.saved()
+        with patch("scripts.med_copilot_judges.PLAN_ACTION_JUDGE_TEMPLATE", "changed prompt"):
+            with self.assertRaisesRegex(ValueError, "correctness"):
+                CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+
+    def test_resume_checks_the_selected_judge_alias(self):
+        metadata = self.saved()
+        metadata["evaluation"]["correctness"]["plan"]["judge_model"] = "custom_judge"
+        CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge="custom_judge")
+        with self.assertRaisesRegex(ValueError, "judge_model"):
+            CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+
+    def test_same_alias_does_not_require_matching_effective_judge_configuration(self):
+        for config in (None, {"models": {DEFAULT_PLAN_JUDGE: {"model": "old model", "api_base": "old endpoint"}}}):
+            with self.subTest(config=config):
+                metadata = self.saved()
+                metadata["evaluation"]["correctness"]["plan"]["judge_model_config"] = config
+                CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
+        self.assertFalse(self.cache.exists())
+
 
 class MetadataTests(JudgeTestCase):
+    def test_judge_alias_is_explicit_and_invalid_values_fail_before_opening_cache(self):
+        with self.assertRaises(TypeError):
+            CorrectnessJudges(None, MODELS, self.cache)
+        for value in (None, "", " \n", False, 1, [], {}):
+            with self.subTest(alias=value), self.assertRaisesRegex(ValueError, "plan_judge"):
+                CorrectnessJudges(None, MODELS, self.cache, plan_judge=value)
+        self.assertFalse(self.cache.exists())
+
     def test_metadata_labels_the_preliminary_metric_and_records_models_prompts_and_weights(self):
         metadata = self.judges()[0].metadata(ROOT)
         self.assertEqual(metadata["status"], METRIC_STATUS)
@@ -580,16 +698,16 @@ class MetadataTests(JudgeTestCase):
             self.assertIn("excluded from reported aggregate results", plan["reporting"])
             self.assertIn("not an accuracy measure", plan["reporting"])
 
-    def test_default_plan_judge_is_a_local_registry_model_that_passed_validation(self):
+    def test_shipped_plan_judge_is_a_local_registry_model_that_passed_validation(self):
         registry = yaml.safe_load((ROOT / "experiments/configs/condition_plan_models.yaml").read_text())["models"]
-        self.assertEqual(PLAN_JUDGE_MODEL, "ollama_qwen2_5_14b")
-        self.assertEqual(registry[PLAN_JUDGE_MODEL]["model"], "qwen2.5:14b")
-        self.assertEqual(registry[PLAN_JUDGE_MODEL]["api_base"], "http://localhost:11434/v1")
-        self.assertNotIn("api_key_env", registry[PLAN_JUDGE_MODEL])
+        self.assertEqual(DEFAULT_PLAN_JUDGE, "ollama_qwen2_5_14b")
+        self.assertEqual(registry[DEFAULT_PLAN_JUDGE]["model"], "qwen2.5:14b")
+        self.assertEqual(registry[DEFAULT_PLAN_JUDGE]["api_base"], "http://localhost:11434/v1")
+        self.assertNotIn("api_key_env", registry[DEFAULT_PLAN_JUDGE])
         self.assertEqual(PLAN_VALIDATION_STATUS, "passed_balanced_sample")
         judges = CorrectnessJudges(FakeJudge(replies()), MODELS, self.cache,
-                                   similarity=BioLordSimilarity(FakeEncoder()))
-        self.assertEqual(judges.plan_judge, PLAN_JUDGE_MODEL)
+                                   similarity=BioLordSimilarity(FakeEncoder()), plan_judge=DEFAULT_PLAN_JUDGE)
+        self.assertEqual(judges.plan_judge, DEFAULT_PLAN_JUDGE)
 
 
 if __name__ == "__main__":

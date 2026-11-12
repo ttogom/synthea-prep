@@ -69,11 +69,14 @@ other fields remain `null` or empty provider lists until available.
 | --- | --- |
 | `selected_reference_patient` | Minimal identity of the selected reference, or `null`. |
 | `guideline_questions` | Parsed `Key Questions` list from the screened reply, or `null`; that screened raw reply is the GraphRAG query. |
+| `guideline_query` | Exact nonblank screened query text, present only after a completed, non-refused question reply. Reused when guideline retrieval resumes, even if the parsed questions are unavailable. Legacy null or blank values are regenerated. |
+| `guideline_question_attempts` | Question replies in request order as `{content, refusal, finish_reason}`, including failed or refused replies. Failed attempts do not publish a reusable query. |
 | `guideline_question_screen` | `null` when the first question reply names no study diagnosis absent from the S/O. Otherwise `{first_reply, first_terms, retry_reply, retry_terms}`: the flagged reply and names, then the single retry and any names it still contains, which are replaced with "these findings" before GraphRAG. |
 | `guideline_evidence` | Raw GraphRAG answer, including a non-string JSON value if returned; `null` also represents an unavailable capture. |
 | `graphrag_context` | Returned context tables serialized as `{columns, index, data}`, or `null`. |
 | `keyword_extraction_raw` | Exact keyword API content captured before validation, including malformed JSON and whitespace. |
 | `retrieval_keywords` | Successfully extracted terms flattened in symptoms/diagnoses/medications order, trimmed and deduplicated in first-occurrence order. `[]` is valid; `null` means unavailable. |
+| `_keyword_query` | Exact input text for a completed keyword extraction. Together with validated raw content and terms, permits reuse during an evidence retry. |
 | `retrieved_patient_ids` | Retained hybrid ranking with minimal identities and unrounded `embedding_score`, `keyword_score`, and `hybrid_score`. |
 | `reranked_patient_ids` | Retained cross-encoder ranking with those scores plus `rerank_score`; ties preserve hybrid order. |
 | `model_responses` | Independent provider metadata lists for evidence-stage responses. |
@@ -109,6 +112,7 @@ Each `variants[variant_id].assessment_plans[model_id]` retains:
 | `error` | Generation error `{type, message}` with credential values redacted, or `null`. |
 | `predictions` | Exactly three ranked `{condition, plan}` pairs, or `null` when structurally invalid/unavailable. |
 | `assessment_plan_raw` | Exact consumed reply content, including malformed content, or `null`. |
+| `_generation_reply_complete` | Optional recovery marker: a non-refused, non-truncated provider reply was received, but local parsing did not finish. Resume reparses `assessment_plan_raw` without another provider request. Removed after parsing succeeds. |
 | `model_responses` | Response metadata for this final model. |
 | `evaluation` | Three ordered `{rank, condition, plan}` score entries, or `null` before scoring. |
 
@@ -448,7 +452,7 @@ and per-call BERTScore model initialization remain upstream behavior.
 > replaces the earlier three-judge panel design. The diagnosis score is a
 > BioLORD-2023 clinical concept similarity score (no LLM judge; not an accuracy
 > or probability), and Plan correctness uses
-> one local judge model, `PLAN_JUDGE_MODEL` in `scripts/med_copilot_judges.py`
+> one judge model, selected by `plan_judge` in `experiments/configs/experiment.yaml`
 > (currently `ollama_qwen2_5_14b`, Ollama tag `qwen2.5:14b`, about 9 GB). The
 > judge is a registry model, not a generating model; the runner and resume
 > command load it on their own. If it cannot be loaded, every Plan entry is
@@ -574,7 +578,41 @@ Correctness scoring only runs for model slots whose generation `completed`.
 Records from runs without it have no correctness keys, and the report shows
 them as not recorded rather than zero.
 
-**Auditing and resumption.** Every completed judge call is appended (and
+**Full runner resumption.** `python scripts/run_med_copilot.py --resume RUN_DIRECTORY`
+continues a schema-4 run using the same experiment settings and verified inputs,
+models, prompts, scoring definitions, and reference resources. Completed
+components, generations (including completed malformed replies), and successful
+score fields are preserved. Failed or unstarted work is retried. A restored
+variant uses its exact saved messages. Patient rows are replaced atomically in
+original cohort order, without duplicates; a repeated interruption retains
+already-saved later patients too. `run.json.experiment.plan_judge` records the
+configured registry alias, including its default for older configs. Every edit
+to `experiment.yaml` blocks a resume: both its effective settings and exact
+source SHA-256 must match. The Plan judge is checked by alias; its effective
+registry configuration remains in provenance without a separate judge check.
+Unrelated model-registry changes are allowed. Cancelled or rejected resumes leave the run
+untouched. Original metadata remains; `run.json.resumptions` adds resume time,
+branch, commit, current model/source fingerprints, and correctness metadata. Missing original
+correctness metadata is filled when judging is first attached.
+
+`.patient_checkpoint.json` is an atomic, flushed snapshot of the current patient
+after each completed component, keyword request, screened query, model call, or
+score field. It carries `_base_results_sha256` so a newer checkpoint can override
+its original row while a stale snapshot cannot roll back a subsequently saved
+row. Recovered checkpoint work is committed to `results.jsonl` at the first
+patient selection, before execution can overwrite the snapshot. Fresh appends
+flush and `fsync` the result file before removing the snapshot; atomic file
+replacements and checkpoint deletion also `fsync` their directory entries.
+`run.json` replacements likewise sync both file data and directory entries.
+If an in-memory patient becomes unserializable, shutdown preserves its last
+durable checkpoint rather than replacing it with an empty record. Without a
+checkpoint, it retains any previously saved row for that patient. Invalid saved
+execution structures are rejected before resumed work or artifact updates.
+The snapshot is removed after that patient is saved. An interrupted
+provider request without a durable response may repeat; simultaneous writers
+to the same run directory are unsupported.
+
+**Auditing and evaluation resumption.** Every completed judge call is appended (and
 `fsync`ed) to `judge_responses.jsonl` in the run directory before its reply is
 used, with the request key, task (`plan_action` or `plan_extras`), judge model,
 full messages, raw content, refusal, provider metadata, `valid`, and the parse
