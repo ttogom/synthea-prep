@@ -32,7 +32,7 @@ from scripts.med_copilot_judges import (
     METRIC_STATUS, PLAN_VALIDATION_STATUS, BioLordSimilarity,
     CorrectnessJudges, JudgeCache, diagnosis_entry, diagnosis_score, normalize_diagnosis, parse_action_judgement,
     parse_extras_judgement,
-    plan_action_messages, plan_entry, plan_extras_messages, rank_weight, request_key, unavailable_plan_reason,
+    plan_action_messages, plan_entry, plan_extras_messages, plan_score, rank_weight, request_key, unavailable_plan_reason,
 )
 from scripts.med_copilot_run_file import RunFile, RunMetadataError, error_scope, pipeline_stage
 
@@ -401,6 +401,108 @@ class PlanTests(JudgeTestCase):
     def test_missing_generated_plan_is_unavailable(self):
         entry, fake = self.plan(generated=None)
         self.assertEqual((entry["status"], entry["reason"], fake.requests), ("unavailable", "missing_generation", []))
+
+
+class ZeroCoverageTests(JudgeTestCase):
+    def test_all_valid_zero_credits_skip_extras_and_keep_them_unmeasured(self):
+        for count in (1, 2, 3):
+            for rank in (1, 2, 3):
+                with self.subTest(reference_count=count, rank=rank):
+                    self.cache.unlink(missing_ok=True)
+                    reference = [f"Action {number}" for number in range(count)]
+                    zero = replies(dict.fromkeys(reference, 0))
+                    def reply(messages):
+                        if is_extras(messages):
+                            raise AssertionError("Extras cannot change an all-zero score")
+                        return zero(messages)
+                    entry, fake = self.plan(reply, reference=reference, generated=["Other action"], rank=rank)
+                    self.assertEqual((entry["status"], entry["reason"], entry["score"], entry["weighted_score"]),
+                                     ("scored", "zero_reference_coverage", 0.0, 0.0))
+                    self.assertEqual(entry["credits"], [0.0] * count)
+                    self.assertIsNone(entry["unsupported_extra_count"])
+                    self.assertIsNone(entry["deduction"])
+                    self.assertIsNone(entry["error"])
+                    self.assertEqual(len(fake.requests), count)
+                    self.assertEqual([(j["call"], j["reference_item"]) for j in entry["judges"]],
+                                     [("action", number) for number in range(1, count + 1)])
+                    cached = [json.loads(line) for line in self.cache.read_text().splitlines()]
+                    self.assertEqual([row["task"] for row in cached], ["plan_action"] * count)
+                    # Holds even when a bundled generated item has many unsupported actions.
+                    for extras in (0, 1, 2, 3, 100):
+                        self.assertEqual(entry["score"], plan_score([0.0] * count, 0.5 * extras))
+
+    def test_any_positive_credit_still_requests_extras_including_the_last_reference(self):
+        for credits in ((0, 0.5), (1, 0), (0, 0, 0.5)):
+            with self.subTest(credits=credits):
+                self.cache.unlink(missing_ok=True)
+                reference = [f"Action {number}" for number in range(len(credits))]
+                entry, fake = self.plan(replies(dict(zip(reference, credits)), extras=1),
+                                        reference=reference, generated=["Other action"])
+                self.assertEqual(len(fake.requests), len(credits) + 1)
+                self.assertTrue(is_extras(fake.requests[-1][1]))
+                self.assertIsNone(entry["reason"])
+                self.assertEqual((entry["unsupported_extra_count"], entry["deduction"]), (1, 0.5))
+                self.assertEqual(entry["score"], plan_score(credits, 0.5))
+
+    def test_a_failed_or_invalid_action_is_not_treated_as_zero_coverage(self):
+        for failure in ('{"credit": true}', "not JSON", RuntimeError("judge down")):
+            with self.subTest(failure=str(failure)):
+                self.cache.unlink(missing_ok=True)
+                base = replies({"Culture": 0, "Rest": 0})
+                def reply(messages):
+                    return failure if not is_extras(messages) and reference_action(messages) == "Culture" else base(messages)
+                entry, fake = self.plan(reply, reference=["Culture", "Rest"])
+                self.assertEqual((entry["status"], entry["reason"], entry["score"]),
+                                 ("error", "judge_failed", None))
+                self.assertEqual(len(fake.requests), 3)
+                self.assertTrue(is_extras(fake.requests[-1][1]))
+
+    def test_invalid_coverage_recovers_to_zero_without_reusing_an_old_extras_count(self):
+        base = replies({"Culture": 0, "Rest": 0}, extras=2,
+                       action_content={"Culture": "not JSON"})
+        judges, _, _ = self.judges(base)
+        first = plan_entry(1, ["Culture", "Rest"], ["Other action", "Another action"])
+        judges.judge_plan(first, LABEL_CONDITION, PATIENT)
+        self.assertEqual(first["status"], "error")
+        self.assertEqual(first["judges"][-1]["unsupported_extra_count"], 2)
+        resumed, fake, _ = self.judges(replies({"Culture": 0, "Rest": 0}))
+        entry = plan_entry(1, ["Culture", "Rest"], ["Other action", "Another action"])
+        resumed.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual((resumed.calls, resumed.cache_hits), (1, 1))
+        self.assertEqual([reference_action(messages) for _, messages in fake.requests], ["Culture"])
+        self.assertEqual((entry["status"], entry["reason"], entry["score"]),
+                         ("scored", "zero_reference_coverage", 0.0))
+        self.assertIsNone(entry["unsupported_extra_count"])
+        self.assertIsNone(entry["deduction"])
+
+    def test_concurrent_identical_zero_coverage_plans_share_only_their_action_requests(self):
+        judges, fake, _ = self.judges(replies({"Culture": 0, "Rest": 0, "Fluids": 0}))
+        entries = [plan_entry(rank, ["Culture", "Rest", "Fluids"], ["Other action"])
+                   for rank in (1, 2, 3, 1, 2, 3)]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda entry: judges.judge_plan(entry, LABEL_CONDITION, PATIENT), entries))
+        self.assertEqual((judges.calls, judges.cache_hits, len(fake.requests)), (3, 15, 3))
+        self.assertTrue(all(entry["reason"] == "zero_reference_coverage" and entry["weighted_score"] == 0
+                            for entry in entries))
+        self.assertTrue(all(not is_extras(messages) for _, messages in fake.requests))
+
+    def test_interrupted_zero_coverage_resumes_from_durable_action_prefix(self):
+        base = replies({"Culture": 0, "Rest": 0, "Fluids": 0})
+        def interrupted(messages):
+            return KeyboardInterrupt() if reference_action(messages) == "Rest" else base(messages)
+        judges, _, _ = self.judges(interrupted)
+        entry = plan_entry(2, ["Culture", "Rest", "Fluids"], ["Other action"])
+        with self.assertRaises(KeyboardInterrupt):
+            judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual(entry["status"], "interrupted")
+        self.assertEqual(len(entry["judges"]), 1)
+        resumed, fake, _ = self.judges(base)
+        entry = plan_entry(2, ["Culture", "Rest", "Fluids"], ["Other action"])
+        resumed.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual([reference_action(messages) for _, messages in fake.requests], ["Rest", "Fluids"])
+        self.assertEqual((resumed.calls, resumed.cache_hits), (2, 1))
+        self.assertEqual((entry["status"], entry["reason"], entry["weighted_score"]),
+                         ("scored", "zero_reference_coverage", 0.0))
 
 
 class MalformedJudgementTests(JudgeTestCase):

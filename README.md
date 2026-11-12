@@ -90,6 +90,12 @@ are reused in the same run directory. The original experiment YAML and
 `run.json.experiment` stay unchanged. Actual parallel inference also depends on
 the provider/server capacity.
 
+When every reference-action credit is a valid zero, Plan scoring skips the
+extras request because no nonnegative deduction can change the zero score.
+These entries have reason `zero_reference_coverage`; `unsupported_extra_count`
+and `deduction` remain `null` because they were not measured. Completed older
+entries with measured extras remain reusable.
+
 Each scalar judge response is saved durably for reuse after crashes. The
 evaluator exports results once per invocation or controlled interruption rather
 than rewriting the full results file after every patient. Both commands lock

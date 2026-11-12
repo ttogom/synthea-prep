@@ -163,6 +163,93 @@ class PlanStageTests(unittest.TestCase):
             self.assertEqual(models.requests, [])
             write.assert_not_called()
 
+    def test_zero_coverage_is_complete_and_a_resume_preserves_the_export_without_calls(self):
+        before = deepcopy(self.records)
+        models = FakeModels(lambda model, messages: '{"credit": 0}')
+        judges = self.run_stage(models, concurrency=3)
+        metadata, records = self.saved()
+        self.assertEqual(judges.calls, 9)
+        self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
+        for entry in self.entries(records):
+            plan = entry["plan_correctness"]
+            self.assertEqual((plan["status"], plan["reason"], plan["score"], plan["weighted_score"]),
+                             ("scored", "zero_reference_coverage", 0.0, 0.0))
+            self.assertIsNone(plan["unsupported_extra_count"])
+            self.assertIsNone(plan["deduction"])
+            self.assertEqual([j["call"] for j in plan["judges"]], ["action"])
+        for original, actual in zip(self.entries(before), self.entries(records)):
+            self.assertEqual({k: v for k, v in original.items() if k != "plan_correctness"},
+                             {k: v for k, v in actual.items() if k != "plan_correctness"})
+        results = (self.run_dir / "results.jsonl").read_bytes()
+        cache = (self.run_dir / "judge_responses.jsonl").read_bytes()
+        with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+            resumed = self.run_stage(FakeModels())
+            self.assertEqual((resumed.calls, resumed.cache_hits), (0, 0))
+            write.assert_not_called()
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), results)
+        self.assertEqual((self.run_dir / "judge_responses.jsonl").read_bytes(), cache)
+
+    def test_zero_coverage_survives_a_crash_before_export_using_only_action_cache(self):
+        original = (self.run_dir / "results.jsonl").read_bytes()
+        with patch.object(stage, "_write_results", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            self.run_stage(FakeModels(lambda model, messages: '{"credit": 0}'))
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original)
+        self.assertEqual(len((self.run_dir / "judge_responses.jsonl").read_text().splitlines()), 9)
+        models = FakeModels()
+        judges = self.run_stage(models)
+        self.assertEqual((models.requests, judges.calls, judges.cache_hits), ([], 0, 9))
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+        self.assertTrue(all(e["plan_correctness"]["reason"] == "zero_reference_coverage"
+                            for e in self.entries(self.saved()[1])))
+
+    def test_tampered_zero_coverage_requires_complete_matching_zero_action_evidence(self):
+        self.run_stage(FakeModels(lambda model, messages: '{"credit": 0}'))
+        metadata, records = self.saved()
+        cases = {
+            "missing action": lambda p: p["judges"].clear(),
+            "invalid action": lambda p: p["judges"][0].update(status="invalid_response"),
+            "wrong judge": lambda p: p["judges"][0].update(judge_model="other"),
+            "wrong key": lambda p: p["judges"][0].update(request_key="wrong"),
+            "wrong index": lambda p: p["judges"][0].update(reference_item=2),
+            "positive evidence": lambda p: p["judges"][0].update(credit=0.5, raw_response='{"credit": 0.5}'),
+            "invalid raw response": lambda p: p["judges"][0].update(raw_response="invalid"),
+            "wrong credits": lambda p: p.update(credits=[0.5]),
+            "wrong score": lambda p: p.update(score=0.5),
+            "wrong weighted score": lambda p: p.update(weighted_score=0.5),
+            "fabricated extras": lambda p: p.update(unsupported_extra_count=0),
+            "fabricated deduction": lambda p: p.update(deduction=0),
+            "missing reason": lambda p: p.update(reason=None),
+        }
+        for name, tamper in cases.items():
+            with self.subTest(case=name):
+                self.metadata, self.records = deepcopy(metadata), deepcopy(records)
+                tamper(self.entries(self.records)[0]["plan_correctness"])
+                self.write()
+                with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+                    judges = self.run_stage(FakeModels())
+                    self.assertEqual((judges.calls, judges.cache_hits), (0, 1))
+                    write.assert_called_once()
+                self.assertEqual(self.saved()[1], records)
+
+    def test_legacy_zero_score_with_measured_extras_remains_reusable(self):
+        self.run_stage(FakeModels(lambda model, messages: '{"credit": 0}'))
+        self.metadata, self.records = self.saved()
+        plan = self.entries(self.records)[0]["plan_correctness"]
+        patient = self.patients[0]
+        messages = stage.plan_extras_messages("reference condition", patient["subjective"], patient["objective"],
+                                              plan["reference_actions"], plan["generated_actions"])
+        plan["judges"].append({"call": "extras", "reference_item": None, "judge_model": "judge",
+                               "status": "scored", "raw_response": '{"unsupported_extra_count": 1}',
+                               "unsupported_extra_count": 1, "request_key": stage.request_key("judge", messages)})
+        plan.update(reason=None, unsupported_extra_count=1, deduction=0.5)
+        self.write()
+        before = (self.run_dir / "results.jsonl").read_bytes()
+        with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+            judges = self.run_stage(FakeModels())
+            self.assertEqual((judges.calls, judges.cache_hits), (0, 0))
+            write.assert_not_called()
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), before)
+
     def test_existing_exact_pending_entries_are_exported_after_judging(self):
         for entry in self.entries(self.records):
             entry["plan_correctness"]["reason"] = None

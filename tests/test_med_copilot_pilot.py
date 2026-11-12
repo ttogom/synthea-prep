@@ -469,6 +469,38 @@ class RuntimeProjectionTests(unittest.TestCase):
         self.assertFalse(judge["all_required_scalar_requests_present"])
         self.assertIsNone(judge["attempted_stage_with_observed_cache_reuse"])
 
+    def test_zero_coverage_entries_are_complete_with_only_their_action_calls(self):
+        logical = 64 * 4 * 4 * 3
+        for record in self.records:
+            for variant in record["variants"].values():
+                for output in variant["assessment_plans"].values():
+                    for evaluation in output["evaluation"]:
+                        plan = evaluation["plan_correctness"]
+                        plan.update(reason="zero_reference_coverage", credits=[0.0], score=0.0, weighted_score=0.0,
+                                    unsupported_extra_count=None, deduction=None)
+                        plan["judges"] = [{"call": "action", "status": "scored", "credit": 0.0}]
+        self.metadata["plan_evaluation"] = {"status": "completed", "calls": logical,
+            "cache_hits": 0, "counts": {"scored": logical},
+            "started_at": "2026-11-11T11:00:00-08:00", "finished_at": "2026-11-11T11:10:00-08:00"}
+        self.write()
+        judge = project_plan_runtime(self.run_dir, root=self.root)["plan_judging"]
+        self.assertTrue(judge["all_required_scalar_requests_present"])
+        self.assertEqual(judge["pilot_logical_scalar_requests"], logical)
+        self.assertAlmostEqual(judge["weighted_full_logical_scalar_requests"], 200 * 4 * 4 * 3)
+        self.assertEqual(judge["extras_calls_skipped_for_zero_coverage"], logical)
+        self.assertIsNotNone(judge["observed_cache_reuse"])
+        first = self.records[0]["variants"][self.variants[0]]["assessment_plans"]["hosted"]["evaluation"][0]["plan_correctness"]
+        baseline = deepcopy(first)
+        for changes in ({"reason": None}, {"credits": [0.5]}, {"score": 0.5},
+                        {"weighted_score": 0.5}, {"unsupported_extra_count": 0}, {"deduction": 0}):
+            with self.subTest(changes=changes):
+                first.clear()
+                first.update(deepcopy(baseline), **changes)
+                self.write()
+                judge = project_plan_runtime(self.run_dir, root=self.root)["plan_judging"]
+                self.assertFalse(judge["all_required_scalar_requests_present"])
+                self.assertIsNone(judge["observed_cache_reuse"])
+
     def test_successful_stage_can_also_report_attempt_throughput(self):
         logical, entries = 64 * 4 * 4 * 3 * 2, 64 * 4 * 4 * 3
         self.metadata["plan_evaluation"] = {"status": "completed", "calls": logical,
