@@ -38,6 +38,7 @@ with patch.object(nltk, "download", return_value=True):
     from med_copilot.upstream.evaluate_metrics import Evaluator
     from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges
     from scripts.med_copilot_scoring import resume_evaluation
+    from scripts.med_copilot_run_file import RunFile, _ERROR_SCOPE, error_scope
 
 
 class FakeSimilarity:
@@ -59,6 +60,128 @@ def setUpModule():
 
 
 class PatientScorerTests(unittest.TestCase):
+    def test_score_results_batches_patients_and_routes_distinct_scores_by_full_identity(self):
+        self.labels[1]["plan"] = ["Other reference plan"]
+        self.write_labels(self.labels)
+        records = [self.result("patient-b", condition="B"), self.result("patient-a", condition="A")]
+        before = deepcopy(records)
+        batches = []
+
+        def score_pairs(pairs):
+            batches.append(list(pairs))
+            return iter(SimpleNamespace(key=pair.key, error=None,
+                                        metrics={name: (index + 1) / 100 for name in METRIC_NAMES})
+                        for index, pair in enumerate(pairs))
+
+        scorer = self.scorer(presenting_evidence_only=False,
+                             metric_evaluator=SimpleNamespace(score_pairs=score_pairs))
+        returned = scorer.score_results(iter(records))
+        self.assertEqual(returned, records)
+        self.assertIs(returned[0], records[0])
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(len(batches[0]), 12)
+        self.assertEqual([pair.key for pair in batches[0]], [
+            (patient_id, None, None, rank, field)
+            for patient_id in ("patient-b", "patient-a") for rank in (1, 2, 3)
+            for field in ("condition", "plan")])
+        self.assertEqual([pair.reference for pair in batches[0]][:2], ["normal", "Other reference plan"])
+        for offset, (record, original) in enumerate(zip(records, before)):
+            self.assertEqual(record["predictions"], original["predictions"])
+            for index, entry in enumerate(record["evaluation"]):
+                for field_index, field in enumerate(("condition", "plan")):
+                    expected = (offset * 6 + index * 2 + field_index + 1) / 100
+                    self.assertEqual(set(entry[field]["metrics"].values()), {expected})
+
+    def test_score_results_resume_uses_only_pending_pairs_and_rescore_is_explicit(self):
+        self.labels[1]["plan"] = ["Other reference plan"]
+        self.write_labels(self.labels)
+        records = [self.result(), self.result("patient-b")]
+        scorer = self.scorer(presenting_evidence_only=False)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_results(records)
+        self.assertEqual(evaluate.call_count, 12)
+        kept = deepcopy(records[0]["evaluation"])
+        records[1]["evaluation"][1]["plan"] = {"status": "error", "metrics": {}, "error": {}}
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_results(records)
+        evaluate.assert_called_once()
+        self.assertEqual(evaluate.call_args.args, (["Other reference plan"], ["P"]))
+        self.assertEqual(records[0]["evaluation"], kept)
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_results(records, rescore=True)
+        self.assertEqual(evaluate.call_count, 12)
+
+    def test_score_results_validates_entire_batch_before_mutating_first_record(self):
+        record = self.result()
+        for invalid in (self.result("unknown"), record):
+            with self.subTest(invalid=invalid["id"]):
+                before = deepcopy(record)
+                with patch.object(Evaluator, "evaluate_metrics") as evaluate, self.assertRaises(ValueError):
+                    self.scorer().score_results([record, invalid])
+                evaluate.assert_not_called()
+                self.assertEqual(record, before)
+        self.assertEqual(self.scorer().score_results([]), [])
+
+    def test_score_results_supports_disjoint_slots_for_same_patient(self):
+        records = [{"id": "patient-a", "variants": {variant: {"assessment_plans": {
+            model: self.result(condition=model)}}}} for variant, model in (
+                ("llm_only", "mini"), ("guidelines", "mini"), ("guidelines", "llama"))]
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            self.scorer().score_results(records)
+        self.assertEqual(evaluate.call_count, 18)
+        self.assertEqual([evaluate.call_args_list[index].args[1] for index in (0, 6, 12)],
+                         [["mini"], ["mini"], ["llama"]])
+
+    def test_score_results_interruption_preserves_completed_patient_and_resumes_remaining(self):
+        self.labels[1]["plan"] = ["Other reference plan"]
+        self.write_labels(self.labels)
+        records = [self.result(condition="FIRST"), self.result("patient-b", condition="SECOND")]
+        scorer = self.scorer(presenting_evidence_only=False)
+
+        def metric(references, candidates, lang):
+            if candidates == ["SECOND"]:
+                raise KeyboardInterrupt()
+            return self.metrics
+
+        with patch.object(Evaluator, "evaluate_metrics", side_effect=metric), self.assertRaises(KeyboardInterrupt):
+            scorer.score_results(records)
+        saved_first = deepcopy(records[0]["evaluation"])
+        self.assertTrue(all(entry[field]["status"] == "scored" for entry in saved_first
+                            for field in ("condition", "plan")))
+        self.assertEqual(records[1]["evaluation"][0]["condition"]["status"], "interrupted")
+        with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics) as evaluate:
+            scorer.score_results(records)
+        self.assertEqual(evaluate.call_count, 6)
+        self.assertEqual(records[0]["evaluation"], saved_first)
+
+    def test_score_results_attributes_checkpoints_and_judge_errors_to_each_patient(self):
+        self.labels[1]["plan"] = ["Other reference plan"]
+        self.write_labels(self.labels)
+        records = [self.result(), self.result("patient-b")]
+        scorer = self.scorer(presenting_evidence_only=False)
+        owner = RunFile(self.directory, {"errors": []})
+        checkpoints = []
+        owner.checkpoint = lambda: checkpoints.append((_ERROR_SCOPE.get() or {}).get("patient_id"))
+
+        def cosine(reference, generated):
+            if reference == "normal":
+                raise RuntimeError("patient b diagnosis failed")
+            return 1.0
+
+        scorer.attach_judges(CorrectnessJudges(None, (), self.directory / JUDGE_FILE,
+            plan_judge="judge", plan_execution="deferred", similarity=SimpleNamespace(cosine=cosine)))
+        with error_scope(owner, patient_id="outer"), \
+                patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics):
+            scorer.score_results(records)
+            self.assertEqual(_ERROR_SCOPE.get()["patient_id"], "outer")
+        self.assertEqual(set(checkpoints), {"patient-a", "patient-b"})
+        self.assertEqual({(error["patient_id"], error["stage"]) for error in owner.metadata["errors"]},
+                         {("patient-b", "scoring")})
+        self.assertTrue(all(entry["diagnosis_correctness"]["status"] == "scored"
+                            for entry in records[0]["evaluation"]))
+        self.assertTrue(all(entry["diagnosis_correctness"]["status"] == "error"
+                            for entry in records[1]["evaluation"]))
+
     def test_each_model_scores_against_same_patient_without_mutating_predictions(self):
         first, second = self.result(condition="mini"), self.result(condition="llama")
         first.pop("id")

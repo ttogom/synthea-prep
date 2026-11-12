@@ -20,6 +20,7 @@ from scripts.med_copilot_metrics import (
 from scripts.med_copilot_judges import JUDGE_FILE, CorrectnessJudges, diagnosis_entry, plan_entry
 from scripts.med_copilot_run_file import (
     RUN_FILE, RunFile, RunMetadataError, checkpoint, error_scope, pipeline_stage, record_error,
+    _ERROR_SCOPE,
 )
 
 
@@ -265,53 +266,76 @@ class PatientScorer:
 
     def score_result(self, result, *, rescore=False):
         """Complete unfinished fields; rescore=True deliberately recalculates saved scores."""
-        if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
-                or result["id"] not in self._selected_ids):
-            raise ValueError("Result must name a selected input patient")
-        if "variants" in result:
-            outputs = [(variant, model, output) for variant, body in result["variants"].items()
-                       for model, output in body["assessment_plans"].items()
-                       if output["status"] == "completed"]
-        elif "assessment_plans" in result:
-            outputs = [(None, model, output) for model, output in result["assessment_plans"].items()
-                       if output["status"] == "completed"]
-        else:
-            outputs = [(None, None, result)]
+        self.score_results([result], rescore=rescore)
+        return result
+
+    def score_results(self, results, *, rescore=False):
+        """Score a finite batch of patient/slot records with one shared metric batch.
+
+        Inputs may contain different model/variant slots for the same patient,
+        but each output identity must appear once. The caller owns checkpoint
+        persistence for the entire batch; checkpoint scopes identify its patient.
+        """
+        results = list(results)
+        outputs, identities = [], set()
+        # Validate the whole batch before preparing or mutating any saved scores.
+        for result in results:
+            if (not isinstance(result, dict) or not isinstance(result.get("id"), str)
+                    or result["id"] not in self._selected_ids):
+                raise ValueError("Result must name a selected input patient")
+            if "variants" in result:
+                slots = [(variant, model, output) for variant, body in result["variants"].items()
+                         for model, output in body["assessment_plans"].items()
+                         if output["status"] == "completed"]
+            elif "assessment_plans" in result:
+                slots = [(None, model, output) for model, output in result["assessment_plans"].items()
+                         if output["status"] == "completed"]
+            else:
+                slots = [(None, None, result)]
+            for variant, model, output in slots:
+                identity = (result["id"], variant, model)
+                if identity in identities:
+                    raise ValueError("Duplicate scoring output identity")
+                identities.add(identity)
+                outputs.append((identity, output))
+        owner = (_ERROR_SCOPE.get() or {}).get("run")
         pending = []
-        for variant, model, output in outputs:
-            pending.extend(self._prepare_predictions(
-                result["id"], output, (result["id"], variant, model), rescore=rescore))
+        for identity, output in outputs:
+            with error_scope(owner, patient_id=identity[0]), pipeline_stage("scoring"):
+                pending.extend(self._prepare_predictions(identity[0], output, identity, rescore=rescore))
         scores = iter(self.metric_evaluator.score_pairs([pair for pair, _, _ in pending]))
         try:
             for pair, evaluation, field in pending:
-                try:
-                    score = next(scores)
-                except Exception as exc:
-                    evaluation[field] = _empty_entry("error", _exception_data(exc))
+                with error_scope(owner, patient_id=pair.key[0]), pipeline_stage("scoring"):
+                    try:
+                        score = next(scores)
+                    except Exception as exc:
+                        evaluation[field] = _empty_entry("error", _exception_data(exc))
+                        checkpoint()
+                        continue
+                    except BaseException as exc:
+                        evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
+                        checkpoint()
+                        raise
+                    try:
+                        if score.key != pair.key:
+                            raise ValueError("Metric result identity does not match its input pair")
+                        if score.error is not None:
+                            raise score.error
+                        values = validate_metrics(score.metrics)
+                        evaluation[field] = {"status": "scored", "metrics": values, "error": None}
+                    except Exception as exc:
+                        evaluation[field] = _empty_entry("error", _exception_data(exc))
                     checkpoint()
-                    continue
-                except BaseException as exc:
-                    evaluation[field] = _empty_entry("interrupted", _exception_data(exc))
-                    checkpoint()
-                    raise
-                try:
-                    if score.key != pair.key:
-                        raise ValueError("Metric result identity does not match its input pair")
-                    if score.error is not None:
-                        raise score.error
-                    values = validate_metrics(score.metrics)
-                    evaluation[field] = {"status": "scored", "metrics": values, "error": None}
-                except Exception as exc:
-                    evaluation[field] = _empty_entry("error", _exception_data(exc))
-                checkpoint()
         finally:
             # Release the evaluator's serialization lock even if a checkpoint fails.
             close = getattr(scores, "close", None)
             if close is not None:
                 close()
-        for _, _, output in outputs:
-            self._score_correctness(result["id"], output)
-        return result
+        for identity, output in outputs:
+            with error_scope(owner, patient_id=identity[0]), pipeline_stage("scoring"):
+                self._score_correctness(identity[0], output)
+        return results
 
     def _prepare_predictions(self, patient_id, result, identity, *, rescore=False):
         label = self._labels[patient_id]

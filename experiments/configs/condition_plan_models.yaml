@@ -19,6 +19,34 @@ models:
     model: gpt-4o-mini
     api_key_env: OPENAI_API_KEY
     output_mode: json_schema
+  ollama_gemma3_4b:
+    type: chat
+    model_provider: openai
+    model: gemma3:4b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_llama3_2_3b:
+    type: chat
+    model_provider: openai
+    model: llama3.2:3b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_ministral_3_3b:
+    type: chat
+    model_provider: openai
+    model: ministral-3:3b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 768
+  ollama_qwen2_5_14b_speedup:
+    type: chat
+    model_provider: openai
+    model: qwen2.5:14b
+    api_base: http://127.0.0.1:11435/v1
+    output_mode: json_schema
+    max_tokens: 64
   ollama_healthcare:
     type: chat
     model_provider: openai

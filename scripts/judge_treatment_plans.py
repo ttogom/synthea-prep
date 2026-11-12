@@ -1,11 +1,12 @@
 """Finish deferred Plan judging without repeating generation or completed metrics.
 
-Usage: python scripts/judge_treatment_plans.py RUN_DIRECTORY
+Usage: python scripts/judge_treatment_plans.py RUN_DIRECTORY [--concurrency N] [--context-length N]
 
 Reads the recorded cohort and loads only its recorded Plan judge. Completed
 Plan judgements and scalar replies are reused. Text metrics, diagnosis scores,
 generation, and evidence are preserved. Concurrent requests are bounded by the
-run's recorded experiment.plan_judge_concurrency (default 2 for older runs).
+last Plan stage's settings, or the experiment defaults on its first invocation.
+Optional runtime overrides are recorded in the Plan stage without changing the experiment.
 
 Exit status: 0 when every Plan entry finished; 1 when the run directory or
 its inputs cannot be used, or when some Plan entries still failed (rerun
@@ -31,6 +32,7 @@ from scripts.collate_med_copilot_results import generate_report
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
+from scripts.med_copilot_ollama import ollama_for_saved_run, plan_judge_settings
 from scripts.med_copilot_plan_evaluation import PlanJudgeUnavailableError, resume_plan_evaluation
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.med_copilot_run_lock import exclusive_run_lock
@@ -85,19 +87,23 @@ def _prepare(run_dir, root, models_factory):
 def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("run_directory", type=Path, help="Directory containing run.json and results.jsonl")
-    run_dir = parser.parse_args(argv).run_directory.resolve()
+    parser.add_argument("--concurrency", type=int, help="Override the number of simultaneous judge requests")
+    parser.add_argument("--context-length", type=int, help="Override the local judge's context window")
+    args = parser.parse_args(argv)
+    run_dir = args.run_directory.resolve()
     try:
         # Lock before reading run.json, so model/cohort reconstruction cannot race
         # a resumed generator and later overwrite its newer results.
         with exclusive_run_lock(run_dir):
-            scorer, _, judge_models = _prepare(run_dir, root, models_factory)
             metadata = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-            concurrency = metadata["experiment"].get("plan_judge_concurrency", 2)
-            judges = resume_plan_evaluation(run_dir, scorer, judge_models, root=root,
-                                            concurrency=concurrency, _lock_held=True)
-            print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
-            print(f"HTML results: {generate_report(run_dir, root=root)}")
-            failed = _failed_entries(run_dir)
+            settings = plan_judge_settings(metadata, concurrency=args.concurrency, context_length=args.context_length)
+            with ollama_for_saved_run(run_dir, **settings):
+                scorer, _, judge_models = _prepare(run_dir, root, models_factory)
+                judges = resume_plan_evaluation(run_dir, scorer, judge_models, root=root,
+                                                **settings, _lock_held=True)
+                print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
+                print(f"HTML results: {generate_report(run_dir, root=root)}")
+                failed = _failed_entries(run_dir)
     except KeyboardInterrupt:
         print("Evaluation interrupted. Completed judge calls are saved; rerun this command to resume.",
               file=sys.stderr)
