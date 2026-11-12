@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.med_copilot_pilot import STRATA, project_plan_runtime, project_runtime, select_runtime_pilot
+from scripts.experiment_runtime.pilot import STRATA, project_plan_runtime, project_runtime, select_runtime_pilot
 
 
 def population(count=200):

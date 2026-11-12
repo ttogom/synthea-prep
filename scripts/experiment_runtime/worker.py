@@ -14,7 +14,7 @@ from time import perf_counter
 
 # Subprocesses start without the repository on sys.path. Credentials and physical
 # CPU encoder initialization must precede retrieval's FAISS import on Apple.
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 PROTOCOL_STDOUT = sys.stdout
@@ -25,7 +25,7 @@ load_dotenv(ROOT / ".env", override=False)
 
 from scripts.med_copilot_config import ExperimentConfig
 from scripts.med_copilot_run_file import RunMetadataError, redact_secrets
-from scripts.med_copilot_worker_stream import RedactingStream
+from scripts.experiment_runtime.worker_stream import RedactingStream
 
 
 PARSER = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -58,7 +58,7 @@ try:
         # FAISS. Each process owns its encoder, retriever, and reranker instances.
         from scripts.med_copilot_retrieval import CrossEncoderReranker, HybridRetriever
         from graphrag.cli.query import run_local_search
-        from scripts.med_copilot_preparation import EvidencePreparer
+        from scripts.experiment_runtime.preparation import EvidencePreparer
 except Exception as exc:
     BOOTSTRAP_ERROR = exc
 

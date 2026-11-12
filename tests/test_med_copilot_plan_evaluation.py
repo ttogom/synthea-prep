@@ -27,7 +27,7 @@ with patch.object(nltk, "download", return_value=True):
     from scripts.med_copilot_scoring import PatientScorer
     from scripts.med_copilot_helpers import GUIDELINE_TABLES, guideline_resource_files, sha256_bundle
     with patch("dotenv.load_dotenv", return_value=False):
-        from scripts import judge_treatment_plans as command
+        import judge_treatment_plans as command
 
 
 class FakeModels:

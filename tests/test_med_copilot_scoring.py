@@ -1334,11 +1334,11 @@ class ResumeEvaluationTests(unittest.TestCase):
                             for e in output["evaluation"] for field in ("condition", "plan")))
 
 
-RESUME_SCRIPT = ROOT / "scripts/judge_treatment_plans.py"
+RESUME_SCRIPT = ROOT / "judge_treatment_plans.py"
 
 
 class ResumeCommandTests(unittest.TestCase):
-    """Command-level checks of scripts/judge_treatment_plans.py with fake judge models."""
+    """Command-level checks of judge_treatment_plans.py with fake judge models."""
     setUp = PatientScorerTests.setUp
     write_labels = PatientScorerTests.write_labels
     result = PatientScorerTests.result

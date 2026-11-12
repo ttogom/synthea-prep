@@ -18,7 +18,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.med_copilot_execution import JobStore, bounded_map, write_results
+from scripts.experiment_runtime.execution import JobStore, bounded_map, write_results
 from scripts.med_copilot_run_file import RunMetadataError
 
 
@@ -178,7 +178,7 @@ class JobStoreTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), b"not a sqlite database")
 
     def test_process_exit_without_close_keeps_durable_reply(self):
-        code = ("from scripts.med_copilot_execution import JobStore\n"
+        code = ("from scripts.experiment_runtime.execution import JobStore\n"
                 "import os,sys\n"
                 "store=JobStore(sys.argv[1])\n"
                 "store.save(('generation','p','v','m'), {'raw':'completed reply'}, status='received')\n"
@@ -289,14 +289,14 @@ class ResultsExportTests(unittest.TestCase):
         self.assertEqual(list(self.path.parent.glob(".results-*.tmp")), [])
 
     def test_failed_flush_and_replace_preserve_existing_file(self):
-        for target in ("scripts.med_copilot_execution.os.fsync", "scripts.med_copilot_execution.os.replace"):
+        for target in ("scripts.experiment_runtime.execution.os.fsync", "scripts.experiment_runtime.execution.os.replace"):
             with self.subTest(target=target), patch(target, side_effect=OSError("disk full")), self.assertRaises(OSError):
                 write_results([{"id": "a"}], self.path)
             self.assertEqual(self.path.read_text(), "original\n")
             self.assertEqual(list(self.path.parent.glob(".results-*.tmp")), [])
 
     def test_failed_directory_sync_reports_failure_with_a_complete_new_file(self):
-        with patch("scripts.med_copilot_execution._fsync_directory", side_effect=OSError("directory flush")), \
+        with patch("scripts.experiment_runtime.execution._fsync_directory", side_effect=OSError("directory flush")), \
                 self.assertRaises(OSError):
             write_results([{"id": "a"}], self.path)
         self.assertEqual(json.loads(self.path.read_text()), {"id": "a"})

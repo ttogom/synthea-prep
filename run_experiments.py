@@ -15,7 +15,7 @@ import sys
 from time import perf_counter
 from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 UPSTREAM = ROOT / "med_copilot/upstream"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(UPSTREAM))
@@ -32,10 +32,10 @@ from scripts.med_copilot_helpers import (
 )
 from scripts.med_copilot_judges import CorrectnessJudges
 from scripts.med_copilot_models import AssessmentPlanModels
-from scripts.med_copilot_ollama import ManagedOllama
+from scripts.experiment_runtime.ollama import ManagedOllama
 from scripts.med_copilot_run_file import RunFile, make_run_name, pacific_now
 from scripts.med_copilot_run_lock import exclusive_run_lock
-from scripts.med_copilot_scheduler import ExperimentScheduler
+from scripts.experiment_runtime.scheduler import ExperimentScheduler
 from scripts.med_copilot_scoring import PatientScorer
 
 
@@ -44,10 +44,11 @@ def _fingerprint(path):
 
 
 def _sources():
-    names = ("run_experiments.py", "med_copilot_scheduler.py", "med_copilot_execution.py",
-             "med_copilot_preparation.py", "med_copilot_worker.py", "med_copilot_worker_stream.py",
-             "med_copilot_ollama.py")
-    return [{"file": f"scripts/{name}", "sha256": _fingerprint(ROOT / "scripts" / name)} for name in names]
+    paths = ("run_experiments.py", "scripts/experiment_runtime/scheduler.py",
+             "scripts/experiment_runtime/execution.py", "scripts/experiment_runtime/preparation.py",
+             "scripts/experiment_runtime/worker.py", "scripts/experiment_runtime/worker_stream.py",
+             "scripts/experiment_runtime/ollama.py")
+    return [{"file": path, "sha256": _fingerprint(ROOT / path)} for path in paths]
 
 
 def _validate_resume(metadata, experiment, models, scorer):

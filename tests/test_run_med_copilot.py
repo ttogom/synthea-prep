@@ -54,9 +54,9 @@ STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
 JUDGES_MODULE = ROOT / "scripts/med_copilot_judges.py"
 RUN_LOCK_MODULE = ROOT / "scripts/med_copilot_run_lock.py"
-OLLAMA_MODULE = ROOT / "scripts/med_copilot_ollama.py"
+OLLAMA_MODULE = ROOT / "scripts/experiment_runtime/ollama.py"
 PLAN_EVALUATION_MODULE = ROOT / "scripts/med_copilot_plan_evaluation.py"
-PLAN_EVALUATION_COMMAND = ROOT / "scripts/judge_treatment_plans.py"
+PLAN_EVALUATION_COMMAND = ROOT / "judge_treatment_plans.py"
 # Plan judge prompts (per reference action, then unsupported extras); diagnoses use BioLORD.
 JUDGE_PROMPT_PREFIXES = ("Grade whether the generated plan covers", "Count the distinct generated actions")
 BIOLORD_MODEL = "FremyCompany/BioLORD-2023"
@@ -402,9 +402,12 @@ class PipelineFixture:
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
         (self.script.parent / RUN_LOCK_MODULE.name).write_bytes(RUN_LOCK_MODULE.read_bytes())
-        (self.script.parent / OLLAMA_MODULE.name).write_bytes(OLLAMA_MODULE.read_bytes())
+        runtime = self.script.parent / "experiment_runtime"
+        runtime.mkdir()
+        (runtime / "__init__.py").write_bytes((OLLAMA_MODULE.parent / "__init__.py").read_bytes())
+        (runtime / OLLAMA_MODULE.name).write_bytes(OLLAMA_MODULE.read_bytes())
         (self.script.parent / PLAN_EVALUATION_MODULE.name).write_bytes(PLAN_EVALUATION_MODULE.read_bytes())
-        (self.script.parent / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
+        (self.root / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
         (self.script.parent / JUDGES_MODULE.name).write_bytes(JUDGES_MODULE.read_bytes())
         (self.script.parent / QUESTION_SCREEN.name).write_bytes(QUESTION_SCREEN.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
@@ -821,7 +824,7 @@ class PipelineFixture:
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
                              "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
                              "scripts.med_copilot_run_lock", "scripts.med_copilot_plan_evaluation",
-                             "scripts.med_copilot_ollama",
+                             "scripts.experiment_runtime.ollama", "scripts.experiment_runtime",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
@@ -6799,7 +6802,7 @@ class RunnerResumeTests(unittest.TestCase):
                                           f.scoring_calls, f.biolord_loads)]
         model_count = len(f.model_configs)
         with f.runtime():
-            command = runpy.run_path(str(f.script.parent / PLAN_EVALUATION_COMMAND.name))
+            command = runpy.run_path(str(f.root / PLAN_EVALUATION_COMMAND.name))
             self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
         _, metadata, judged = self.saved()
         self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
@@ -6823,7 +6826,7 @@ class RunnerResumeTests(unittest.TestCase):
         calls = len(f.judge_calls)
         cache = (folder / "judge_responses.jsonl").read_bytes()
         with f.runtime():
-            command = runpy.run_path(str(f.script.parent / PLAN_EVALUATION_COMMAND.name))
+            command = runpy.run_path(str(f.root / PLAN_EVALUATION_COMMAND.name))
             self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
         self.assertEqual(self.invoke(runner, folder), "completed")
         self.assertEqual(len(f.judge_calls), calls)

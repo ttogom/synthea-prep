@@ -14,9 +14,9 @@ from time import perf_counter, time_ns
 
 from sentence_transformers import SentenceTransformer
 
-from scripts.med_copilot_execution import JobStore, bounded_map, write_results, _decode as decode_checkpoint
+from scripts.experiment_runtime.execution import JobStore, bounded_map, write_results, _decode as decode_checkpoint
 from scripts.med_copilot_helpers import new_patient_result
-from scripts.med_copilot_preparation import validate_preparation_result
+from scripts.experiment_runtime.preparation import validate_preparation_result
 from scripts.med_copilot_judges import BIOLORD_MODEL, BIOLORD_REVISION, BioLordSimilarity, CorrectnessJudges, JUDGE_FILE
 from scripts.med_copilot_run_file import error_scope, pacific_now, pipeline_stage
 
@@ -42,7 +42,7 @@ class PreparationWorker:
         self.process = None
         try:
             self.process = subprocess.Popen(
-                [sys.executable, str(root / "scripts/med_copilot_worker.py"), str(config_path),
+                [sys.executable, str(root / "scripts/experiment_runtime/worker.py"), str(config_path),
                  "--device", settings["encoder_device"], "--threads", str(settings["cpu_threads"])],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
                 text=True, bufsize=1, cwd=root,

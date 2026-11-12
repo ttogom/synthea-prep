@@ -173,16 +173,17 @@ If the questions barely change, make the added sentence stronger and repeat.
 Temporarily edit `experiments/configs/experiment.yaml`:
 
 ```yaml
-patient_input: experiments/input/test_sample_so.jsonl
-patient_labels: experiments/input/test_sample_labels.jsonl
+patient_input: experiments/input/test_so.jsonl
+patient_labels: experiments/input/test_labels.jsonl
 selected_variants: [llm_only, guidelines]
 selected_models: [gpt_4o_mini]
+max_patients: 10
 ```
 
 Run `python scripts/run_med_copilot.py` once with the new prompt and once with
 the old prompt (`git stash` / `git stash pop`), under the same configuration.
 Compare `guideline_questions`, `guideline_evidence`, Plan scores for
-`guidelines`, and condition scores in the two `results.jsonl` files. With five
+`guidelines`, and condition scores in the two `results.jsonl` files. With ten
 eligible patients and temperature 1, treat this as a sanity check, not
 evidence of improvement. Revert the YAML afterwards.
 

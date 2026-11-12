@@ -10,8 +10,7 @@ the diagnosis, or of anything after it, hands the model the answer. Losing real
 pre-diagnosis history weakens the data, so the rules below aim to remove exactly
 what happened on or after the diagnosis and nothing earlier.
 
-This document describes current behavior (script v1.3). Design history and the
-reasoning behind revisions are in [SCRUBBING_PLAN.md](SCRUBBING_PLAN.md).
+This document describes current behavior (script v1.3).
 
 ## Quick start
 

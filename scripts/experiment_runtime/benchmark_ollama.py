@@ -19,16 +19,16 @@ from urllib.parse import urlsplit
 
 # Resolve the vendored completion wrappers before importing model clients. The
 # local catalogue avoids an unrelated hosted-model pricing lookup at import.
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from scripts.med_copilot_config import ExperimentConfig, read_yaml_config
-from scripts.med_copilot_execution import _decode, bounded_map
+from scripts.experiment_runtime.execution import _decode, bounded_map
 from scripts.med_copilot_helpers import new_model_result, parse_condition_plan
 from scripts.med_copilot_models import AssessmentPlanModels
-from scripts.med_copilot_ollama import ManagedOllama
+from scripts.experiment_runtime.ollama import ManagedOllama
 from scripts.med_copilot_run_file import _fsync_directory
 
 

@@ -6,6 +6,12 @@ completion. New component-based runs use `run.json.schema_version: 4`.
 Historical schema 1–3 files keep their original layout and remain readable by the
 collator; they are not migrated or rewritten.
 
+`run_experiments.py` adds a private `jobs.sqlite3` recovery database without
+changing the public patient schema. Run it with `--config CONFIG_PATH`; continue
+the same run with `--config CONFIG_PATH --resume RUN_DIRECTORY`. `--yes` skips
+interactive confirmation. The original `scripts/run_med_copilot.py` remains the
+serial runner with its existing CLI and checkpoint format.
+
 JSONL escaping is ordinary JSON escaping: after `json.loads`, captured strings
 retain their original characters, whitespace, Unicode and embedded newlines.
 
@@ -41,8 +47,10 @@ A logical component and identical effective settings share one configured
 instance across all consuming variants/models for the patient. Different
 settings create distinct instance IDs; variant references are authoritative and
 consumers must not infer the instance ID from a naming convention. Required
-resources can still be shared between instances. Preparation is sequential; the
-existing wrappers change process working directories and use mutable callbacks.
+resources can still be shared between instances. Preparation is sequential within
+each isolated worker because wrappers change working directories and mutable
+callbacks. The concurrent runner reuses four CPU workers across patients; its
+local model queues drain across the cohort with bounded concurrent requests.
 
 The existing logical components publish these outputs:
 
@@ -203,12 +211,13 @@ Caught interruptions retain the current patient's obtained captures, prompts,
 replies and scores, and add explicit unattempted placeholders for remaining
 selected patients/variants/models. Excluded patients receive no result rows or
 placeholders. Persistence is at patient boundaries plus best-effort interruption
-finalization; this schema does not add resume-existing-run support or protection
-against uncatchable process termination.
+finalization. Resume preserves durably checkpointed work after both controlled
+stops and abrupt termination; an interrupted provider request whose response was
+not saved can be repeated.
 
 ### Run errors
 
-Launching `scripts/run_med_copilot.py` creates the run directory and `run.json`
+Launching the original `scripts/run_med_copilot.py` creates the run directory and `run.json`
 (`status: running`, `errors: []`) before any heavy import, using the
 standard-library-only `scripts/med_copilot_run_file.py`. Until the experiment
 config and Git branch are known, the directory is provisional,
@@ -216,6 +225,13 @@ config and Git branch are known, the directory is provisional,
 to `<timestamp>__<input stem>__<branch>` under `experiment_output`. Cancelling at
 the confirmation prompt (or a successful exit such as `--help`) is not an error:
 the run directory, and any output directory created only for it, is removed.
+
+The concurrent runner validates configuration/cohort/model settings and obtains
+confirmation before creating its run directory. After that point, runtime
+failures are recorded in `run.json` and independent completed jobs remain in
+`jobs.sqlite3`. Its `run.json` also records `execution_sources`,
+`preparation_runtime` (worker devices), `ollama_runtime` (effective owned-server
+settings and installed model identities), and `runtime_timings` by stage/model.
 
 Each failure is appended to `errors` and saved (atomically, through a temporary
 file and `os.replace()`) as soon as it is handled, before the run continues or
@@ -256,14 +272,15 @@ errors saved earlier remain readable.
 
 ## Configuration and provenance
 
-The fixed `experiments/configs/experiment.yaml` selects models, variants, cohort,
+The default `experiments/configs/experiment.yaml` selects models, variants, cohort,
 paths and tuning. `variant_settings` nests overrides by variant ID, component ID,
 and declared parameter. Registered component defaults may reference shared
 experiment fields. Unknown fields, invalid types/ranges, bad bindings/templates,
 duplicate selections and missing selected credentials fail during preflight.
 `llm_only` with a keyless local final model requires no retrieval resources or
-shared API keys. The presenting-evidence CLI filter override remains available;
-no additional runner command-line arguments are introduced.
+shared API keys. The original runner retains its presenting-evidence CLI override.
+The concurrent runner selects a config through `--config`, with its model
+registry resolved from the fixed sibling `condition_plan_models.yaml`.
 
 `run.json.experiment` records every effective YAML setting and applied default,
 config path/source SHA-256 and the final-model registry reference. `variant_definitions` and
@@ -275,6 +292,12 @@ template hashes. Only accessed/successfully initialized resources are
 fingerprinted; unused/failed resources remain `null`. Shared reference corpus,
 S/O cache/manifest, guideline settings, active prompt, tables and vector stores
 retain their existing fingerprints. Resolved credentials are never saved.
+
+The guideline settings fingerprint covers its numeric chat limits: 12 RPM and
+200,000 TPM per worker, or nominal combined ceilings of 48 RPM / 800,000 TPM for
+the four preparation workers. Embedding limits remain `null`; other API
+clients have separate limiters. These guideline settings belong to reference
+provenance rather than `experiment.yaml`.
 
 `condition_plan_models.yaml` continues to contain only model definitions, with
 credential variable names and `output_mode`. Shared final `temperature` and
@@ -290,9 +313,10 @@ evidence filter runs first, then optional exact label-Plan exclusion
 positive integers sample up to N without replacement using seed 42. Selected
 patients run in input order. Evaluation metadata records `patient_sampling_seed`,
 the label/helper hashes, installed scoring versions/defaults, filter order,
-intermediate counts, selected/excluded IDs and reasons. The sample dataset has
-10 input patients, 7 after presenting-evidence filtering and 5 after the recorded-
-plan filter; `max_patients: null` retains all five. Additional output/resource paths
+intermediate counts, selected/excluded IDs and reasons. The shipped test dataset
+has 4,959 rows and 2,378 eligible patients; the shipped `max_patients: null`
+selects the full eligible cohort. An optional selection manifest may retain
+population weights in `run.json.pilot_selection`. Additional output/resource paths
 and evidence tuning remain configured/saved without expanding confirmation.
 
 ## Reporting and historical compatibility
@@ -359,7 +383,7 @@ Generation statuses do not themselves certify response-format validity.
 
 Gold labels are joined to the complete input by exact ID before cohort selection.
 YAML `presenting_evidence_only` defaults to `true`, optionally overridden by the
-existing `--presenting-evidence-only true|false` flag. YAML
+serial runner's `--presenting-evidence-only true|false` flag. YAML
 `exclude_none_recorded_plans` excludes label `plan` exactly `["none recorded"]`
 when enabled, then `max_patients` applies the seeded sample. Only selected IDs
 are registered in the run. Excluded patients
@@ -437,13 +461,15 @@ empty strings or zeros. When both are unavailable, missing-reference status take
 precedence over missing-generation; the exact Plan sentinel takes precedence over
 either.
 
-Every invocation compares singleton lists, separately for condition and Plan at
+Lexical metrics compare singleton lists, separately for condition and Plan at
 each rank. Text-metric rank order is preserved without weighting.
 BLEU uses corpus statistics for that singleton; METEOR and ROUGE/BERTScore F1
 retain the upstream reductions. These are not cohort-level scores, and averaging
 per-patient BLEUs is not corpus BLEU. Raw BERTScore is not a correctness
-probability. Encoder truncation, upstream import-time NLTK download attempts,
-and per-call BERTScore model initialization remain upstream behavior.
+probability. The project adapter reuses one persistent BERTScore model and
+batches up to 64 pending text pairs, returning one F1 per pair. Encoder truncation
+and upstream import-time NLTK download attempts remain unchanged; batching does
+not turn per-pair scores into a cohort-level reduction.
 
 ### Preliminary correctness metric (single-model midterm)
 
@@ -453,9 +479,9 @@ and per-call BERTScore model initialization remain upstream behavior.
 > BioLORD-2023 clinical concept similarity score (no LLM judge; not an accuracy
 > or probability), and Plan correctness uses
 > one judge model, selected by `plan_judge` in `experiments/configs/experiment.yaml`
-> (currently `ollama_qwen2_5_14b`, Ollama tag `qwen2.5:14b`, about 9 GB). The
-> judge is a registry model, not a generating model; the runner and resume
-> command load it on their own. If it cannot be loaded, every Plan entry is
+> (currently `ollama_qwen2_5_14b_speedup`, Ollama tag `qwen2.5:14b`, about 9 GB). The
+> judge is a separate registry model. Only `judge_treatment_plans.py` loads it;
+> generation defers nonempty judgeable Plans. If the judge cannot be loaded, Plan entries are
 > `unavailable` with reason `judge_unavailable` and diagnoses are still scored.
 
 The runner also scores every completed prediction for correctness. Each
@@ -558,7 +584,7 @@ status:
   in any case or spacing, such as `( Record  Artifact )`),
   `missing_reference` (empty or blank reference Plan), `missing_generation`,
   `invalid_generation` (malformed prediction pair or field), or
-  `judge_unavailable` (the Plan judge model is not among `selected_models`).
+  `judge_unavailable` (the Plan judge is unavailable to the evaluation stage).
   Reference reasons take precedence over generation reasons.
 - `error`: `similarity_failed` (BioLORD could not be loaded or returned unusable
   embeddings; saved in `run.json.errors` as `SimilarityError`) or
@@ -578,7 +604,7 @@ Correctness scoring only runs for model slots whose generation `completed`.
 Records from runs without it have no correctness keys, and the report shows
 them as not recorded rather than zero.
 
-**Full runner resumption.** `python scripts/run_med_copilot.py --resume RUN_DIRECTORY`
+**Full runner resumption.** `python run_experiments.py --config CONFIG_PATH --resume RUN_DIRECTORY`
 continues a schema-4 run using the same experiment settings and verified inputs,
 models, prompts, scoring definitions, and reference resources. Completed
 components, generations (including completed malformed replies), and successful
@@ -595,7 +621,41 @@ untouched. Original metadata remains; `run.json.resumptions` adds resume time,
 branch, commit, current model/source fingerprints, and correctness metadata. Missing original
 correctness metadata is filled when judging is first attached.
 
-`.patient_checkpoint.json` is an atomic, flushed snapshot of the current patient
+The concurrent runner's `jobs.sqlite3` stores independently keyed preparation,
+generation, and scoring jobs in durable SQLite transactions. Evidence workers
+wait for a save acknowledgement after each obtained paid-step response; final
+generation replies are committed before parsing. Received replies can therefore
+be reparsed after a crash without another provider call. Scoring commits finite
+patient batches, preserving completed fields. On resume, newer durable jobs are
+merged with canonical results before work is scheduled. `results.jsonl` is still
+the report input and is exported atomically at phase boundaries and controlled
+stops. Keep the database and its WAL/SHM sidecars with the run directory; a hard
+crash can leave newer work there than in the last JSONL export. Invalid saved
+structures are rejected before paid resumed work.
+
+**Automatic preparation worker recovery.** Unexpected subprocess exits and
+broken pipes replace only the affected worker and retry its interrupted patient.
+The retry reloads the latest committed `preparation` job rather than the snapshot
+originally submitted to the dead worker. Completed evidence components, captured
+responses, exact prompts, and ranking metadata remain available, while completed
+generation and evaluation fields are preserved. A committed checkpoint is reused
+even if the worker died before receiving its acknowledgement. Work whose response
+was never durably saved can be repeated; this is not exactly-once API execution.
+
+The fixed budget is two worker replacements per interrupted patient per
+invocation. `run.json.preparation_recovery` records the policy and redacted
+recovery events/attempts, also appended to `preparation-recovery.log`.
+Startup deaths before a patient is assigned have the same two-replacement
+budget per worker slot; their events have `patient_id: null`. Replacement
+process diagnostics append to the worker slot's `preparation-N.log`.
+Exhaustion stops new work and leaves durable jobs available for explicit manual
+`--resume` after addressing the cause. Manual resume starts a fresh recovery
+budget. Configuration, validation, protocol, and checkpoint-writing failures
+remain fatal and are not retried automatically. This recovery path adds no
+experiment setting and does not relax the exact `experiment.yaml` resume checks.
+
+The serial runner resumes with `python scripts/run_med_copilot.py --resume RUN_DIRECTORY`.
+Its `.patient_checkpoint.json` is an atomic, flushed snapshot of the current patient
 after each completed component, keyword request, screened query, model call, or
 score field. It carries `_base_results_sha256` so a newer checkpoint can override
 its original row while a stale snapshot cannot roll back a subsequently saved
@@ -624,12 +684,17 @@ nonempty judgeable Plans remain `pending` with reason `deferred`, and no Plan
 model or response cache is loaded by the runner. Empty generated Plans can
 still receive the rubric's deterministic zero without a model call.
 
-`python scripts/judge_treatment_plans.py RUN_DIRECTORY` finishes only
+`python judge_treatment_plans.py RUN_DIRECTORY` finishes only
 Plan correctness after generation finishes. It rebuilds the recorded cohort
 (refusing changed input or labels), loads only the recorded Plan judge, and
-preserves generation, evidence, text metrics, and diagnosis scores. Bounded
-concurrency comes from the saved `experiment.plan_judge_concurrency` (default
-2 for older runs; valid range 1–64). Identical concurrent valid requests share
+preserves generation, evidence, text metrics, and diagnosis scores. Optional
+`--concurrency N` (1–64) and `--context-length N` (positive token count) change
+only that Plan stage's runtime. Explicit overrides take precedence over the
+previous `plan_evaluation.concurrency` and `context_length`, then the original
+experiment defaults (shipped concurrency/context: 8/4096; older defaults: 2/8192).
+Without overrides, subsequent invocations reuse the last saved stage settings.
+The request pool and owned Ollama server use the same effective values; the
+original experiment YAML and `run.json.experiment` are unchanged. Identical concurrent valid requests share
 one response. Scalar replies are the durable incremental checkpoint;
 `results.jsonl` is exported atomically once on completion or controlled stop,
 then the report is regenerated after a successful invocation. Following an
@@ -637,8 +702,11 @@ abrupt crash, aggregate Plan scores are reconstructed using saved scalar replies
 
 Both commands acquire the same exclusive `.run.lock`; the OS releases ownership
 after a crash and the lock file remains. The evaluator records its independent
-status, timing, concurrency, counts, and judge provenance in
+status, start/finish times, concurrency, context length, counts, and judge provenance in
 `run.json.plan_evaluation`, preserving the generation run's status and timestamps.
+Before each new invocation, the previous stage object is appended to
+`run.json.plan_evaluation_history`; changing runtime settings preserves earlier
+measurements and valid cached replies in the same run directory.
 It exits 0 when every applicable Plan entry finished, 1 when inputs cannot be
 used or some Plan entries still failed (rerun to retry them), and 130 when
 interrupted. Neither generation nor completed text/diagnosis scoring is repeated.

@@ -72,3 +72,13 @@ AGENTS.md
 .vscode
 
 med_copilot/docs/evaluation_literature_review.md
+
+# Generated experiment diagnostics and recovery databases
+/experiments/output/**/*.log
+/experiments/output/**/jobs.sqlite3
+/experiments/output/**/jobs.sqlite3-wal
+/experiments/output/**/jobs.sqlite3-shm
+
+# Runtime coordination files
+/experiments/output/**/.run.lock
+/med_copilot/data/patient_retrieval_so/.initialization.lock
