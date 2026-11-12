@@ -762,6 +762,7 @@ class PipelineSettingsTests(unittest.TestCase):
         config = ExperimentConfig(self.path)
         expected = {
             "plan_judge": "ollama_qwen2_5_14b",
+            "plan_judge_concurrency": 2,
             "guidelines": "med_copilot/data/guidelines",
             "experiment_output": "experiments/output",
             "patient_corpus": "med_copilot/data/patient_corpus/reference_patients.json",
@@ -778,7 +779,7 @@ class PipelineSettingsTests(unittest.TestCase):
         for field, value in expected.items():
             self.assertEqual(config.metadata(ROOT)[field], value)
             self.assertEqual(getattr(config, field), ROOT / value if field in PATH_SETTINGS else value)
-        self.assertEqual(len(config.metadata(ROOT)), 28)  # 25 effective settings + three provenance fields
+        self.assertEqual(len(config.metadata(ROOT)), 29)  # Effective settings and three provenance fields.
 
     def test_paths_resolve_from_repo_root_and_absolute_paths_are_preserved_from_other_cwd(self):
         for field in PATH_SETTINGS:
@@ -801,6 +802,7 @@ class PipelineSettingsTests(unittest.TestCase):
             "patient_retrieval_alpha": [None, "0.5", True, -0.1, 1.1, float("nan"), float("inf"), []],
             "patient_retrieval_top_k": [None, 0, -1, True, 1.0, "20"],
             "patient_rerank_top_k": [None, 0, -1, False, 1.0, "5"],
+            "plan_judge_concurrency": [None, 0, -1, True, 1.0, "2", [], 65],
             "guideline_community_level": [None, -1, True, 1.0, "2"],
             "guideline_verbose": [None, 0, 1, "false", []],
         })
@@ -832,6 +834,14 @@ class PipelineSettingsTests(unittest.TestCase):
         self.assertEqual(config.selected_models, ["mini"])
         self.assertEqual(config.metadata(ROOT)["plan_judge"], "custom_judge")
         self.assertEqual(config.metadata(ROOT)["config_sha256"], hashlib.sha256(self.path.read_bytes()).hexdigest())
+
+    def test_plan_judge_concurrency_boundaries_are_recorded(self):
+        for workers in (1, 2, 64):
+            self.data["plan_judge_concurrency"] = workers
+            self.write()
+            config = ExperimentConfig(self.path)
+            self.assertEqual(config.plan_judge_concurrency, workers)
+            self.assertEqual(config.metadata(ROOT)["plan_judge_concurrency"], workers)
 
     def test_new_pipeline_fields_do_not_expand_the_confirmation_display(self):
         self.data.update(PIPELINE_DEFAULTS)

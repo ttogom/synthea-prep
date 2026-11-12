@@ -38,6 +38,7 @@ python tests/test_med_copilot_helpers.py
 python tests/test_med_copilot_retrieval.py
 python tests/test_med_copilot_observability.py
 python tests/test_med_copilot_judges.py
+python tests/test_med_copilot_plan_evaluation.py
 python tests/test_med_copilot_scoring.py
 python tests/test_med_copilot_models.py
 python tests/test_collate_med_copilot_results.py
@@ -47,9 +48,25 @@ python scripts/run_med_copilot.py
 python scripts/run_med_copilot.py --presenting-evidence-only false
 # Continue an interrupted run, including missing generations and scores:
 python scripts/run_med_copilot.py --resume experiments/output/<run-directory>
-# Finish an interrupted evaluation without repeating completed judge calls:
-python scripts/resume_med_copilot_evaluation.py experiments/output/<run directory>
+# After generation finishes, judge Plans; rerun this same command after interruption:
+python scripts/judge_treatment_plans.py experiments/output/<run-directory>
 ```
+
+The runner calculates text metrics and BioLORD diagnosis similarity, leaving
+Plan correctness pending with reason `deferred`. The separate evaluator loads
+only the recorded `plan_judge`, preserves generation and existing text/diagnosis
+scores, and regenerates the report after judging. Install/serve the configured
+judge before starting that stage. `plan_judge_concurrency` in `experiment.yaml`
+limits simultaneous judge requests (default 2; range 1–64); the evaluator uses
+the value saved in the run, so choose it before generation. Actual parallel
+inference also depends on the provider/server capacity.
+
+Each scalar judge response is saved durably for reuse after crashes. The
+evaluator exports results once per invocation or controlled interruption rather
+than rewriting the full results file after every patient. Both commands lock
+the run directory to prevent simultaneous writers. Generation must finish before
+starting Plan evaluation; its separate status is recorded in
+`run.json.plan_evaluation`.
 
 `--resume` continues a schema-4 run in its existing directory. It preserves
 completed evidence, exact final prompts, completed model responses, successful

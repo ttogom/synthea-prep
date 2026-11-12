@@ -53,6 +53,9 @@ CONFIG = ROOT / "scripts" / "med_copilot_config.py"
 STARTUP = ROOT / "scripts/med_copilot_startup.py"
 RUN_FILE_MODULE = ROOT / "scripts/med_copilot_run_file.py"
 JUDGES_MODULE = ROOT / "scripts/med_copilot_judges.py"
+RUN_LOCK_MODULE = ROOT / "scripts/med_copilot_run_lock.py"
+PLAN_EVALUATION_MODULE = ROOT / "scripts/med_copilot_plan_evaluation.py"
+PLAN_EVALUATION_COMMAND = ROOT / "scripts/judge_treatment_plans.py"
 # Plan judge prompts (per reference action, then unsupported extras); diagnoses use BioLORD.
 JUDGE_PROMPT_PREFIXES = ("Grade whether the generated plan covers", "Count the distinct generated actions")
 BIOLORD_MODEL = "FremyCompany/BioLORD-2023"
@@ -397,6 +400,9 @@ class PipelineFixture:
         (self.script.parent / REGISTRY.name).write_bytes(REGISTRY.read_bytes())
         (self.script.parent / STARTUP.name).write_bytes(STARTUP.read_bytes())
         (self.script.parent / RUN_FILE_MODULE.name).write_bytes(RUN_FILE_MODULE.read_bytes())
+        (self.script.parent / RUN_LOCK_MODULE.name).write_bytes(RUN_LOCK_MODULE.read_bytes())
+        (self.script.parent / PLAN_EVALUATION_MODULE.name).write_bytes(PLAN_EVALUATION_MODULE.read_bytes())
+        (self.script.parent / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
         (self.script.parent / JUDGES_MODULE.name).write_bytes(JUDGES_MODULE.read_bytes())
         (self.script.parent / QUESTION_SCREEN.name).write_bytes(QUESTION_SCREEN.read_bytes())
         (self.script.parent / COLLATOR.name).write_bytes(COLLATOR.read_bytes())
@@ -811,6 +817,7 @@ class PipelineFixture:
                              "scripts.med_copilot_helpers", "scripts.med_copilot_models", "scripts.med_copilot_config",
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
                              "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
+                             "scripts.med_copilot_run_lock", "scripts.med_copilot_plan_evaluation",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
@@ -885,7 +892,7 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             dirs = self.run_dirs()
             self.assertEqual(len(dirs), 1, dirs)
             run_dir = dirs[0]
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (run_dir / name).exists()})
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json", ".run.lock") if (run_dir / name).exists()})
         run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
         text = (run_dir / "results.jsonl").read_text(encoding="utf-8")
         self.assertTrue(text == "" or text.endswith("\n"))
@@ -4165,7 +4172,7 @@ class ScoringIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(evaluation["settings"]["aggregation"], "per_patient_per_rank_per_field_singleton")
         self.assertEqual(fixture.input_path.read_bytes(), input_bytes)
         self.assertEqual(fixture.labels_path.read_bytes(), label_bytes)
-        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (run_dir / name).exists()})
+        self.assertEqual({path.name for path in run_dir.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json", ".run.lock") if (run_dir / name).exists()})
 
     def test_default_filter_joins_shuffled_superset_labels_by_id_and_keeps_input_order(self):
         fixture = self.fixture
@@ -4620,7 +4627,7 @@ class MultiModelIntegrationTests(FailedRunAssertions, unittest.TestCase):
         [directory] = self.run_dirs()
         run = json.loads((directory / "run.json").read_text())
         records = [json.loads(line) for line in (directory / "results.jsonl").read_text().split("\n") if line]
-        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json") if (directory / name).exists()})
+        self.assertEqual({file.name for file in directory.iterdir()}, {"run.json", "results.jsonl"} | {name for name in ("results_summary.html", "judge_responses.jsonl", ".patient_checkpoint.json", ".run.lock") if (directory / name).exists()})
         for record in records:
             self.assertEqual(list(record), V4_RESULT_FIELDS if "components" in record else V3_RESULT_FIELDS if "variants" in record else V2_RESULT_FIELDS)
             self.assertNotIn("assessment_plan", schema3_view(record)["model_responses"])
@@ -5653,8 +5660,8 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(len(fixture.keyword_calls), 1)
         self.assertEqual(len(fixture.graph_calls), 1)
         self.assertEqual(len(fixture.scoring_calls), 96)
-        # Four generating models plus the separately loaded preliminary Plan judge.
-        self.assertEqual(len(fixture.model_configs), 5)
+        # Only the four generators load; Plan judging runs separately.
+        self.assertEqual(len(fixture.model_configs), 4)
         for field, value in self.experiment.items():
             self.assertEqual(run["experiment"][field], value if field != "variant_settings" else runner_config_metadata(self.fixture)[field])
         for variant in row["variants"].values():
@@ -5662,7 +5669,7 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(fixture.stdout.getvalue().count("Best variant: llm_only"), 4)
         self.assertIn("Planned final requests: 16", fixture.stdout.getvalue())
 
-    def test_unloadable_plan_judge_marks_plans_unavailable_and_still_scores_diagnoses(self):
+    def test_unloadable_plan_judge_is_deferred_and_diagnoses_still_score(self):
         fixture = self.fixture
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         del self.config["models"]["ollama_qwen2_5_14b"]
@@ -5672,15 +5679,15 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.write_config()
         status, run, [row] = self.execute()
         self.assertEqual(status, "completed")
-        self.assertIn("Plan judge ollama_qwen2_5_14b unavailable", fixture.stderr.getvalue())
+        self.assertNotIn("Plan judge ollama_qwen2_5_14b unavailable", fixture.stderr.getvalue())
         self.assertEqual(fixture.judge_calls, [])
         self.assertFalse(run["evaluation"]["correctness"]["plan"]["judge_available"])
         entry = row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]["evaluation"][0]
         self.assertEqual((entry["plan_correctness"]["status"], entry["plan_correctness"]["reason"]),
-                         ("unavailable", "judge_unavailable"))
+                         ("pending", "deferred"))
         self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
 
-    def test_shipped_selection_scores_biolord_diagnoses_and_judges_plans_with_one_local_model(self):
+    def test_shipped_selection_scores_diagnoses_and_defers_plans_without_loading_judge(self):
         fixture = self.fixture
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
@@ -5694,38 +5701,33 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.assertEqual(correctness["status"], "preliminary single-model midterm metric")
         self.assertEqual(correctness["rank_weighting"]["weights"], {"1": 1.0, "2": 0.5, "3": 1 / 3})
         judge_alias = correctness["plan"]["judge_model"]
-        # The Plan judge is a registry model loaded on its own, not a generating model.
+        # Plan selection is recorded without loading it in the generation process.
         self.assertEqual(judge_alias, "ollama_qwen2_5_14b")
         self.assertNotIn(judge_alias, self.experiment["selected_models"])
         self.assertIn(judge_alias, self.config["models"])
-        self.assertEqual(correctness["selected_models"], [judge_alias])
+        self.assertEqual(correctness["selected_models"], [])
         self.assertEqual(correctness["plan"]["generator_models"], self.experiment["selected_models"])
         self.assertEqual(correctness["plan"]["self_judging"], "the judge is not a generating model")
         self.assertEqual(correctness["plan"]["validation_status"], "passed_balanced_sample")
-        self.assertEqual(correctness["plan"]["judge_model_config"]["selected_models"], [judge_alias])
-        self.assertTrue(correctness["plan"]["judge_available"])
+        self.assertIsNone(correctness["plan"]["judge_model_config"])
+        self.assertFalse(correctness["plan"]["judge_available"])
+        self.assertEqual(correctness["plan"]["execution"], "deferred")
         self.assertEqual(fixture.biolord_loads, [{"revision": correctness["diagnosis"]["model_revision"]}])
-        judge_model = "openai/" + self.config["models"][judge_alias]["model"]
-        self.assertEqual({request["model"] for request in fixture.judge_calls}, {judge_model})
-        for request in fixture.judge_calls:
-            self.assertEqual((request["temperature"], request["response_format"]), (0, {"type": "json_object"}))
-            prompt = request["messages"][-1]["content"]
-            for hidden in (*self.experiment["selected_models"], *self.experiment["selected_variants"]):
-                self.assertNotIn(hidden, prompt)
+        self.assertEqual(fixture.judge_calls, [])
+        self.assertEqual([name for name, _ in fixture.model_configs], self.experiment["selected_models"])
         for variant in row["variants"].values():
             for generator, slot in variant["assessment_plans"].items():
                 for rank, entry in enumerate(slot["evaluation"], 1):
-                    for kind in ("diagnosis_correctness", "plan_correctness"):
-                        judged = entry[kind]
-                        self.assertEqual((judged["status"], judged["score"]), ("scored", 1.0))
-                        self.assertAlmostEqual(judged["weighted_score"], 1 / rank)
+                    judged = entry["diagnosis_correctness"]
+                    self.assertEqual((judged["status"], judged["score"]), ("scored", 1.0))
+                    self.assertAlmostEqual(judged["weighted_score"], 1 / rank)
                     self.assertEqual(entry["diagnosis_correctness"]["method"], "biolord_2023_cosine")
-                    self.assertEqual({judge["judge_model"] for judge in entry["plan_correctness"]["judges"]},
-                                     {judge_alias})
+                    self.assertEqual((entry["plan_correctness"]["status"], entry["plan_correctness"]["reason"]),
+                                     ("pending", "deferred"))
+                    self.assertEqual(entry["plan_correctness"]["judges"], [])
         [run_dir] = self.run_dirs()
-        saved = [json.loads(line) for line in (run_dir / "judge_responses.jsonl").read_text().splitlines()]
-        self.assertEqual(len(saved), len(fixture.judge_calls))
-        self.assertEqual(len({entry["key"] for entry in saved}), len(saved))
+        self.assertFalse((run_dir / "judge_responses.jsonl").exists())
+        self.assertIn("deferred", (run_dir / "results_summary.html").read_text().lower())
 
     def test_prompt_variants_remove_only_evidence_sections_and_preserve_combined_verbatim(self):
         original = PROMPTS["EVALUATE_TEMPLATE_KEYINFO"]
@@ -6330,28 +6332,24 @@ class RunnerResumeTests(unittest.TestCase):
         self.assertEqual(self.invoke(runner, folder), "completed")
         self.assertEqual([len(calls) for calls in (f.calls, f.judge_calls, f.bert_batches, f.scoring_calls)], counts)
 
-    def test_real_batch_judge_interruption_reuses_all_text_and_completed_judge_responses(self):
+    def test_real_batch_scoring_defers_plans_and_resume_never_calls_a_judge(self):
         f = self.fixture
         f.batch_metrics = True
         self.experiment["plan_judge"] = "llama"
         self.write_config()
-        def interrupted(request):
-            if len(f.judge_calls) == 2:
-                raise KeyboardInterrupt()
-        f.judge_reply = interrupted
+        f.judge_reply = Mock(side_effect=AssertionError("The runner must not call a Plan judge"))
         runner = self.load_runner()
-        with self.assertRaises(KeyboardInterrupt):
-            self.invoke(runner)
-        folder, _, _ = self.saved()
-        first_request = deepcopy(f.judge_calls[0])
-        previous_calls = len(f.judge_calls)
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, _, [before] = self.saved()
         generation_count = len(f.calls)
-        f.judge_reply = None
+        self.assertEqual(f.judge_calls, [])
+        self.assertFalse((folder / "judge_responses.jsonl").exists())
         self.assertEqual(self.invoke(runner, folder), "completed")
-        self.assertNotIn(first_request, f.judge_calls[previous_calls:])
+        self.assertEqual(self.saved()[2], [before])
         self.assertEqual(len(f.calls), generation_count)
         self.assertEqual([len(call[0]) for call in f.bert_batches], [48])
         self.assertEqual(len(f.scoring_calls), 48)
+        f.judge_reply.assert_not_called()
 
     def test_changed_metric_implementation_blocks_resume_before_touching_artifacts(self):
         f = self.fixture
@@ -6700,63 +6698,61 @@ class RunnerResumeTests(unittest.TestCase):
                     f.experiment_config.write_bytes(original)
         self.assertEqual(self.invoke(runner, folder), "completed")
 
-    def test_same_judge_alias_allows_registry_model_endpoint_and_output_changes_on_resume(self):
+    def test_same_judge_alias_allows_registry_changes_without_opening_judge_cache(self):
         f = self.fixture
         alias = "ollama_qwen2_5_14b"
         original = {"type": "chat", "model_provider": "openai", "model": "original-judge",
                     "api_base": "http://localhost:11434/v1", "output_mode": "json_object"}
         self.config["models"][alias] = deepcopy(original)
         self.write_config()
-        def interrupt_judging(request):
-            if len(f.judge_calls) == 2:
-                raise KeyboardInterrupt()
-        f.judge_reply = interrupt_judging
-        with self.assertRaises(KeyboardInterrupt):
-            self.invoke(self.load_runner())
+        self.assertEqual(self.invoke(self.load_runner()), "completed")
         folder, _, _ = self.saved()
         cache = folder / "judge_responses.jsonl"
-        cached_lines = cache.read_bytes()
-        self.assertEqual(len(cached_lines.splitlines()), 1)
-        old_count = len(f.judge_calls)
+        # Even an audit file that the judge cache parser would reject stays untouched.
+        cached_lines = b"external audit bytes\n"
+        cache.write_bytes(cached_lines)
         self.config["models"][alias].update(model="replacement-judge", api_base="http://other-server/v1",
                                             output_mode="prompt")
         self.write_config()
-        f.judge_reply = None
+        before = [len(f.calls), len(f.scoring_calls)]
         self.assertEqual(self.invoke(self.load_runner(), folder), "completed")
-        self.assertTrue(cache.read_bytes().startswith(cached_lines))
-        self.assertEqual({call["model"] for call in f.judge_calls[old_count:]}, {"openai/replacement-judge"})
+        self.assertEqual(cache.read_bytes(), cached_lines)
+        self.assertEqual(f.judge_calls, [])
+        self.assertEqual([len(f.calls), len(f.scoring_calls)], before)
         self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["plan"]["judge_model"], alias)
 
-    def test_configured_plan_judge_can_reuse_a_generating_model_and_records_every_setting(self):
+    def test_configured_judge_alias_is_recorded_without_judging_its_generations(self):
         self.experiment["plan_judge"] = "llama"
+        self.experiment["plan_judge_concurrency"] = 4
         self.write_config()
         runner = self.load_runner()
         self.assertEqual(self.invoke(runner), "completed")
         _, metadata, _ = self.saved()
         self.assertEqual(metadata["experiment"]["plan_judge"], "llama")
+        self.assertEqual(metadata["experiment"]["plan_judge_concurrency"], 4)
         self.assertEqual(metadata["evaluation"]["correctness"]["plan"]["judge_model"], "llama")
-        self.assertEqual(len(self.fixture.model_configs), 2)  # No duplicate judge model initialization.
-        self.assertEqual({call["model"] for call in self.fixture.judge_calls}, {"groq/llama-3.3-70b-versatile"})
+        self.assertEqual(len(self.fixture.model_configs), 2)
+        self.assertEqual(self.fixture.judge_calls, [])
         for key in yaml.safe_load(self.fixture.experiment_config.read_text()):
             self.assertIn(key, metadata["experiment"])
 
-    def test_configured_separate_judge_is_loaded_and_recorded(self):
+    def test_configured_separate_judge_is_recorded_without_loading_it(self):
         self.experiment["plan_judge"] = "custom_judge"
         self.config["models"]["custom_judge"] = {
             "type": "chat", "model_provider": "openai", "model": "custom-judge-model",
-            "api_base": "http://localhost:11434/v1", "output_mode": "json_object"}
+            "api_key_env": "MISSING_JUDGE_CREDENTIAL", "output_mode": "json_object"}
         self.write_config()
         self.assertEqual(self.invoke(self.load_runner()), "completed")
         _, metadata, _ = self.saved()
         self.assertEqual(metadata["experiment"]["plan_judge"], "custom_judge")
         plan = metadata["evaluation"]["correctness"]["plan"]
         self.assertEqual(plan["judge_model"], "custom_judge")
-        self.assertEqual(plan["judge_model_config"]["selected_models"], ["custom_judge"])
-        self.assertEqual(len(self.fixture.model_configs), 3)
-        self.assertEqual({call["model"] for call in self.fixture.judge_calls}, {"openai/custom-judge-model"})
+        self.assertIsNone(plan["judge_model_config"])
+        self.assertEqual(len(self.fixture.model_configs), 2)
+        self.assertEqual(self.fixture.judge_calls, [])
         self.assertEqual(metadata["assessment_plan_models"]["selected_models"], self.experiment["selected_models"])
 
-    def test_unknown_configured_judge_keeps_generations_and_diagnosis_scoring(self):
+    def test_unknown_judge_keeps_generations_diagnoses_and_explicitly_deferred_plans(self):
         self.experiment["plan_judge"] = "missing_judge"
         self.write_config()
         self.assertEqual(self.invoke(self.load_runner()), "completed")
@@ -6767,7 +6763,63 @@ class RunnerResumeTests(unittest.TestCase):
         slot = row["variants"]["llm_only"]["assessment_plans"]["gpt_4o_mini"]
         self.assertEqual(slot["status"], "completed")
         self.assertEqual(slot["evaluation"][0]["diagnosis_correctness"]["status"], "scored")
-        self.assertEqual(slot["evaluation"][0]["plan_correctness"]["reason"], "judge_unavailable")
+        self.assertEqual(slot["evaluation"][0]["plan_correctness"]["reason"], "deferred")
+
+    def test_busy_evaluation_lock_blocks_resume_before_saved_artifacts_or_calls_change(self):
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, _, _ = self.saved()
+        before = {path.name: path.read_bytes() for path in folder.iterdir()}
+        counts = [len(calls) for calls in (self.fixture.calls, self.fixture.scoring_calls)]
+        acquire = runpy.run_path(str(RUN_LOCK_MODULE))["exclusive_run_lock"]
+        with acquire(folder):
+            self.assertEqual(self.invoke(runner, folder), "resume_error")
+        self.assertEqual({path.name: path.read_bytes() for path in folder.iterdir()}, before)
+        self.assertEqual([len(calls) for calls in (self.fixture.calls, self.fixture.scoring_calls)], counts)
+        self.assertIn("already in use", self.fixture.stderr.getvalue())
+        self.assertEqual(self.invoke(runner, folder), "completed")
+
+    def test_separate_plan_command_preserves_other_stages_and_runner_can_resume_afterward(self):
+        f = self.fixture
+        self.experiment.update(plan_judge="llama", plan_judge_concurrency=2)
+        self.write_config()
+        runner = self.load_runner()
+        self.assertEqual(self.invoke(runner), "completed")
+        folder, original_metadata, original = self.saved()
+        counts = [len(calls) for calls in (f.calls, f.retrieval_calls, f.graph_calls,
+                                          f.scoring_calls, f.biolord_loads)]
+        model_count = len(f.model_configs)
+        with f.runtime():
+            command = runpy.run_path(str(f.script.parent / PLAN_EVALUATION_COMMAND.name))
+            self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
+        _, metadata, judged = self.saved()
+        self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
+        self.assertEqual(metadata["plan_evaluation"]["concurrency"], 2)
+        self.assertEqual(metadata["status"], original_metadata["status"])
+        self.assertEqual(metadata["finished_at"], original_metadata["finished_at"])
+        self.assertEqual([name for name, _ in f.model_configs[model_count:]], ["llama"])
+        self.assertEqual([len(calls) for calls in (f.calls, f.retrieval_calls, f.graph_calls,
+                                                 f.scoring_calls, f.biolord_loads)], counts)
+        for before, after in zip(original, judged):
+            for variant in before["variants"]:
+                for model in before["variants"][variant]["assessment_plans"]:
+                    old = before["variants"][variant]["assessment_plans"][model]
+                    new = after["variants"][variant]["assessment_plans"][model]
+                    for old_rank, new_rank in zip(old["evaluation"], new["evaluation"]):
+                        self.assertEqual(new_rank["plan_correctness"]["status"], "scored")
+                        for field in ("condition", "plan", "diagnosis_correctness"):
+                            self.assertEqual(new_rank[field], old_rank[field])
+                    old["evaluation"] = new["evaluation"]
+            self.assertEqual(after, before)
+        calls = len(f.judge_calls)
+        cache = (folder / "judge_responses.jsonl").read_bytes()
+        with f.runtime():
+            command = runpy.run_path(str(f.script.parent / PLAN_EVALUATION_COMMAND.name))
+            self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
+        self.assertEqual(self.invoke(runner, folder), "completed")
+        self.assertEqual(len(f.judge_calls), calls)
+        self.assertEqual((folder / "judge_responses.jsonl").read_bytes(), cache)
+        self.assertEqual(self.saved()[2], judged)
 
     def test_result_fsync_failure_preserves_recovery_snapshot_for_restart(self):
         runner, f = self.load_runner(), self.fixture

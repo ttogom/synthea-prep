@@ -72,6 +72,7 @@ CORRECTNESS_REASONS = {
     "similarity_failed": "BioLORD clinical concept similarity failed",
     "experimental_unvalidated": "Experimental, unvalidated; excluded from aggregates; not accuracy",
     "interrupted": "Judging interrupted",
+    "deferred": "Plan judging deferred to the separate evaluation stage",
     "pending": "Judging not attempted",
     "not_judged": "Judging not recorded",
     "not_processed": "Generation not completed; judging unavailable",
@@ -162,7 +163,8 @@ def _correctness(entry, generated):
         # Shown per prediction for review, but no aggregate counts a non-"scored" status.
         return {"status": EXPERIMENTAL_UNVALIDATED, "score": score, "weighted_score": weighted,
                 "reason": CORRECTNESS_REASONS[EXPERIMENTAL_UNVALIDATED]}
-    reason_key = entry.get("reason") if status in ("scored", "unavailable", "error") else status
+    reason_key = entry.get("reason") if (status in ("scored", "unavailable", "error")
+                                         or status == "pending" and entry.get("reason") == "deferred") else status
     reason = CORRECTNESS_REASONS.get(reason_key if isinstance(reason_key, str) else status,
                                      "Judging unavailable")
     if status != "scored":
@@ -465,6 +467,17 @@ def load_report_data(run_dir, *, root=ROOT):
                            "separate relevant Plans from placeholder and off-target Plans. Its per-prediction "
                            "scores are shown for review only, are excluded from every aggregate (cards, "
                            "statistics, console summary), and are not a measure of accuracy.")
+    deferred_plans = sum(
+        entry["status"] == "pending" and (entry["reason"] == CORRECTNESS_REASONS["deferred"]
+                                          or isinstance(metadata.get("plan_evaluation"), dict))
+        for patient in patients for output in patient["outputs"]
+        for prediction in output["predictions"]
+        for entry in [prediction["correctness"]["plan"]]
+    )
+    if deferred_plans:
+        notices.append(f"Plan judging is deferred to the separate evaluation stage: {deferred_plans} Plan "
+                       "entries are still pending and excluded from Plan-score aggregates. "
+                       "Text metrics and diagnosis scores are reported independently.")
     if expected_hash is None:
         notices.append("Reference labels have no saved fingerprint; their original contents could not be verified.")
     if not patients:

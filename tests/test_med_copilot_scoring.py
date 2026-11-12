@@ -1198,7 +1198,7 @@ class ResumeEvaluationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cohort"):
             self.resume(FakeJudgeModels())
 
-    def test_evaluation_only_command_still_recalculates_all_previously_saved_text_scores(self):
+    def test_legacy_full_rescore_function_recalculates_previously_saved_text_scores(self):
         self.write_run()
         self.resume(FakeJudgeModels())
         replacement = {name: 0.125 for name in METRIC_NAMES}
@@ -1211,11 +1211,11 @@ class ResumeEvaluationTests(unittest.TestCase):
                             for e in output["evaluation"] for field in ("condition", "plan")))
 
 
-RESUME_SCRIPT = ROOT / "scripts/resume_med_copilot_evaluation.py"
+RESUME_SCRIPT = ROOT / "scripts/judge_treatment_plans.py"
 
 
 class ResumeCommandTests(unittest.TestCase):
-    """Command-level checks of scripts/resume_med_copilot_evaluation.py with fake judge models."""
+    """Command-level checks of scripts/judge_treatment_plans.py with fake judge models."""
     setUp = PatientScorerTests.setUp
     write_labels = PatientScorerTests.write_labels
     result = PatientScorerTests.result
@@ -1260,7 +1260,7 @@ class ResumeCommandTests(unittest.TestCase):
         rows = [json.loads(line) for line in (self.run_dir / "results.jsonl").read_text().splitlines()]
         return rows, json.loads((self.run_dir / "run.json").read_text())
 
-    def test_success_scores_every_patient_writes_the_report_and_exits_zero(self):
+    def test_success_judges_only_plans_writes_the_report_and_exits_zero(self):
         self.build_run()
         status, stdout, stderr, models = self.command()
         self.assertEqual((status, stderr), (0, ""))
@@ -1268,7 +1268,10 @@ class ResumeCommandTests(unittest.TestCase):
         self.assertTrue((self.run_dir / "results_summary.html").is_file())
         rows, run = self.saved()
         entry = rows[1]["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][0]
-        self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
+        self.assertEqual(entry["plan_correctness"]["status"], "scored")
+        self.assertNotIn("diagnosis_correctness", entry)
+        self.assertNotIn("condition", entry)
+        self.assertNotIn("plan", entry)
         # patient-b's label is ["none recorded"], so its Plans are never judged.
         none_recorded = rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
         self.assertEqual(none_recorded["plan_correctness"]["reason"], "no_recorded_plan")
@@ -1288,7 +1291,7 @@ class ResumeCommandTests(unittest.TestCase):
             return judge if selected_models == ["custom_judge"] else generators
         status, _, stderr, _ = self.command(models=generators, models_factory=factory)
         self.assertEqual((status, stderr), (0, ""))
-        self.assertEqual(requested, [list(JUDGE_MODELS), ["custom_judge"]])
+        self.assertEqual(requested, [["custom_judge"]])
         self.assertEqual({model for model, _ in judge.requests}, {"custom_judge"})
         self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["plan"]["judge_model"], "custom_judge")
 
@@ -1323,7 +1326,9 @@ class ResumeCommandTests(unittest.TestCase):
         self.assertEqual(status, 130)
         self.assertIn("rerun this command to resume", stderr)
         cached = len((self.run_dir / "judge_responses.jsonl").read_text().splitlines())
-        self.assertEqual(cached, 1)
+        # Other already-running requests may finish while interruption drains
+        # the bounded executor; every such valid response must be retained.
+        self.assertGreaterEqual(cached, 1)
         status, _, _, models = self.command()
         self.assertEqual(status, 0)
         requested = {(model, prompt) for model, prompt in models.requests}

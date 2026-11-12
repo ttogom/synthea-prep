@@ -20,6 +20,7 @@ from scripts.med_copilot_variants import COMPONENTS, VARIANTS, ComponentSpec, Va
 # Defaults preserve older experiment files; the shipped YAML spells out each field.
 PIPELINE_DEFAULTS = {
     "plan_judge": "ollama_qwen2_5_14b",  # Historical default for configs that omit the setting.
+    "plan_judge_concurrency": 2,  # Bounded requests in the separate Plan-evaluation stage.
     "guidelines": "med_copilot/data/guidelines",
     "experiment_output": "experiments/output",
     "patient_corpus": "med_copilot/data/patient_corpus/reference_patients.json",
@@ -101,9 +102,11 @@ class ExperimentConfig:
                       "patient_reranker_model", "guideline_response_type", "plan_judge"):
             if not isinstance(data[field], str) or not data[field].strip():
                 raise ValueError(f"{field} must be a nonempty string")
-        for field in ("patient_retrieval_top_k", "patient_rerank_top_k"):
+        for field in ("patient_retrieval_top_k", "patient_rerank_top_k", "plan_judge_concurrency"):
             if type(data[field]) is not int or data[field] < 1:
                 raise ValueError(f"{field} must be a positive integer")
+        if data["plan_judge_concurrency"] > 64:
+            raise ValueError("plan_judge_concurrency must be between 1 and 64")
         level = data["guideline_community_level"]
         if type(level) is not int or level < 0:
             raise ValueError("guideline_community_level must be a nonnegative integer")

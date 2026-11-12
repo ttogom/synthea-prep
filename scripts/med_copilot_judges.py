@@ -23,6 +23,7 @@ import math
 import os
 from pathlib import Path
 import re
+from threading import Lock, RLock
 
 from med_copilot.prompts.correctness_judges import PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE
 from scripts.med_copilot_helpers import model_response_metadata, repo_path
@@ -233,14 +234,15 @@ class JudgeCache:
     def __init__(self, path):
         self.path = Path(path).resolve()
         self.entries = {}
+        self._lock = RLock()
+        self._write_error = None
         if not self.path.exists():
             return
         data = self.path.read_bytes()
         # A crash can leave a partial final line; drop it so appends stay line-aligned.
-        if data and not data.endswith(b"\n"):
+        torn_tail = bool(data and not data.endswith(b"\n"))
+        if torn_tail:
             data = data[:data.rfind(b"\n") + 1]
-            with self.path.open("r+b") as handle:
-                handle.truncate(len(data))
         for number, line in enumerate(data.decode("utf-8").split("\n"), 1):
             if line.strip():
                 entry = json.loads(line)
@@ -248,20 +250,40 @@ class JudgeCache:
                     raise ValueError(f"{self.path}:{number}: invalid judge response entry")
                 if entry.get("valid") is True:
                     self.entries[entry["key"]] = entry
+        # Refuse corrupt complete lines without changing the input artifact.
+        if torn_tail:
+            with self.path.open("r+b") as handle:
+                handle.truncate(len(data))
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_directory(self.path.parent)
 
     def get(self, key):
         """The saved valid judgement for this request, or None to request it."""
-        return self.entries.get(key)
+        with self._lock:
+            if self._write_error is not None:
+                raise OSError("Judge response cache has a failed write; restart evaluation") from self._write_error
+            return self.entries.get(key)
 
     def add(self, entry):
         line = json.dumps(entry, ensure_ascii=False, allow_nan=False) + "\n"
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _fsync_directory(self.path.parent)
-        if entry.get("valid") is True:
-            self.entries[entry["key"]] = entry
+        # Publish a reply only after its complete line and directory entry are
+        # durable. A failed append may leave a torn line: stop other threads
+        # from appending behind it until the next constructor repairs the tail.
+        with self._lock:
+            if self._write_error is not None:
+                raise OSError("Judge response cache has a failed write; restart evaluation") from self._write_error
+            try:
+                with self.path.open("a", encoding="utf-8") as handle:
+                    handle.write(line)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                _fsync_directory(self.path.parent)
+            except OSError as exc:
+                self._write_error = exc
+                raise
+            if entry.get("valid") is True:
+                self.entries[entry["key"]] = entry
 
 
 class CorrectnessJudges:
@@ -275,18 +297,52 @@ class CorrectnessJudges:
     """
 
     def __init__(self, complete, model_ids, cache_path, *, plan_judge, similarity=None,
-                 generator_models=None, judge_model_config=None):
+                 generator_models=None, judge_model_config=None, plan_execution="inline", redact=None):
         self.complete = complete
         self.model_ids = tuple(model_ids)
         if not isinstance(plan_judge, str) or not plan_judge.strip():
             raise ValueError("plan_judge must be a nonempty registry alias")
+        if plan_execution not in ("inline", "deferred"):
+            raise ValueError("plan_execution must be inline or deferred")
+        if redact is not None and not callable(redact):
+            raise ValueError("redact must be callable or None")
         self.plan_judge = plan_judge
+        self.plan_execution = plan_execution
+        self._redact = redact
         self.generator_models = None if generator_models is None else tuple(generator_models)
         self.judge_model_config = judge_model_config
         self.similarity = similarity if similarity is not None else BioLordSimilarity()
-        self.cache = JudgeCache(cache_path)
+        self._lock = RLock()
+        self._request_locks = {}
+        self._cache_path = cache_path
+        # Generation/diagnosis-only runs must not read or repair an existing
+        # Plan cache. The separate evaluation stage opens it when needed.
+        self._cache = JudgeCache(cache_path) if plan_execution == "inline" else None
         self.calls = 0
         self.cache_hits = 0
+
+    @property
+    def cache(self):
+        """Lazily open the durable Plan cache, under one owner lock."""
+        with self._lock:
+            if self._cache is None:
+                self._cache = JudgeCache(self._cache_path)
+            return self._cache
+
+    @contextmanager
+    def _request_lock(self, key):
+        """Coalesce equal requests without serializing unrelated model calls."""
+        with self._lock:
+            pending = self._request_locks.setdefault(key, [Lock(), 0])
+            pending[1] += 1
+        try:
+            with pending[0]:
+                yield
+        finally:
+            with self._lock:
+                pending[1] -= 1
+                if pending[1] == 0:
+                    del self._request_locks[key]
 
     @staticmethod
     def validate_resume(metadata, root, *, plan_judge):
@@ -342,6 +398,9 @@ class CorrectnessJudges:
                 "score": "cosine similarity clipped to [0, 1]; the raw cosine is kept as cosine_similarity",
             },
             "plan": {
+                "execution": self.plan_execution,
+                "judge_loading": ("deferred" if self.plan_execution == "deferred" else
+                                  "loaded" if self.plan_judge in self.model_ids else "unavailable"),
                 "validation_status": PLAN_VALIDATION_STATUS,
                 "validation_evidence": PLAN_VALIDATION_EVIDENCE,
                 "reporting": ("excluded from reported aggregate results; per-prediction scores are kept "
@@ -403,15 +462,39 @@ class CorrectnessJudges:
     def _ask(self, judge, task, messages, parse):
         """Return one judge record, reusing a saved valid judgement for this request."""
         key = request_key(judge, messages)
+        with self._request_lock(key):
+            record = self._redacted(self._ask_locked(key, judge, task, messages, parse))
+            record["request_key"] = key
+            return record
+
+    def _redacted(self, value):
+        """Sanitize provider-controlled text before it enters result/cache artifacts."""
+        if self._redact is None:
+            return value
+        if isinstance(value, str):
+            return self._redact(value)
+        if isinstance(value, dict):
+            return {key: self._redacted(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._redacted(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._redacted(item) for item in value)
+        return value
+
+    def _ask_locked(self, key, judge, task, messages, parse):
         record = {"judge_model": judge, "status": "pending", "request_key": key,
                   "raw_response": None, "model_response": None, "error": None}
-        entry = self.cache.get(key)
+        try:
+            entry = self.cache.get(key)
+        except OSError as exc:
+            raise RunMetadataError("Could not read judge response cache") from exc
         try:
             parsed = parse(entry["content"]) if entry is not None else None
         except JudgeResponseError:
             parsed = None  # Saved under an older parser; request it again.
         if parsed is not None:
-            self.cache_hits += 1
+            with self._lock:
+                self.cache_hits += 1
             record.update(status="scored", raw_response=entry["content"],
                           model_response=entry["model_response"], **parsed)
             return record
@@ -426,7 +509,8 @@ class CorrectnessJudges:
             record.update(status="interrupted", error={"type": type(exc).__name__,
                                                         "message": "Judge call interrupted"})
             raise
-        self.calls += 1
+        with self._lock:
+            self.calls += 1
         choices = getattr(response, "choices", None)
         message = getattr(choices[0], "message", None) if choices else None
         content, refusal = getattr(message, "content", None), getattr(message, "refusal", None)
@@ -454,8 +538,12 @@ class CorrectnessJudges:
     def _save_response(self, entry):
         """Stop the run if a completed judge response cannot be saved durably."""
         try:
-            self.cache.add(entry)
-        except OSError as exc:
+            sanitized = self._redacted(entry)
+            # Request identity always describes the actual request, even when
+            # stored prompt/provider text has had a credential removed.
+            sanitized["key"] = entry["key"]
+            self.cache.add(sanitized)
+        except (OSError, TypeError, ValueError) as exc:
             raise RunMetadataError("Could not save judge response") from exc
 
     @staticmethod
@@ -498,6 +586,9 @@ class CorrectnessJudges:
         Every call is attempted so valid replies are saved even when another fails.
         """
         if entry["status"] != "pending":
+            return entry
+        if self.plan_execution == "deferred":
+            entry["reason"] = "deferred"
             return entry
         if self.plan_judge not in self.model_ids:
             entry.update(status="unavailable", reason="judge_unavailable")

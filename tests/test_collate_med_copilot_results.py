@@ -1377,6 +1377,75 @@ class CorrectnessReportTests(unittest.TestCase):
         self.assertEqual((entry["status"], entry["score"]), ("not_judged", None))
         self.assertIn("diagnosis: rank-1 N/A (n=0), rank-weighted mean N/A (n=0)", format_judge_summary(data))
 
+    def deferred_run(self):
+        self.native_v3()
+        self.metadata["evaluation"]["correctness"] = {
+            "plan": {"judge_model": "qwen", "execution": "deferred"}}
+        for variant in self.rows[0]["variants"].values():
+            for slot in variant["assessment_plans"].values():
+                for entry in slot["evaluation"]:
+                    entry["diagnosis_correctness"] = judged(0.75, entry["rank"])
+                    entry["plan_correctness"] = judged(None, entry["rank"], "pending", "deferred")
+
+    def test_deferred_plans_are_explicit_and_excluded_without_hiding_other_scores(self):
+        self.deferred_run()
+        # A pending entry must never contribute a stale numeric payload.
+        first = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
+        first["plan_correctness"].update(score=1.0, weighted_score=1.0)
+        self.write()
+        data = self.load()
+        prediction = data["patients"][0]["outputs"][0]["predictions"][0]
+        self.assertEqual(prediction["correctness"]["plan"], {
+            "status": "pending", "score": None, "weighted_score": None,
+            "reason": "Plan judging deferred to the separate evaluation stage"})
+        self.assertEqual(prediction["correctness"]["condition"]["score"], 0.75)
+        self.assertEqual(prediction["scores"]["condition"]["metrics"]["BLEU"], 0.4)
+        plan_rows = [row for row in data["correctness_summary"] if row["field"] == "plan"]
+        self.assertEqual(len(plan_rows), 12)
+        self.assertTrue(all(row["judged"] == 0 and row["mean_score"] is None
+                            and row["counts"] == {"pending": 1} for row in plan_rows))
+        self.assertTrue(any("12 Plan entries are still pending" in notice for notice in data["notices"]))
+        self.assertIn("Plan judging deferred to the separate evaluation stage", render_report(data))
+
+    def test_deferred_notice_counts_remaining_entries_after_partial_judging(self):
+        self.deferred_run()
+        self.metadata["plan_evaluation"] = {"status": "interrupted"}
+        slot = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]
+        for entry in slot["evaluation"]:
+            entry["plan_correctness"] = judged(0.5, entry["rank"])
+        # A submitted job can have been rearmed before interruption canceled it.
+        # It remains pending even though its deferred reason has been cleared.
+        waiting = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["llama"]["evaluation"][0]
+        waiting["plan_correctness"]["reason"] = None
+        self.write()
+        data = self.load()
+        self.assertTrue(any("9 Plan entries are still pending" in notice for notice in data["notices"]))
+        self.assertEqual(sum(row["judged"] for row in data["correctness_summary"] if row["field"] == "plan"), 3)
+
+    def test_completed_plan_stage_removes_deferred_notice_despite_original_execution_metadata(self):
+        self.deferred_run()
+        self.metadata["plan_evaluation"] = {"status": "completed"}
+        for variant in self.rows[0]["variants"].values():
+            for slot in variant["assessment_plans"].values():
+                for entry in slot["evaluation"]:
+                    entry["plan_correctness"] = judged(0.5, entry["rank"])
+        self.write()
+        data = self.load()
+        self.assertFalse(any("Plan judging is deferred" in notice for notice in data["notices"]))
+        self.assertTrue(all(row["judged"] == 1 for row in data["correctness_summary"] if row["field"] == "plan"))
+
+    def test_ordinary_pending_scores_are_not_mislabeled_as_deferred(self):
+        self.deferred_run()
+        for variant in self.rows[0]["variants"].values():
+            for slot in variant["assessment_plans"].values():
+                for entry in slot["evaluation"]:
+                    entry["plan_correctness"]["reason"] = None
+        self.write()
+        data = self.load()
+        self.assertFalse(any("Plan judging is deferred" in notice for notice in data["notices"]))
+        self.assertEqual(data["patients"][0]["outputs"][0]["predictions"][0]["correctness"]["plan"]["reason"],
+                         "Judging not attempted")
+
     def test_invalid_saved_judgements_are_flagged_not_reported(self):
         self.native_v3()
         slot = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]

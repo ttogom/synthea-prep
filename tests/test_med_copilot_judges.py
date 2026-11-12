@@ -7,11 +7,13 @@ BioLordSanityOrderingTests uses the pinned BioLORD-2023 when it is already cache
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 import re
 import sys
 from tempfile import TemporaryDirectory
+from threading import Barrier, Event
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -30,7 +32,7 @@ from scripts.med_copilot_judges import (
     METRIC_STATUS, PLAN_VALIDATION_STATUS, BioLordSimilarity,
     CorrectnessJudges, JudgeCache, diagnosis_entry, diagnosis_score, normalize_diagnosis, parse_action_judgement,
     parse_extras_judgement,
-    plan_action_messages, plan_entry, plan_extras_messages, rank_weight, unavailable_plan_reason,
+    plan_action_messages, plan_entry, plan_extras_messages, rank_weight, request_key, unavailable_plan_reason,
 )
 from scripts.med_copilot_run_file import RunFile, RunMetadataError, error_scope, pipeline_stage
 
@@ -552,6 +554,13 @@ class ResumptionTests(JudgeTestCase):
         self.assertEqual(len(cache.entries), 2)
         self.assertTrue(self.cache.read_text(encoding="utf-8").endswith("\n"))
 
+    def test_corrupt_complete_line_is_rejected_before_torn_tail_repair(self):
+        original = b'not JSON\n{"key":"torn'
+        self.cache.write_bytes(original)
+        with self.assertRaises(ValueError):
+            JudgeCache(self.cache)
+        self.assertEqual(self.cache.read_bytes(), original)
+
     def test_identical_requests_are_asked_once(self):
         judges, fake, _ = self.judges()
         for rank in (1, 2):
@@ -708,6 +717,217 @@ class MetadataTests(JudgeTestCase):
         judges = CorrectnessJudges(FakeJudge(replies()), MODELS, self.cache,
                                    similarity=BioLordSimilarity(FakeEncoder()), plan_judge=DEFAULT_PLAN_JUDGE)
         self.assertEqual(judges.plan_judge, DEFAULT_PLAN_JUDGE)
+
+
+class ConcurrentPlanTests(JudgeTestCase):
+    def test_independent_plans_overlap_and_keep_their_own_scores(self):
+        barrier = Barrier(2)
+        base = replies(credits={"Culture": 1, "Rest": 0.5})
+
+        def reply(messages):
+            barrier.wait(timeout=3)
+            return base(messages)
+
+        judges, fake, _ = self.judges(reply)
+        entries = [plan_entry(1, ["Culture"], ["Culture"]),
+                   plan_entry(2, ["Rest"], ["Rest"])]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(judges.judge_plan, entry, LABEL_CONDITION, PATIENT)
+                       for entry in entries]
+            for future in futures:
+                future.result(timeout=5)
+        self.assertEqual([entry["score"] for entry in entries], [1.0, 0.5])
+        self.assertEqual([entry["weighted_score"] for entry in entries], [1.0, 0.25])
+        self.assertEqual((judges.calls, judges.cache_hits, len(fake.requests)), (4, 0, 4))
+        self.assertEqual(len(JudgeCache(self.cache).entries), 4)
+
+    def test_simultaneous_equal_plans_share_durable_calls_and_resume_without_calls(self):
+        entered, release = Event(), Event()
+        start = Barrier(8)
+        base = replies()
+
+        def reply(messages):
+            if not is_extras(messages):
+                entered.set()
+                if not release.wait(timeout=3):
+                    raise RuntimeError("test did not release the judge")
+            return base(messages)
+
+        judges, fake, _ = self.judges(reply)
+
+        def score(rank):
+            start.wait(timeout=3)
+            entry = plan_entry(rank, ["Culture"], ["Culture"])
+            return judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(score, index % 3 + 1) for index in range(8)]
+            try:
+                self.assertTrue(entered.wait(timeout=3))
+            finally:
+                release.set()
+            entries = [future.result(timeout=5) for future in futures]
+        self.assertTrue(all(entry["status"] == "scored" for entry in entries))
+        self.assertEqual((judges.calls, judges.cache_hits, len(fake.requests)), (2, 14, 2))
+        self.assertEqual(len(self.cache.read_text().splitlines()), 2)
+        resumed, again, _ = self.judges(lambda messages: AssertionError("completed request repeated"))
+        resumed.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+        self.assertEqual((resumed.calls, resumed.cache_hits, again.requests), (0, 2, []))
+
+    def test_concurrent_cache_appends_remain_line_aligned_and_recoverable(self):
+        cache = JudgeCache(self.cache)
+        entries = [{"key": str(index), "valid": True, "content": "x" * 4096}
+                   for index in range(32)]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(cache.add, entries))
+        recovered = JudgeCache(self.cache)
+        self.assertEqual(recovered.entries, {entry["key"]: entry for entry in entries})
+        self.assertEqual(len(self.cache.read_text().splitlines()), len(entries))
+
+    def test_failed_cache_append_stops_other_calls_until_restart(self):
+        judges, fake, _ = self.judges()
+        with patch("scripts.med_copilot_judges._fsync_directory", side_effect=OSError("disk failed")):
+            with self.assertRaises(RunMetadataError):
+                judges.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+        # No unrelated request may append behind a possibly torn cache write.
+        with self.assertRaises(RunMetadataError):
+            judges.judge_plan(plan_entry(1, ["Rest"], ["Rest"]), LABEL_CONDITION, PATIENT)
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(judges.cache.entries, {})
+        # A fresh owner validates the complete persisted line and can use it.
+        resumed, _, _ = self.judges()
+        resumed.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+        self.assertEqual((resumed.calls, resumed.cache_hits), (1, 1))
+
+    def test_unserializable_judge_reply_is_a_fatal_persistence_failure(self):
+        for failure in (TypeError("unsupported usage value"), ValueError("nonfinite usage value")):
+            with self.subTest(error=type(failure).__name__):
+                judges, fake, _ = self.judges()
+                with patch.object(judges.cache, "add", side_effect=failure), \
+                        self.assertRaises(RunMetadataError) as caught:
+                    judges.judge_plan(plan_entry(1, ["Culture"], ["Culture"]), LABEL_CONDITION, PATIENT)
+                self.assertIs(caught.exception.__cause__, failure)
+                self.assertEqual(len(fake.requests), 1)
+                self.assertEqual(judges.cache.entries, {})
+
+    def test_invalid_reply_does_not_block_later_retry_or_break_counters(self):
+        judges, fake, _ = self.judges(replies(extras_content="invalid JSON"))
+        first = plan_entry(1, ["Culture"], ["Culture"])
+        judges.judge_plan(first, LABEL_CONDITION, PATIENT)
+        self.assertEqual(first["status"], "error")
+        fake.reply = replies()
+        second = plan_entry(1, ["Culture"], ["Culture"])
+        judges.judge_plan(second, LABEL_CONDITION, PATIENT)
+        self.assertEqual(second["status"], "scored")
+        self.assertEqual((judges.calls, judges.cache_hits), (3, 1))
+
+
+class DeferredPlanTests(JudgeTestCase):
+    def test_deferred_plans_leave_judge_artifacts_untouched_and_diagnoses_still_score(self):
+        # The separate stage owns tail repair. Generation must not truncate it.
+        original = b'{"key":"torn'
+        self.cache.write_bytes(original)
+        fake = FakeJudge(lambda messages: AssertionError("deferred judge called"))
+        encoder = FakeEncoder()
+        with patch("scripts.med_copilot_judges.JudgeCache", side_effect=AssertionError("cache opened")):
+            judges = CorrectnessJudges(fake, (), self.cache, plan_judge=JUDGE,
+                                       similarity=BioLordSimilarity(encoder), plan_execution="deferred")
+            entry = plan_entry(1, ["Culture"], ["Culture"])
+            judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+            diagnosis = diagnosis_entry(1, LABEL_CONDITION, "viral pharyngitis")
+            judges.score_diagnosis(diagnosis)
+            metadata = judges.metadata(ROOT)
+        self.assertEqual((entry["status"], entry["reason"]), ("pending", "deferred"))
+        self.assertEqual(diagnosis["status"], "scored")
+        self.assertEqual(self.cache.read_bytes(), original)
+        self.assertEqual(fake.requests, [])
+        self.assertEqual(metadata["plan"]["execution"], "deferred")
+        self.assertEqual(metadata["plan"]["judge_loading"], "deferred")
+        self.assertFalse(metadata["plan"]["judge_available"])
+
+    def test_deferred_mode_does_not_create_cache_and_preserves_final_zero_and_unavailable_entries(self):
+        judges = CorrectnessJudges(None, (), self.cache, plan_judge=JUDGE, plan_execution="deferred")
+        for generated, reference, expected in (([], ["Culture"], "scored"),
+                                                (["Culture"], ["none recorded"], "unavailable")):
+            with self.subTest(generated=generated, reference=reference):
+                entry = plan_entry(1, reference, generated)
+                original = deepcopy(entry)
+                judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+                self.assertEqual(entry["status"], expected)
+                self.assertEqual(entry, original)
+        self.assertFalse(self.cache.exists())
+
+    def test_invalid_execution_mode_fails_before_opening_cache(self):
+        for mode in (None, "", "parallel", False, 1, []):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "plan_execution"):
+                CorrectnessJudges(None, (), self.cache, plan_judge=JUDGE, plan_execution=mode)
+        self.assertFalse(self.cache.exists())
+
+
+class JudgeRedactionTests(JudgeTestCase):
+    def test_transport_error_is_redacted_in_returned_entries_and_run_errors(self):
+        secret = "private-provider-api-key"
+        redact = lambda text: text.replace(secret, "[REDACTED]")
+        run = RunFile.begin(self.directory / "output")
+        run.redact = redact
+        fake = FakeJudge(lambda messages: RuntimeError(f"Authorization failed: {secret}"))
+        judges = CorrectnessJudges(fake, MODELS, self.cache, plan_judge=JUDGE, redact=redact)
+        entry = plan_entry(1, ["Culture"], ["Culture"])
+        with error_scope(run, patient_id="patient-a"), pipeline_stage("scoring"):
+            judges.judge_plan(entry, LABEL_CONDITION, PATIENT)
+        self.assertEqual(entry["status"], "error")
+        self.assertNotIn(secret, json.dumps(entry))
+        self.assertIn("[REDACTED]", json.dumps(entry))
+        self.assertNotIn(secret, (run.run_dir / "run.json").read_text())
+        self.assertFalse(self.cache.exists())
+
+    def test_refusal_provider_metadata_and_stored_prompt_are_redacted(self):
+        secret = "private-provider-api-key"
+        redact = lambda text: text.replace(secret, "[REDACTED]")
+        patient = {**PATIENT, "subjective": f"S/O text containing {secret}"}
+
+        def reply(messages):
+            result = response(f"refused {secret}", refusal=f"policy {secret}")
+            result.model = f"reported-model-{secret}"
+            return result
+
+        judges = CorrectnessJudges(FakeJudge(reply), MODELS, self.cache, plan_judge=JUDGE, redact=redact)
+        entry = plan_entry(1, ["Culture"], ["Culture"])
+        judges.judge_plan(entry, LABEL_CONDITION, patient)
+        self.assertEqual(entry["status"], "error")
+        self.assertNotIn(secret, json.dumps(entry))
+        self.assertNotIn(secret, self.cache.read_text())
+        saved = [json.loads(line) for line in self.cache.read_text().splitlines()]
+        actual_messages = plan_action_messages(LABEL_CONDITION, patient["subjective"],
+                                               patient["objective"], "Culture", ["Culture"])
+        self.assertEqual(saved[0]["key"], request_key(JUDGE, actual_messages))
+        self.assertEqual(entry["judges"][0]["request_key"], saved[0]["key"])
+
+    def test_redacted_valid_replies_keep_request_identity_and_are_reused(self):
+        secret = "private-provider-api-key"
+        redact = lambda text: text.replace(secret, "[REDACTED]")
+        patient = {**PATIENT, "subjective": f"S/O text containing {secret}"}
+
+        def reply(messages):
+            value = ({"unsupported_extra_count": 0} if is_extras(messages) else {"credit": 1})
+            return json.dumps({**value, "note": secret})
+
+        judges = CorrectnessJudges(FakeJudge(reply), MODELS, self.cache, plan_judge=JUDGE, redact=redact)
+        entry = plan_entry(1, ["Culture"], ["Culture"])
+        judges.judge_plan(entry, LABEL_CONDITION, patient)
+        self.assertEqual(entry["score"], 1)
+        self.assertNotIn(secret, json.dumps(entry))
+        self.assertNotIn(secret, self.cache.read_text())
+        fake = FakeJudge(lambda messages: AssertionError("completed request repeated"))
+        resumed = CorrectnessJudges(fake, MODELS, self.cache, plan_judge=JUDGE, redact=redact)
+        resumed.judge_plan(plan_entry(2, ["Culture"], ["Culture"]), LABEL_CONDITION, patient)
+        self.assertEqual((resumed.calls, resumed.cache_hits, fake.requests), (0, 2, []))
+
+    def test_invalid_redactor_fails_before_opening_cache(self):
+        for redact in ("redact", False, 1, []):
+            with self.subTest(redact=redact), self.assertRaisesRegex(ValueError, "redact"):
+                CorrectnessJudges(None, (), self.cache, plan_judge=JUDGE, redact=redact)
+        self.assertFalse(self.cache.exists())
 
 
 if __name__ == "__main__":

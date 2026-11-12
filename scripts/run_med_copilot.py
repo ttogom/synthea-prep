@@ -1,4 +1,4 @@
-from contextlib import chdir
+from contextlib import ExitStack, chdir
 import json
 import os
 from pathlib import Path
@@ -14,6 +14,7 @@ sys.path.insert(0, str(UPSTREAM))
 
 # Standard library only, so run.json exists before the heavy imports below.
 from scripts.med_copilot_run_file import RunFile, make_run_name
+from scripts.med_copilot_run_lock import exclusive_run_lock
 
 # A launched script records startup failures in a provisional run directory
 # under the default output root; main() renames it once the config is loaded.
@@ -159,6 +160,12 @@ def process_patient(patient, result, corpus_records, retriever, reranker, guidel
 
 
 def main(argv=None, run_file=None):
+    # Both commands must own the run before reading or replacing saved state.
+    with ExitStack() as locks:
+        return _main(argv, run_file, locks)
+
+
+def _main(argv, run_file, locks):
 # %% ------------------------------------------------------------------
 #  Load assessment/plan generating models and input patient records
 # ---------------------------------------------------------------------
@@ -168,6 +175,13 @@ def main(argv=None, run_file=None):
     try:
         with pipeline_stage("startup"):
             args = parse_scoring_args(argv)
+        if args.resume:
+            try:
+                locks.enter_context(exclusive_run_lock(args.resume))
+            except (OSError, ValueError) as exc:
+                print(f"Cannot resume run: {exc}", file=sys.stderr)
+                run_file.discard()
+                return "resume_error"
         try:
             experiment = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
         except (OSError, ValueError) as exc:
@@ -217,6 +231,8 @@ def main(argv=None, run_file=None):
             # Cancelling is not a failure: leave no run directory behind.
             run_file.discard()
             return "cancelled"
+        if not args.resume:
+            locks.enter_context(exclusive_run_lock(run_file.run_dir))
         with pipeline_stage("startup"):
             client = OpenAI(api_key=os.environ["OPENAI_API_KEY"]) if experiment.needs("guidelines") else None
         credentials = [os.environ.get(name) for name in experiment.required_credentials]
@@ -241,24 +257,11 @@ def main(argv=None, run_file=None):
 
     current = None
     try:
-        # Preliminary single-model midterm metric: BioLORD-2023 clinical concept similarity score
-        # for diagnoses (not an accuracy or probability) and one
-        # configured Plan judge, loaded on its own unless it is also a generator.
-        # If it cannot be loaded, Plans are marked judge_unavailable; the run continues.
-        judge_models = assessment_models
-        if experiment.plan_judge not in assessment_models.model_ids:
-            try:
-                judge_models = AssessmentPlanModels(experiment.model_config, [experiment.plan_judge],
-                                                    temperature=experiment.temperature,
-                                                    max_retries=experiment.max_retries)
-            except (OSError, ValueError) as exc:
-                judge_models = None
-                print(f"Plan judge {experiment.plan_judge} unavailable; Plans will not be judged: {exc}",
-                      file=sys.stderr)
+        # Diagnosis similarity stays inline; the standalone evaluator owns Plan calls.
         scorer.attach_judges(CorrectnessJudges(
-            judge_models.judge if judge_models else None, judge_models.model_ids if judge_models else (),
+            None, (),
             run.run_dir / JUDGE_FILE, plan_judge=experiment.plan_judge, generator_models=assessment_models.model_ids,
-            judge_model_config=judge_models.metadata(ROOT) if judge_models else None))
+            plan_execution="deferred"))
         run.update(experiment=experiment.metadata(ROOT), evaluation=scorer.metadata(ROOT),
                    assessment_plan_models=assessment_models.metadata(ROOT),
                    **experiment.variant_metadata(ROOT))

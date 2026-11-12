@@ -609,8 +609,8 @@ durable checkpoint rather than replacing it with an empty record. Without a
 checkpoint, it retains any previously saved row for that patient. Invalid saved
 execution structures are rejected before resumed work or artifact updates.
 The snapshot is removed after that patient is saved. An interrupted
-provider request without a durable response may repeat; simultaneous writers
-to the same run directory are unsupported.
+provider request without a durable response may repeat; simultaneous runner or
+Plan-evaluator writers to the same run directory are rejected by an exclusive lock.
 
 **Auditing and evaluation resumption.** Every completed judge call is appended (and
 `fsync`ed) to `judge_responses.jsonl` in the run directory before its reply is
@@ -619,14 +619,29 @@ full messages, raw content, refusal, provider metadata, `valid`, and the parse
 `error`. Only `valid: true` replies are reused: identical requests are then
 asked once. Malformed or refused replies stay in the file for auditing, but
 they are requested again, as are calls that raised (which have no reply to
-save). BioLORD concept similarity scores are recomputed, not cached. `python scripts/resume_med_copilot_evaluation.py
-RUN_DIRECTORY` rebuilds the run's cohort and models from `run.json` (refusing
-changed input or labels), re-scores every saved prediction, replaces
-`results.jsonl` atomically after each patient, and regenerates the report.
-Valid judge calls are never repeated, and generation is never re-run. It exits
-0 when every correctness entry finished, 1 when the run directory or inputs
-cannot be used or some entries still failed (rerun to retry them), and 130 when
-interrupted.
+save). The runner calculates text metrics and BioLORD diagnosis similarity;
+nonempty judgeable Plans remain `pending` with reason `deferred`, and no Plan
+model or response cache is loaded by the runner. Empty generated Plans can
+still receive the rubric's deterministic zero without a model call.
+
+`python scripts/judge_treatment_plans.py RUN_DIRECTORY` finishes only
+Plan correctness after generation finishes. It rebuilds the recorded cohort
+(refusing changed input or labels), loads only the recorded Plan judge, and
+preserves generation, evidence, text metrics, and diagnosis scores. Bounded
+concurrency comes from the saved `experiment.plan_judge_concurrency` (default
+2 for older runs; valid range 1–64). Identical concurrent valid requests share
+one response. Scalar replies are the durable incremental checkpoint;
+`results.jsonl` is exported atomically once on completion or controlled stop,
+then the report is regenerated after a successful invocation. Following an
+abrupt crash, aggregate Plan scores are reconstructed using saved scalar replies.
+
+Both commands acquire the same exclusive `.run.lock`; the OS releases ownership
+after a crash and the lock file remains. The evaluator records its independent
+status, timing, concurrency, counts, and judge provenance in
+`run.json.plan_evaluation`, preserving the generation run's status and timestamps.
+It exits 0 when every applicable Plan entry finished, 1 when inputs cannot be
+used or some Plan entries still failed (rerun to retry them), and 130 when
+interrupted. Neither generation nor completed text/diagnosis scoring is repeated.
 
 `run.json.evaluation.correctness` records `status: "preliminary single-model
 midterm metric"`, the method, `selected_models` (the models the judge can
