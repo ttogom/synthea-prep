@@ -104,7 +104,7 @@ Absence from the reference alone does not make an extra unsupported. Split
 bundled actions, count each distinct unsupported action once, and do not count
 placeholders.
 
-Return exactly one JSON object, {{"unsupported_extra_count": N}}, where N is a whole number from 0 to {generated_count}.
+Return exactly one JSON object, {{"unsupported_extra_count": N}}, where N is a nonnegative integer.
 
 SOURCE DATA — Prepared Synthea case and labels
 

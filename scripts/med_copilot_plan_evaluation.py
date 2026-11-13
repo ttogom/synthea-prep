@@ -194,7 +194,7 @@ def _saved_plan(entry, expected, judge, condition, patient):
                     return False
                 credits.append(credit)
             else:
-                extras = parse_extras_judgement(record.get("raw_response"), len(generated))["unsupported_extra_count"]
+                extras = parse_extras_judgement(record.get("raw_response"))["unsupported_extra_count"]
                 if record.get("unsupported_extra_count") != extras:
                     return False
     except (ValueError, TypeError, KeyError):

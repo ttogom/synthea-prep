@@ -163,6 +163,29 @@ class PlanStageTests(unittest.TestCase):
             self.assertEqual(models.requests, [])
             write.assert_not_called()
 
+    def test_bundled_extras_are_scored_and_resume_without_calls_or_result_writes(self):
+        for row in self.records:
+            output = row["variants"]["llm_only"]["assessment_plans"]["generator"]
+            for prediction, entry in zip(output["predictions"], output["evaluation"]):
+                prediction["plan"] = ["Antibiotics; imaging"]
+                entry["plan_correctness"] = plan_entry(
+                    entry["rank"], entry["plan_correctness"]["reference_actions"], prediction["plan"])
+        self.write()
+        models = FakeModels(lambda model, messages: '{"unsupported_extra_count": 2}'
+                            if messages[0]["content"].startswith("Count the distinct generated actions") else None)
+        self.run_stage(models)
+        self.assertEqual(len(models.requests), 6)  # Identical plans across ranks share judge requests.
+        metadata, records = self.saved()
+        self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
+        for entry in self.entries(records):
+            plan = entry["plan_correctness"]
+            self.assertEqual((plan["status"], plan["unsupported_extra_count"], plan["deduction"], plan["score"]),
+                             ("scored", 2, 1.0, 0.0))
+        second = FakeModels()
+        with patch.object(stage, "_write_results", side_effect=AssertionError("completed results rewritten")):
+            self.run_stage(second)
+        self.assertEqual(second.requests, [])
+
     def test_zero_coverage_is_complete_and_a_resume_preserves_the_export_without_calls(self):
         before = deepcopy(self.records)
         models = FakeModels(lambda model, messages: '{"credit": 0}')
