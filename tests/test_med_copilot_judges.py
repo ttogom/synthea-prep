@@ -700,6 +700,72 @@ class ResumptionTests(JudgeTestCase):
         self.assertEqual(len(self.cache.read_text().splitlines()), 1)  # Kept for recovery/auditing.
 
 
+class CompactJudgeCacheTests(JudgeTestCase):
+    def test_live_and_reloaded_lookup_keep_only_reuse_fields_and_full_audit_stays_on_disk(self):
+        entry = {"key": "request", "valid": True, "content": '{"credit": 0.5}',
+                 "model_response": {"reported_model": "judge", "token_usage": {"total_tokens": 23}},
+                 "elapsed_seconds": 1.25, "messages": [{"role": "user", "content": "患者" * 100000}],
+                 "task": "plan_action", "recorded_at": "original time", "error": None}
+        expected = {field: entry[field] for field in ("content", "model_response", "elapsed_seconds")}
+        cache = JudgeCache(self.cache)
+        cache.add(entry)
+        self.assertEqual(cache.get("request"), expected)
+        self.assertEqual(json.loads(self.cache.read_text(encoding="utf-8")), entry)
+        original = self.cache.read_bytes()
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole cache read")), \
+                patch.object(Path, "read_text", side_effect=AssertionError("whole cache read")):
+            resumed = JudgeCache(self.cache)
+        self.assertEqual(resumed.entries, cache.entries)
+        self.assertEqual(self.cache.read_bytes(), original)
+
+    def test_streaming_preserves_last_valid_duplicate_and_repairs_only_unterminated_tail(self):
+        rows = [{"key": "same", "valid": True, "content": '{"credit": 0}', "model_response": None},
+                {"key": "same", "valid": True, "content": '{"credit": 0.5}', "model_response": None},
+                {"key": "same", "valid": False, "content": "invalid"},
+                {"key": "invalid", "valid": False, "content": "invalid"}]
+        complete = "\n \r\n\u2003\n".encode() + b"".join((json.dumps(row) + "\r\n").encode() for row in rows)
+        # Even a syntactically complete JSON object is uncommitted without its newline.
+        for tail in (b'{"key":"partial', b'\xf0\x9f', json.dumps(rows[0]).encode()):
+            with self.subTest(tail=tail):
+                self.cache.write_bytes(complete + tail)
+                cache = JudgeCache(self.cache)
+                self.assertEqual(cache.entries, {"same": {"content": '{"credit": 0.5}',
+                                                         "model_response": None}})
+                self.assertEqual(self.cache.read_bytes(), complete)
+                cache.add({"key": "next", "valid": True, "content": "next"})
+                self.assertEqual(set(JudgeCache(self.cache).entries), {"same", "next"})
+
+    def test_existing_cache_is_read_without_whole_file_buffers(self):
+        self.cache.write_text('{"key":"saved","valid":true,"content":"reply"}\n', encoding="utf-8")
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("whole cache read")), \
+                patch.object(Path, "read_text", side_effect=AssertionError("whole cache read")):
+            self.assertEqual(JudgeCache(self.cache).get("saved"), {"content": "reply"})
+
+    def test_bad_complete_lines_leave_even_a_torn_tail_untouched(self):
+        prefix = b'{"key":"good","valid":true,"content":"saved"}\n\n'
+        for bad in (b"not JSON", b"[]", b'{"valid":false}', b'{"key":3}', b'\xff'):
+            with self.subTest(bad=bad):
+                original = prefix + bad + b'\n{"key":"torn'
+                self.cache.write_bytes(original)
+                with self.assertRaises((ValueError, UnicodeError)):
+                    JudgeCache(self.cache)
+                self.assertEqual(self.cache.read_bytes(), original)
+
+    def test_cached_content_is_reparsed_instead_of_trusting_old_valid_flag(self):
+        messages = [{"role": "user", "content": "parser fixture"}]
+        key = request_key(JUDGE, messages)
+        JudgeCache(self.cache).add({"key": key, "valid": True, "content": '{"credit": 0.25}',
+                                   "model_response": None, "messages": messages})
+        judges, fake, _ = self.judges(lambda _: '{"credit": 0.5}')
+        result = judges._ask(JUDGE, "plan_action", messages, parse_action_judgement)
+        self.assertEqual((result["credit"], judges.calls, judges.cache_hits), (0.5, 1, 0))
+        resumed, again, _ = self.judges(lambda _: AssertionError("saved request repeated"))
+        self.assertEqual(resumed._ask(JUDGE, "plan_action", messages, parse_action_judgement), result)
+        self.assertEqual((again.requests, resumed.cache_hits), ([], 1))
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(len(self.cache.read_text().splitlines()), 2)
+
+
 class ResumeValidationTests(JudgeTestCase):
     def saved(self):
         judges = CorrectnessJudges(None, [DEFAULT_PLAN_JUDGE], self.cache, plan_judge=DEFAULT_PLAN_JUDGE)
@@ -921,7 +987,9 @@ class ConcurrentPlanTests(JudgeTestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(cache.add, entries))
         recovered = JudgeCache(self.cache)
-        self.assertEqual(recovered.entries, {entry["key"]: entry for entry in entries})
+        self.assertEqual(recovered.entries, {entry["key"]: {"content": entry["content"]} for entry in entries})
+        self.assertEqual(sorted((json.loads(line) for line in self.cache.read_text().splitlines()),
+                                key=lambda entry: int(entry["key"])), entries)
         self.assertEqual(len(self.cache.read_text().splitlines()), len(entries))
 
     def test_failed_cache_append_stops_other_calls_until_restart(self):

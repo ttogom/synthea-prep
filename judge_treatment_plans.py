@@ -66,13 +66,14 @@ def _failed_entries(run_dir):
     if "counts" in stage:
         return sum(stage["counts"].get(status, 0) for status in ("error", "interrupted", "pending"))
     failed = 0
-    for line in (run_dir / "results.jsonl").read_text(encoding="utf-8").split("\n"):
-        if line.strip():
-            for variant in json.loads(line).get("variants", {}).values():
-                for slot in variant.get("assessment_plans", {}).values():
-                    for entry in slot.get("evaluation") or []:
-                        failed += entry.get("plan_correctness", {}).get("status") in (
-                            "error", "interrupted", "pending")
+    with (run_dir / "results.jsonl").open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                for variant in json.loads(line).get("variants", {}).values():
+                    for slot in variant.get("assessment_plans", {}).values():
+                        for entry in slot.get("evaluation") or []:
+                            failed += entry.get("plan_correctness", {}).get("status") in (
+                                "error", "interrupted", "pending")
     return failed
 
 

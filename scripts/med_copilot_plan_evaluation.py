@@ -88,8 +88,8 @@ def _records(run_dir, metadata, scorer):
         raise ValueError("The scorer's cohort does not match the run's selected_patient_ids")
     if len(set(selected)) != len(selected):
         raise ValueError("selected_patient_ids contains duplicate patients")
-    source = (run_dir / "results.jsonl").read_text(encoding="utf-8")
-    records = [_read_object(line) for line in source.split("\n") if line.strip()]
+    with (run_dir / "results.jsonl").open(encoding="utf-8") as handle:
+        records = [_read_object(line) for line in handle if line.strip()]
     ids = [record.get("id") for record in records]
     if len(ids) != len(selected) or set(ids) != set(selected) or len(set(ids)) != len(ids):
         raise ValueError("Saved results must contain every selected patient exactly once")

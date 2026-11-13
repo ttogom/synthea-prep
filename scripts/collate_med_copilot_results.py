@@ -352,7 +352,10 @@ def load_report_data(run_dir, *, root=ROOT):
                 isinstance(label.get("plan"), list) and all(isinstance(step, str) for step in label["plan"])):
             raise ValueError(f"Invalid reference condition or plan for patient {patient_id!r}")
         labels[patient_id] = label
-    rows = _json_lines((run_dir / "results.jsonl").read_text(encoding="utf-8"), run_dir / "results.jsonl")
+    results_path = run_dir / "results.jsonl"
+    with results_path.open(encoding="utf-8") as handle:
+        rows = [_json_object(line, f"{results_path}:{number}")
+                for number, line in enumerate(handle, 1) if line.strip()]
     selected_ids = evaluation.get("selected_patient_ids", [])
     if (not isinstance(selected_ids, list) or not all(_text(value) for value in selected_ids)
             or len(set(selected_ids)) != len(selected_ids)):

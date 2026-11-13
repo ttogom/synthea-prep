@@ -255,7 +255,8 @@ class BioLordSimilarity:
 class JudgeCache:
     """Append-only JSONL of completed judge calls, durable before each reply is used.
 
-    Every reply is kept for auditing; only entries marked valid are reused.
+    Every reply is kept on disk for auditing. The in-memory lookup retains only
+    valid reply content, provider metadata and timing; parsers recheck each hit.
     """
 
     def __init__(self, path):
@@ -265,25 +266,34 @@ class JudgeCache:
         self._write_error = None
         if not self.path.exists():
             return
-        data = self.path.read_bytes()
-        # A crash can leave a partial final line; drop it so appends stay line-aligned.
-        torn_tail = bool(data and not data.endswith(b"\n"))
-        if torn_tail:
-            data = data[:data.rfind(b"\n") + 1]
-        for number, line in enumerate(data.decode("utf-8").split("\n"), 1):
-            if line.strip():
-                entry = json.loads(line)
-                if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
-                    raise ValueError(f"{self.path}:{number}: invalid judge response entry")
-                if entry.get("valid") is True:
-                    self.entries[entry["key"]] = entry
+        complete_bytes = 0
+        torn_tail = False
+        with self.path.open("rb") as handle:
+            for number, line in enumerate(handle, 1):
+                # Do not decode a crash-truncated UTF-8 character in the tail.
+                if not line.endswith(b"\n"):
+                    torn_tail = True
+                    break
+                text = line.decode("utf-8")
+                if text.strip():
+                    entry = json.loads(text)
+                    if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
+                        raise ValueError(f"{self.path}:{number}: invalid judge response entry")
+                    self._remember(entry)
+                complete_bytes += len(line)
         # Refuse corrupt complete lines without changing the input artifact.
         if torn_tail:
             with self.path.open("r+b") as handle:
-                handle.truncate(len(data))
+                handle.truncate(complete_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
             _fsync_directory(self.path.parent)
+
+    def _remember(self, entry):
+        if entry.get("valid") is True:
+            self.entries[entry["key"]] = {
+                field: entry[field] for field in ("content", "model_response", "elapsed_seconds")
+                if field in entry}
 
     def get(self, key):
         """The saved valid judgement for this request, or None to request it."""
@@ -309,8 +319,7 @@ class JudgeCache:
             except OSError as exc:
                 self._write_error = exc
                 raise
-            if entry.get("valid") is True:
-                self.entries[entry["key"]] = entry
+            self._remember(entry)
 
 
 class CorrectnessJudges:

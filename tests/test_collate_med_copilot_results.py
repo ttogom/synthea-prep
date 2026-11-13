@@ -107,6 +107,22 @@ class Document(HTMLParser):
 
 
 class ReportTests(unittest.TestCase):
+    def test_streamed_results_preserve_report_data_without_whole_file_reads(self):
+        path = self.run / "results.jsonl"
+        expected = load_report_data(self.run, root=self.root)
+        path.write_text("\n \n" + path.read_text(encoding="utf-8").rstrip("\n"), encoding="utf-8")
+        before = path.read_bytes()
+        original = Path.read_text
+
+        def no_whole_results_read(file, *args, **kwargs):
+            if file == path:
+                raise AssertionError("whole results read")
+            return original(file, *args, **kwargs)
+
+        with patch.object(Path, "read_text", no_whole_results_read):
+            self.assertEqual(load_report_data(self.run, root=self.root), expected)
+        self.assertEqual(path.read_bytes(), before)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

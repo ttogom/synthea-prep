@@ -115,7 +115,8 @@ class PlanStageTests(unittest.TestCase):
 
     def saved(self):
         metadata = json.loads((self.run_dir / "run.json").read_text())
-        records = [json.loads(line) for line in (self.run_dir / "results.jsonl").read_text().splitlines()]
+        with (self.run_dir / "results.jsonl").open(encoding="utf-8") as handle:
+            records = [json.loads(line) for line in handle if line.strip()]
         return metadata, records
 
     def run_stage(self, models=None, **kwargs):
@@ -504,6 +505,88 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(second.requests, [])
         self.assertEqual(judges.cache_hits, len(first.requests))
         self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_streamed_results_recover_identical_scores_from_cache_after_failed_export(self):
+        # Include Unicode and blank lines; the last patient has no trailing newline.
+        self.records[0]["components"]["evidence"] = "患者 °C\u2028\u2029" * 1000
+        self.write()
+        path = self.run_dir / "results.jsonl"
+        path.write_text("\n \n" + "\n".join(json.dumps(row, ensure_ascii=False) for row in self.records),
+                        encoding="utf-8")
+        original = path.read_bytes()
+        read_text = Path.read_text
+
+        def no_whole_results_read(file, *args, **kwargs):
+            if file == path:
+                raise AssertionError("whole results read")
+            return read_text(file, *args, **kwargs)
+
+        def reply(model, messages):
+            prompt = messages[0]["content"]
+            if "<reference_action>" in prompt:
+                credit = next(credit for number, credit in enumerate((0, 0.5, 1))
+                              if f"Reference action {number}" in prompt)
+                return json.dumps({"credit": credit})
+            return json.dumps({"unsupported_extra_count": 2 if "Reference action 2" in prompt else 0})
+
+        expected = []
+        def fail_export(run_dir, records):
+            expected.extend(deepcopy(records))
+            raise OSError("disk full")
+
+        with patch.object(Path, "read_text", no_whole_results_read):
+            with patch.object(stage, "_write_results", side_effect=fail_export), \
+                    self.assertRaises(OSError):
+                self.run_stage(FakeModels(reply), concurrency=1)
+            self.assertEqual(path.read_bytes(), original)
+            replies = (self.run_dir / "judge_responses.jsonl").read_bytes()
+            models = FakeModels(lambda *_: AssertionError("durable request repeated"))
+            judges = self.run_stage(models, concurrency=1)
+        self.assertEqual((models.requests, judges.calls, judges.cache_hits), ([], 0, 15))
+        self.assertEqual((self.run_dir / "judge_responses.jsonl").read_bytes(), replies)
+        records = self.saved()[1]
+        self.assertEqual(records, expected)  # Includes raw evidence, timing, deductions and rank weights.
+        self.assertEqual(records[0]["components"], self.records[0]["components"])
+        self.assertEqual([entry["plan_correctness"]["score"] for entry in self.entries(records)],
+                         [0.0] * 3 + [0.5] * 3 + [0.0] * 3)
+        before = path.read_bytes()
+        self.run_stage(models)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_streamed_results_validate_all_lines_before_requests_or_cache_repair(self):
+        path = self.run_dir / "results.jsonl"
+        cache = self.run_dir / "judge_responses.jsonl"
+        cache.write_bytes(b'{"torn"')
+        for suffix in ('\n{"id": "bad", "id": "duplicate"}\n', '\n{"extra": NaN}\n',
+                       '\n{"extra": 1e999}\n', '\n{"truncated":', '\n[]\n',
+                       '\n' + json.dumps(self.records[-1]) + '\n'):
+            with self.subTest(suffix=suffix):
+                self.write()
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(suffix)
+                artifacts = {file: file.read_bytes() for file in (path, cache, self.run_dir / "run.json")}
+                models = FakeModels()
+                with self.assertRaises(ValueError):
+                    self.run_stage(models)
+                self.assertEqual(models.requests, [])
+                self.assertEqual({file: file.read_bytes() for file in artifacts}, artifacts)
+
+    def test_legacy_failed_entry_count_streams_results_without_changing_counts(self):
+        statuses = ("pending", "error", "interrupted", "scored", "unavailable")
+        for index, entry in enumerate(self.entries(self.records)):
+            entry["plan_correctness"]["status"] = statuses[index % len(statuses)]
+        self.write()
+        path = self.run_dir / "results.jsonl"
+        path.write_text("\n" + path.read_text().rstrip("\n"), encoding="utf-8")
+        original = Path.read_text
+
+        def no_whole_results_read(file, *args, **kwargs):
+            if file == path:
+                raise AssertionError("whole results read")
+            return original(file, *args, **kwargs)
+
+        with patch.object(Path, "read_text", no_whole_results_read):
+            self.assertEqual(command._failed_entries(self.run_dir), 6)
 
     def test_interruption_saves_responses_and_restarts_only_missing_requests(self):
         calls = []
