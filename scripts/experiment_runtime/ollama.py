@@ -83,6 +83,7 @@ class ManagedOllama:
         self._process = self._log = self._port_lock = None
         self._entered = False
         self._version = None
+        self._log_start = 0
         self.profile = None if profile is None else validate_profile(profile)
         if self.profile and (self.parallel != self.profile["concurrency"]
                              or self.context != self.profile["context_length"]):
@@ -144,6 +145,7 @@ class ManagedOllama:
                 raise ValueError(f"Dedicated Ollama endpoint {self.base_url} is already in use; "
                                  "refusing to reuse or stop an unowned server")
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_start = self.log_path.stat().st_size if self.log_path.exists() else 0
             self._log = self.log_path.open("ab")
             self._process = subprocess.Popen(
                 ["ollama", "serve"], env=self._environment(), stdout=self._log,
@@ -193,6 +195,23 @@ class ManagedOllama:
         if self._process is None or self._process.poll() is not None:
             raise RuntimeError("Managed Ollama server is not running")
         return self._request("GET", "/api/ps")
+
+    def preload(self, model):
+        """Load the judge without generating an answer, before native verification."""
+        if not self.enabled:
+            raise ValueError("Native judge verification requires an owned Ollama server")
+        if self._process is None or self._process.poll() is not None:
+            raise RuntimeError("Managed Ollama server is not running")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("Judge to preload must be a nonempty model tag")
+        self._request("POST", "/api/generate", {"model": model, "stream": False,
+                      "keep_alive": -1, "options": {"num_ctx": self.context}}, timeout=180)
+
+    def invocation_log(self):
+        """Return only this process's log segment; prior invocations are not evidence."""
+        with self.log_path.open("rb") as handle:
+            handle.seek(self._log_start)
+            return handle.read().decode("utf-8", errors="replace")
 
     def unload(self, model):
         """Unload a drained model using an empty request; no generation is performed."""

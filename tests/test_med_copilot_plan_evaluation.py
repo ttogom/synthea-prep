@@ -681,6 +681,7 @@ class PlanStageTests(unittest.TestCase):
         models = FakeModels()
         with patch.object(command, "_prepare", return_value=(self.scorer, models, models)), \
                 patch.object(command, "ollama_for_saved_run", return_value=nullcontext()) as server, \
+                patch.object(command, "save_verified_runtime", return_value={"file": "provenance/runtime.json"}), \
                 patch.object(command, "generate_report", return_value=self.run_dir / "report.html"):
             self.assertEqual(command.main([str(self.run_dir), "--concurrency", "8", "--context-length", "4096"],
                                           root=self.root), 0)
@@ -698,6 +699,34 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(metadata["experiment"], self.metadata["experiment"])
         self.assertEqual(metadata["plan_evaluation"]["context_length"], 4096)
         self.assertEqual(metadata["plan_evaluation"]["concurrency"], 8)
+
+    def test_failed_runtime_verification_does_not_repair_cache_or_change_saved_artifacts(self):
+        self.run_stage()
+        cache = self.run_dir / "judge_responses.jsonl"
+        cache.write_bytes(b'{"torn":')
+        before = {path: path.read_bytes() for path in
+                  (cache, self.run_dir / "run.json", self.run_dir / "results.jsonl")}
+        verifier = unittest.mock.Mock(side_effect=ValueError("native profile mismatch"))
+        models = FakeModels()
+        with self.assertRaisesRegex(ValueError, "profile mismatch"):
+            self.run_stage(models, runtime_verifier=verifier)
+        verifier.assert_called_once_with()
+        self.assertFalse(models.requests)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_runtime_provenance_reference_survives_invocation_history(self):
+        first = {"file": "provenance/first.json", "sha256": "a" * 64}
+        second = {"file": "provenance/second.json", "sha256": "b" * 64}
+        models = FakeModels()
+        self.run_stage(models, runtime_verifier=lambda: first)
+        original_experiment = self.saved()[0]["experiment"]
+        calls = len(models.requests)
+        self.run_stage(models, runtime_verifier=lambda: second)
+        metadata, _ = self.saved()
+        self.assertEqual(metadata["plan_evaluation"]["runtime_provenance"], second)
+        self.assertEqual(metadata["plan_evaluation_history"][0]["runtime_provenance"], first)
+        self.assertEqual(metadata["experiment"], original_experiment)
+        self.assertEqual(len(models.requests), calls)
 
     def test_cli_invalid_runtime_override_does_not_start_server_or_rewrite_metadata(self):
         original = (self.run_dir / "run.json").read_bytes()
