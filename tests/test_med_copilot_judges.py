@@ -151,12 +151,14 @@ class PromptTests(JudgeTestCase):
         self.assertIn("Generated plan: 1. Diet, exercise\n2. ECG\n", message["content"])
         self.assertIn('Valid outputs are {"credit": 0}, {"credit": 0.5}, or {"credit": 1}.', message["content"])
 
-    def test_extras_prompt_states_the_count_range_and_numbers_both_plans(self):
+    def test_extras_prompt_requires_a_nonnegative_integer_and_numbers_both_plans(self):
         [message] = plan_extras_messages(LABEL_CONDITION, "S", "O", ["Amlodipine", "Lifestyle education"],
                                          ["Diet", "ECG", "Antibiotics"])
         self.assertIn("Reference plan: 1. Amlodipine\n2. Lifestyle education\n", message["content"])
         self.assertIn("Generated plan: 1. Diet\n2. ECG\n3. Antibiotics\n", message["content"])
-        self.assertIn('{"unsupported_extra_count": N}, where N is a whole number from 0 to 3.', message["content"])
+        self.assertIn('{"unsupported_extra_count": N}, where N is a nonnegative integer.', message["content"])
+        self.assertIn("bundled actions, count each distinct unsupported action once", message["content"])
+        self.assertNotIn("from 0 to", message["content"])
 
     def test_prompts_never_contain_example_credit_arrays(self):
         for template in (PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE):
@@ -368,6 +370,13 @@ class PlanTests(JudgeTestCase):
         entry, _ = self.plan(replies({"Throat culture (procedure)": 0.5}, 2), generated=["A", "B", "C"])
         self.assertEqual((entry["score"], entry["weighted_score"], entry["deduction"]), (0.0, 0.0, 1.0))
 
+    def test_bundled_extras_can_exceed_the_number_of_plan_items(self):
+        entry, _ = self.plan(replies(extras=2), reference=["Culture", "Rest"],
+                             generated=["Culture; rest; antibiotics; imaging"], rank=2)
+        self.assertEqual(entry["status"], "scored")
+        self.assertEqual((entry["unsupported_extra_count"], entry["deduction"]), (2, 1.0))
+        self.assertEqual((entry["score"], entry["weighted_score"]), (0.5, 0.25))
+
     def test_weighted_plan_score_uses_the_rank(self):
         entry, _ = self.plan(rank=2)
         self.assertEqual((entry["score"], entry["weighted_score"], entry["rank_weight"]), (1.0, 0.5, 0.5))
@@ -525,9 +534,10 @@ class MalformedJudgementTests(JudgeTestCase):
                 self.assertEqual(len(fake.requests), 3)
 
     def test_invalid_extras_counts_fail_the_plan(self):
-        for content in ('{"unsupported_extra_count": -1}', '{"unsupported_extra_count": 3}',
+        for content in ('{"unsupported_extra_count": -1}', '{"unsupported_extra_count": null}',
                         '{"unsupported_extra_count": 1.5}', '{"unsupported_extra_count": 1.0}',
-                        '{"unsupported_extra_count": true}', '{"unsupported_extra_count": "1"}', '{"extras": 1}'):
+                        '{"unsupported_extra_count": true}', '{"unsupported_extra_count": false}',
+                        '{"unsupported_extra_count": "1"}', '{"extras": 1}'):
             with self.subTest(content=content):
                 self.cache.unlink(missing_ok=True)
                 entry, _ = self.plan(replies(extras_content=content), generated=["Culture", "Antibiotics"])
@@ -541,7 +551,10 @@ class MalformedJudgementTests(JudgeTestCase):
 
     def test_parsers_accept_only_the_rubric_values(self):
         self.assertEqual(parse_action_judgement('{"credit": 0.5, "reason": "less specific"}'), {"credit": 0.5})
-        self.assertEqual(parse_extras_judgement('{"unsupported_extra_count": 2}', 3), {"unsupported_extra_count": 2})
+        for count in (0, 1, 2, 1000):
+            with self.subTest(count=count):
+                self.assertEqual(parse_extras_judgement(json.dumps({"unsupported_extra_count": count})),
+                                 {"unsupported_extra_count": count})
 
 
 class JudgeFailureTests(JudgeTestCase):
@@ -740,8 +753,10 @@ class ResumeValidationTests(JudgeTestCase):
 
     def test_changed_runtime_prompt_is_rejected_against_saved_prompt_hash(self):
         metadata = self.saved()
-        with patch("scripts.med_copilot_judges.PLAN_ACTION_JUDGE_TEMPLATE", "changed prompt"):
-            with self.assertRaisesRegex(ValueError, "correctness"):
+        for template in ("PLAN_ACTION_JUDGE_TEMPLATE", "PLAN_EXTRAS_JUDGE_TEMPLATE"):
+            with self.subTest(template=template), \
+                    patch("scripts.med_copilot_judges." + template, "changed prompt"), \
+                    self.assertRaisesRegex(ValueError, "correctness"):
                 CorrectnessJudges.validate_resume(metadata, ROOT, plan_judge=DEFAULT_PLAN_JUDGE)
 
     def test_resume_checks_the_selected_judge_alias(self):

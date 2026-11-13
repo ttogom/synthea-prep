@@ -101,8 +101,7 @@ def plan_extras_messages(condition, subjective, objective, reference_actions, ge
     """Count unsupported extras among the numbered generated actions."""
     prompt = PLAN_EXTRAS_JUDGE_TEMPLATE.format(
         condition=condition, subjective=subjective, objective=objective,
-        reference_plan=_numbered(reference_actions), generated_plan=_numbered(generated_actions),
-        generated_count=len(generated_actions))
+        reference_plan=_numbered(reference_actions), generated_plan=_numbered(generated_actions))
     return [{"role": "user", "content": prompt}]
 
 
@@ -164,14 +163,14 @@ def parse_action_judgement(content):
     return {"credit": _credit(judgement["credit"], "credit")}
 
 
-def parse_extras_judgement(content, generated_count):
-    """Return the whole-number count of unsupported extras, from 0 to the generated action count."""
+def parse_extras_judgement(content):
+    """Return a nonnegative integer count of unsupported extras, including bundled actions."""
     judgement = _judgement(content)
     if "unsupported_extra_count" not in judgement:
         raise JudgeResponseError("Extras judgement requires unsupported_extra_count")
     count = judgement["unsupported_extra_count"]
-    if type(count) is not int or not 0 <= count <= generated_count:
-        raise JudgeResponseError(f"unsupported_extra_count must be a whole number from 0 to {generated_count}")
+    if type(count) is not int or count < 0:
+        raise JudgeResponseError("unsupported_extra_count must be a nonnegative integer")
     return {"unsupported_extra_count": count}
 
 
@@ -611,7 +610,7 @@ class CorrectnessJudges:
                 return entry
             record = self._ask(self.plan_judge, "plan_extras",
                                plan_extras_messages(*context, reference, generated),
-                               lambda content: parse_extras_judgement(content, len(generated)))
+                               parse_extras_judgement)
             judges.append({"call": "extras", "reference_item": None, **record})
         entry["judges"] = judges
         if any(record["status"] != "scored" for record in judges):
