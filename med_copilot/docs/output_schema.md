@@ -747,7 +747,10 @@ original experiment YAML and `run.json.experiment` are unchanged. Identical conc
 one response. The CLI requires an owned server and verifies actual native FA, K/V type,
 context, slots, batch/microbatch, host-cache cap, loaded model, and full GPU
 placement before opening/repairing the response cache. Unsupported settings
-fail clearly. Detailed requested/effective settings, software/model identity
+fail clearly. Batch/microbatch remain Ollama's automatic memory-dependent
+choice (512 or 1024), are verified equal, and are recorded; the benchmark's
+observed 1024 is not forced when less memory is available.
+Detailed requested/effective settings, software/model identity
 and native evidence are written once per invocation to a unique
 `provenance/plan-judge-runtime-<id>.json`; the stage stores its path and SHA-256.
 Only the current process's appended log segment is accepted as evidence.
@@ -771,6 +774,15 @@ response records retain their original request duration when reused.
 It exits 0 when every applicable Plan entry finished, 1 when inputs cannot be
 used or some Plan entries still failed (rerun to retry them), and 130 when
 interrupted. Neither generation nor completed text/diagnosis scoring is repeated.
+
+`python scripts/validate_plan_judging.py RUN_DIRECTORY NEW_OUTPUT_DIRECTORY`
+performs a bounded live check on a separate copy: one patient per populated
+size/reference-count cell, all their saved Plans, nine simple rubric controls,
+controlled interruption/resume, and an unchanged-score/cache check on completed
+resume. It retains the full result corpus in memory and writes `validation.json`
+with source/prompt fingerprints. Observe system memory separately; these smoke
+controls and a short run do not establish clinical equivalence or long-run
+memory stability. The source run is never evaluated or rewritten by this command.
 
 `run.json.evaluation.correctness` records `status: "preliminary single-model
 midterm metric"`, the method, `selected_models` (the models the judge can
