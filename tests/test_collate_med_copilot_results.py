@@ -1324,6 +1324,21 @@ class CorrectnessReportTests(unittest.TestCase):
         self.assertIn("its maximum is about 0.611", html)
         self.assertIn("preliminary single-model midterm metric", html)
 
+    def test_plan_stage_notices_use_its_judge_settings_and_keep_generation_provenance(self):
+        self.native_v3()
+        generation = {"plan": {"judge_model": "generation_judge",
+                               "validation_status": "experimental_unvalidated"}}
+        self.metadata["evaluation"]["correctness"] = generation
+        self.metadata["plan_evaluation"] = {"judge_settings": {
+            "judge_model": "evaluation_judge", "validation_status": "passed_balanced_sample"}}
+        self.write()
+        data = self.load()
+        text = " ".join(data["notices"])
+        self.assertIn("evaluation_judge", text)
+        self.assertNotIn("generation_judge", text)
+        self.assertNotIn("Plan correctness is experimental and unvalidated", text)
+        self.assertEqual(json.loads((self.run / "run.json").read_text())["evaluation"]["correctness"], generation)
+
     def test_experimental_unvalidated_plan_scores_are_shown_but_excluded_from_every_aggregate(self):
         self.native_v3()
         for variant in ("llm_only", "guidelines"):

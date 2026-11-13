@@ -1398,7 +1398,8 @@ class ResumeCommandTests(unittest.TestCase):
         # patient-b's label is ["none recorded"], so its Plans are never judged.
         none_recorded = rows[0]["variants"]["llm_only"]["assessment_plans"]["mini"]["evaluation"][0]
         self.assertEqual(none_recorded["plan_correctness"]["reason"], "no_recorded_plan")
-        self.assertIn("correctness", run["evaluation"])
+        self.assertNotIn("correctness", run["evaluation"])
+        self.assertEqual(run["plan_evaluation"]["protocol"]["version"], 1)
         self.assertEqual(self.command()[0], 0)
         self.assertEqual(self.command()[3].requests, [])  # Fully resumed: nothing is requested again.
 
@@ -1416,7 +1417,7 @@ class ResumeCommandTests(unittest.TestCase):
         self.assertEqual((status, stderr), (0, ""))
         self.assertEqual(requested, [["custom_judge"]])
         self.assertEqual({model for model, _ in judge.requests}, {"custom_judge"})
-        self.assertEqual(self.saved()[1]["evaluation"]["correctness"]["plan"]["judge_model"], "custom_judge")
+        self.assertEqual(self.saved()[1]["plan_evaluation"]["protocol"]["plan"]["judge_model"], "custom_judge")
 
     def test_invalid_run_directories_exit_one_without_scoring(self):
         self.build_run()

@@ -127,6 +127,218 @@ class PlanStageTests(unittest.TestCase):
         return [entry for row in records for variant in row["variants"].values()
                 for output in variant["assessment_plans"].values() for entry in output["evaluation"]]
 
+    def generation_correctness(self):
+        return CorrectnessJudges(None, ("judge",), self.run_dir / "judge_responses.jsonl",
+                                 plan_judge="judge", plan_execution="deferred").metadata(self.root)
+
+    def assert_protocol_rejected_without_writes(self, message):
+        paths = [self.run_dir / name for name in ("run.json", "results.jsonl", "judge_responses.jsonl")]
+        before = {p.name: p.read_bytes() if p.exists() else None for p in paths}
+        models = FakeModels()
+        with patch("scripts.med_copilot_judges.JudgeCache", side_effect=AssertionError("cache opened")), \
+                self.assertRaisesRegex(ValueError, message):
+            self.run_stage(models)
+        self.assertEqual(models.requests, [])
+        self.assertEqual({p.name: p.read_bytes() if p.exists() else None for p in paths}, before)
+
+    def test_first_plan_stage_uses_current_protocol_and_preserves_old_generation_fingerprints(self):
+        original = self.generation_correctness()
+        original["plan"]["extras_prompt_template_sha256"] = "old-generation-extras-prompt"
+        original["diagnosis"]["model"] = "generation-only-diagnosis-model"
+        self.metadata["evaluation"]["correctness"] = deepcopy(original)
+        self.write()
+        observed = []
+        def reply(model, messages):
+            observed.append(json.loads((self.run_dir / "run.json").read_text()))
+        judges = self.run_stage(FakeModels(reply))
+        metadata, _ = self.saved()
+        self.assertEqual(judges.calls, 18)
+        self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
+        self.assertEqual(metadata["evaluation"], self.metadata["evaluation"])
+        self.assertEqual(metadata["experiment"], self.metadata["experiment"])
+        protocol = metadata["plan_evaluation"]["protocol"]
+        self.assertEqual(protocol["version"], 1)
+        self.assertEqual(protocol["plan"]["extras_prompt_template_sha256"],
+                         self.generation_correctness()["plan"]["extras_prompt_template_sha256"])
+        self.assertTrue(observed)
+        for snapshot in observed:
+            self.assertEqual(snapshot["plan_evaluation"]["protocol"], protocol)
+            self.assertEqual(snapshot["plan_evaluation"]["status"], "running")
+            self.assertEqual(snapshot["evaluation"]["correctness"], original)
+
+    def test_old_generation_hash_does_not_block_recovery_after_failed_export(self):
+        self.metadata["evaluation"]["correctness"] = self.generation_correctness()
+        self.metadata["evaluation"]["correctness"]["plan"]["rubric_sha256"] = "old-generation-rubric"
+        self.write()
+        original = (self.run_dir / "results.jsonl").read_bytes()
+        with patch.object(stage, "_write_results", side_effect=OSError("disk full")), self.assertRaises(OSError):
+            self.run_stage()
+        metadata, _ = self.saved()
+        self.assertIn("protocol", metadata["plan_evaluation"])
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original)
+        judges = self.run_stage(FakeModels())
+        self.assertEqual((judges.calls, judges.cache_hits), (0, 18))
+        self.assertEqual(self.saved()[0]["evaluation"], self.metadata["evaluation"])
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_new_stage_protocol_rejects_drift_before_touching_cache_results_or_metadata(self):
+        self.run_stage()
+        cache = self.run_dir / "judge_responses.jsonl"
+        with cache.open("ab") as handle:
+            handle.write(b'{"torn"')
+        before = {p.name: p.read_bytes() for p in self.run_dir.iterdir() if p.is_file()}
+        models = FakeModels()
+        with patch("scripts.med_copilot_judges.PLAN_EXTRAS_JUDGE_TEMPLATE", "changed prompt"), \
+                patch("scripts.med_copilot_judges.JudgeCache", side_effect=AssertionError("cache opened")), \
+                self.assertRaisesRegex(ValueError, "protocol.*extras_prompt"):
+            self.run_stage(models)
+        self.assertEqual(models.requests, [])
+        self.assertEqual({p.name: p.read_bytes() for p in self.run_dir.iterdir() if p.is_file()}, before)
+
+    def test_first_stage_allows_an_empty_cache_and_automatic_zero_without_treating_it_as_prior_judging(self):
+        self.metadata["evaluation"]["correctness"] = self.generation_correctness()
+        self.metadata["evaluation"]["correctness"]["plan"]["rubric_sha256"] = "old-rubric"
+        output = self.records[0]["variants"]["llm_only"]["assessment_plans"]["generator"]
+        output["predictions"][0]["plan"] = []
+        output["evaluation"][0]["plan_correctness"] = plan_entry(1, self.labels[0]["plan"], [])
+        output["evaluation"][1].pop("plan_correctness")
+        (self.run_dir / "judge_responses.jsonl").touch()
+        self.write()
+        judges = self.run_stage()
+        self.assertEqual(judges.calls, 16)
+        self.assertEqual(self.saved()[0]["evaluation"], self.metadata["evaluation"])
+        self.assertEqual(self.entries(self.saved()[1])[0]["plan_correctness"]["reason"], "empty_generated_plan")
+
+    def test_legacy_matching_protocol_is_upgraded_and_reuses_completed_scores(self):
+        self.metadata["evaluation"]["correctness"] = self.generation_correctness()
+        self.write()
+        self.run_stage()
+        self.metadata, self.records = self.saved()
+        self.metadata["plan_evaluation"].pop("protocol")
+        self.write()
+        before = (self.run_dir / "results.jsonl").read_bytes()
+        cache = (self.run_dir / "judge_responses.jsonl").read_bytes()
+        judges = self.run_stage()
+        metadata, _ = self.saved()
+        self.assertEqual((judges.calls, judges.cache_hits), (0, 0))
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), before)
+        self.assertEqual((self.run_dir / "judge_responses.jsonl").read_bytes(), cache)
+        self.assertEqual(metadata["evaluation"], self.metadata["evaluation"])
+        self.assertEqual(metadata["plan_evaluation"]["protocol"]["version"], 1)
+        self.assertNotIn("protocol", metadata["plan_evaluation_history"][-1])
+
+    def test_legacy_evidence_prevents_initializing_over_changed_generation_fingerprints(self):
+        original_records = deepcopy(self.records)
+        for kind in ("cache", "judged entry", "aggregate", "scored marker", "failed entry", "interrupted entry", "stage", "history"):
+            with self.subTest(evidence=kind):
+                self.records = deepcopy(original_records)
+                self.metadata.pop("plan_evaluation", None)
+                self.metadata.pop("plan_evaluation_history", None)
+                cache = self.run_dir / "judge_responses.jsonl"
+                cache.unlink(missing_ok=True)
+                self.metadata["evaluation"]["correctness"] = self.generation_correctness()
+                self.metadata["evaluation"]["correctness"]["plan"]["extras_prompt_template_sha256"] = "old-prompt"
+                entry = self.entries(self.records)[0]["plan_correctness"]
+                if kind == "cache":
+                    cache.write_text('{"torn"')
+                elif kind == "judged entry":
+                    entry["judges"] = [{"call": "action", "credit": 1, "status": "scored"}]
+                elif kind == "aggregate":
+                    entry.update(status="scored", score=1.0, weighted_score=1.0, credits=[1.0])
+                elif kind == "scored marker":
+                    entry.update(status="scored")
+                elif kind == "failed entry":
+                    entry.update(status="error", reason="judge_failed")
+                elif kind == "interrupted entry":
+                    entry.update(status="interrupted")
+                elif kind == "stage":
+                    self.metadata["plan_evaluation"] = {"status": "running"}
+                else:
+                    self.metadata["plan_evaluation_history"] = [{"status": "interrupted"}]
+                self.write()
+                self.assert_protocol_rejected_without_writes("correctness.*extras_prompt")
+
+    def test_legacy_cache_without_correctness_provenance_is_not_silently_adopted(self):
+        (self.run_dir / "judge_responses.jsonl").write_text('{"torn"')
+        self.assert_protocol_rejected_without_writes("without correctness provenance")
+
+    def test_protocol_drift_missing_fields_and_unsupported_versions_cannot_be_hidden_by_generation_metadata(self):
+        self.run_stage()
+        metadata, records = self.saved()
+        changes = [
+            (("version",), 2), (("version",), True),
+            (("plan", "judge_model"), "other"), (("plan", "judge_temperature"), 1),
+            (("plan", "rubric_file"), "other.md"), (("plan", "rubric_sha256"), "other"),
+            (("plan", "action_prompt_template_sha256"), "other"),
+            (("plan", "extras_prompt_template_sha256"), "other"),
+            (("plan", "credit_values"), [0, 1]), (("plan", "deduction_per_unsupported_extra"), 1),
+            (("rank_weighting", "formula"), "other"), (("rank_weighting", "weights"), {"1": 0.5}),
+        ]
+        for keys, value in changes:
+            with self.subTest(field=keys):
+                self.metadata, self.records = deepcopy(metadata), deepcopy(records)
+                self.metadata["evaluation"]["correctness"] = self.generation_correctness()
+                target = self.metadata["plan_evaluation"]["protocol"]
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = value
+                self.write()
+                self.assert_protocol_rejected_without_writes("protocol")
+        for protocol in (None, [], {}, {"version": 1}, {"version": 1, "plan": None}):
+            with self.subTest(protocol=protocol):
+                self.metadata, self.records = deepcopy(metadata), deepcopy(records)
+                self.metadata["plan_evaluation"]["protocol"] = protocol
+                self.write()
+                self.assert_protocol_rejected_without_writes("protocol")
+
+    def test_versioned_history_cannot_be_ignored_when_current_protocol_is_removed(self):
+        self.run_stage()
+        self.metadata, self.records = self.saved()
+        self.metadata["plan_evaluation_history"] = [deepcopy(self.metadata["plan_evaluation"])]
+        self.metadata["plan_evaluation"].pop("protocol")
+        self.write()
+        self.assert_protocol_rejected_without_writes("protocol is missing")
+
+    def test_stage_judge_settings_cannot_disagree_with_its_protocol(self):
+        self.run_stage()
+        self.metadata, self.records = self.saved()
+        self.metadata["plan_evaluation"]["judge_settings"]["extras_prompt_template_sha256"] = "other-prompt"
+        self.write()
+        self.assert_protocol_rejected_without_writes("protocol.*extras_prompt")
+
+    def test_protocol_and_judge_settings_describe_the_start_even_if_rubric_changes_during_work(self):
+        rubric = self.root / "rubric.md"
+        rubric.write_text("rubric at stage start")
+        initial_hash = hashlib.sha256(rubric.read_bytes()).hexdigest()
+        def change_rubric(model, messages):
+            rubric.write_text("changed while work was running")
+        with patch("scripts.med_copilot_judges.PLAN_RUBRIC", rubric):
+            self.run_stage(FakeModels(change_rubric))
+            saved = self.saved()[0]["plan_evaluation"]
+            self.assertEqual(saved["protocol"]["plan"]["rubric_sha256"], initial_hash)
+            self.assertEqual(saved["judge_settings"]["rubric_sha256"], initial_hash)
+            self.assert_protocol_rejected_without_writes("protocol.*rubric_sha256")
+
+    def test_same_judge_alias_can_resume_without_comparing_provider_settings(self):
+        self.run_stage()
+        models = FakeModels()
+        provider = {"models": {"judge": {"model": "updated-underlying-model"}}}
+        with patch.object(models, "metadata", return_value=provider):
+            judges = self.run_stage(models)
+        self.assertEqual((judges.calls, judges.cache_hits), (0, 0))
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["judge_settings"]["judge_model_config"], provider)
+
+    def test_malformed_history_or_generation_provenance_is_rejected_without_writes(self):
+        original = deepcopy(self.metadata)
+        for key, value in (("plan_evaluation", []), ("plan_evaluation_history", None),
+                           ("plan_evaluation_history", ["invalid"]), ("correctness", "invalid")):
+            with self.subTest(key=key, value=value):
+                self.metadata = deepcopy(original)
+                target = self.metadata["evaluation"] if key == "correctness" else self.metadata
+                target[key] = value
+                self.write()
+                self.assert_protocol_rejected_without_writes("must be")
+
     def test_only_plan_fields_change_and_generator_status_and_metric_provenance_survive(self):
         before = deepcopy(self.records)
         with patch.object(self.scorer, "score_result", side_effect=AssertionError("all metrics repeated")), \
@@ -426,6 +638,7 @@ class PlanStageTests(unittest.TestCase):
                 self.run_stage(concurrency=value)
 
     def test_runtime_context_and_concurrency_preserve_experiment_and_archive_previous_stages(self):
+        self.metadata["evaluation"]["correctness"] = self.generation_correctness()
         self.metadata["experiment"]["execution"] = {"ollama_judge_context_length": 8192}
         old_history = [{"status": "completed", "concurrency": 2, "context_length": 8192, "calls": 7}]
         previous = {"status": "interrupted", "concurrency": 4, "calls": 5, "cache_hits": 3}

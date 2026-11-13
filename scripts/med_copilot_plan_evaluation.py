@@ -20,7 +20,7 @@ from scripts.experiment_runtime.ollama import plan_judge_settings
 from scripts.med_copilot_judges import (
     DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
     parse_action_judgement, parse_extras_judgement, plan_action_messages,
-    plan_entry, plan_extras_messages, plan_score, request_key,
+    plan_entry, plan_evaluation_protocol, plan_extras_messages, plan_score, request_key,
 )
 from scripts.med_copilot_run_file import (
     RUN_FILE, RunFile, RunMetadataError, _fsync_directory, error_scope,
@@ -153,6 +153,70 @@ def _verified_sources(metadata, scorer, root):
 
 def _finite(value):
     return not isinstance(value, bool) and isinstance(value, Real) and math.isfinite(value)
+
+
+def _validate_protocol(saved, current):
+    if (not isinstance(saved, dict) or type(saved.get("version")) is not int
+            or saved["version"] != current["version"]):
+        raise ValueError("Cannot resume: missing or unsupported Plan evaluation protocol version")
+    for group in ("plan", "rank_weighting"):
+        recorded = saved.get(group)
+        for key, value in current[group].items():
+            if not isinstance(recorded, dict) or recorded.get(key) != value:
+                raise ValueError(f"Cannot resume: Plan evaluation protocol.{group}.{key} changed")
+
+
+def _evaluation_protocol(run_dir, metadata, records, root, judge):
+    """Initialize only untouched evaluations; validate all existing judging provenance."""
+    current = plan_evaluation_protocol(root, plan_judge=judge)
+    correctness = metadata.get("evaluation", {}).get("correctness")
+    if correctness is not None and not isinstance(correctness, dict):
+        raise ValueError("Generation correctness provenance must be an object")
+    previous = metadata.get("plan_evaluation")
+    history = metadata.get("plan_evaluation_history", [])
+    if previous is not None and not isinstance(previous, dict):
+        raise ValueError("plan_evaluation must be an object")
+    if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
+        raise ValueError("plan_evaluation_history must be a list of objects")
+    stages = [*history, *([previous] if previous else [])]
+    versioned = [item for item in stages if "protocol" in item]
+    for item in versioned:
+        _validate_protocol(item["protocol"], current)
+        if "judge_settings" in item:
+            _validate_protocol({**item["protocol"], "plan": item["judge_settings"]}, current)
+    if previous is not None and "protocol" in previous:
+        return current
+    if versioned:
+        raise ValueError("Cannot resume: current Plan evaluation protocol is missing")
+
+    cache = run_dir / JUDGE_FILE
+    started = bool(stages) or (cache.exists() and cache.stat().st_size > 0)
+    for record in records:
+        for _, _, output in _outputs(record):
+            if output.get("status") != "completed":
+                continue
+            for evaluation in output.get("evaluation") or []:
+                entry = evaluation.get("plan_correctness") or {}
+                if not isinstance(entry, dict):
+                    raise ValueError("Saved Plan correctness must be an object")
+                automatic_zero = (entry.get("status") == "scored" and entry.get("reason") == "empty_generated_plan"
+                                  and entry.get("generated_actions") == [] and entry.get("score") == 0
+                                  and entry.get("weighted_score") == 0)
+                if (entry.get("judges") or entry.get("error") or entry.get("status") in ("error", "interrupted")
+                        or entry.get("status") == "scored" and not automatic_zero
+                        or not automatic_zero and any(entry.get(key) is not None for key in (
+                            "score", "weighted_score", "credits", "unsupported_extra_count", "deduction"))):
+                    started = True
+    if started:
+        if not metadata.get("evaluation", {}).get("correctness"):
+            raise ValueError("Cannot resume legacy Plan judging without correctness provenance")
+        CorrectnessJudges.validate_resume(metadata, root, plan_judge=judge)
+        for item in stages:
+            if "judge_settings" in item:
+                legacy = {"version": current["version"], "plan": item["judge_settings"],
+                          "rank_weighting": metadata["evaluation"]["correctness"].get("rank_weighting")}
+                _validate_protocol(legacy, current)
+    return current
 
 
 def _saved_plan(entry, expected, judge, condition, patient):
@@ -317,8 +381,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         metadata = _read_object((run_dir / RUN_FILE).read_text(encoding="utf-8"))
         judge = metadata.get("experiment", {}).get("plan_judge", PIPELINE_DEFAULTS["plan_judge"])
         _verified_sources(metadata, scorer, root)
-        CorrectnessJudges.validate_resume(metadata, root, plan_judge=judge)
         records = _records(run_dir, metadata, scorer)
+        protocol = _evaluation_protocol(run_dir, metadata, records, root, judge)
         if judge not in models.model_ids:
             raise ValueError(f"Recorded Plan judge {judge} is unavailable; no Plan scores were changed")
         previous_settings = plan_judge_settings(metadata)
@@ -341,7 +405,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         )
         started = pacific_now().isoformat()
         stage = {"status": "running", "started_at": started, "finished_at": None,
-                 "judge_model": judge, **settings,
+                 "judge_model": judge, **settings, "protocol": protocol,
+                 "judge_settings": {**judges.metadata(root)["plan"], **protocol["plan"]},
                  "responses_file": JUDGE_FILE, "calls": 0, "cache_hits": 0,
                  "implementation_file": str(Path(__file__).resolve().relative_to(Path(root).resolve()))
                  if Path(__file__).resolve().is_relative_to(Path(root).resolve()) else str(Path(__file__).resolve()),
@@ -361,15 +426,9 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
                                  else "failed_incomplete" if interrupted is not None
                                  or any(counts.get(key, 0) for key in ("pending", "error", "interrupted"))
                                  else "completed"), finished_at=pacific_now().isoformat(),
-                         calls=judges.calls, cache_hits=judges.cache_hits, counts=counts,
-                         judge_settings=judges.metadata(root)["plan"])
+                         calls=judges.calls, cache_hits=judges.cache_hits, counts=counts)
             stage["error"] = None if interrupted is None else {
                 "type": type(interrupted).__name__, "message": models.redact(str(interrupted))}
-            evaluation = metadata["evaluation"]
-            if not isinstance(evaluation.get("correctness"), dict):
-                evaluation["correctness"] = judges.metadata(root)
-            else:
-                evaluation["correctness"]["plan"] = judges.metadata(root)["plan"]
             run_file.update(plan_evaluation=stage)
         except BaseException:
             # Never claim completed when the canonical export failed. Scalar
