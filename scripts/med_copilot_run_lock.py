@@ -23,6 +23,6 @@ def exclusive_run_lock(run_dir):
         except BlockingIOError as exc:
             raise RunLockError(f"Run directory is already in use by a runner or evaluator: {path.parent}") from exc
         try:
-            yield
+            yield handle
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
