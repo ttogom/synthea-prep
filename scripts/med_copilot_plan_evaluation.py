@@ -14,6 +14,7 @@ import math
 from numbers import Real
 import os
 from pathlib import Path
+import time
 
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
@@ -381,6 +382,7 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         raise ValueError("Plan judge context_length must be an integer from 512 to 262144")
     run_dir = Path(run_dir).resolve()
     with nullcontext() if _lock_held else exclusive_run_lock(run_dir):
+        invocation_started = time.monotonic()
         metadata = _read_object((run_dir / RUN_FILE).read_text(encoding="utf-8"))
         judge = metadata.get("experiment", {}).get("plan_judge", PIPELINE_DEFAULTS["plan_judge"])
         _verified_sources(metadata, scorer, root)
@@ -439,6 +441,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
                                  or any(counts.get(key, 0) for key in ("pending", "error", "interrupted"))
                                  else "completed"), finished_at=pacific_now().isoformat(),
                          calls=judges.calls, cache_hits=judges.cache_hits, counts=counts)
+            stage.update(elapsed_seconds=time.monotonic() - invocation_started,
+                         request_timing=judges.request_timing())
             stage["error"] = None if interrupted is None else {
                 "type": type(interrupted).__name__, "message": models.redact(str(interrupted))}
             run_file.update(plan_evaluation=stage)
@@ -446,7 +450,9 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
             # Never claim completed when the canonical export failed. Scalar
             # replies already fsynced to the cache remain available next time.
             stage.update(status="failed_incomplete", finished_at=pacific_now().isoformat(),
-                         calls=judges.calls, cache_hits=judges.cache_hits)
+                         calls=judges.calls, cache_hits=judges.cache_hits,
+                         elapsed_seconds=time.monotonic() - invocation_started,
+                         request_timing=judges.request_timing())
             run_file.update(plan_evaluation=stage)
             raise
         if interrupted is not None:

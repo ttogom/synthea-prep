@@ -728,6 +728,19 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(metadata["experiment"], original_experiment)
         self.assertEqual(len(models.requests), calls)
 
+    def test_stage_timing_counts_actual_requests_and_completed_resume_has_no_model_work(self):
+        self.run_stage()
+        first = self.saved()[0]["plan_evaluation"]
+        self.assertGreaterEqual(first["elapsed_seconds"], 0)
+        self.assertEqual(first["request_timing"]["attempted"], 18)
+        self.assertEqual(first["request_timing"]["failed"], 0)
+        self.assertEqual(first["request_timing"]["invalid"], 0)
+        self.run_stage()
+        metadata, _ = self.saved()
+        self.assertEqual(metadata["plan_evaluation"]["request_timing"]["attempted"], 0)
+        self.assertEqual(metadata["plan_evaluation"]["request_timing"]["total_seconds"], 0)
+        self.assertEqual(metadata["plan_evaluation_history"][0]["request_timing"], first["request_timing"])
+
     def test_cli_invalid_runtime_override_does_not_start_server_or_rewrite_metadata(self):
         original = (self.run_dir / "run.json").read_bytes()
         for args in (("--concurrency", "0"), ("--context-length", "0"),

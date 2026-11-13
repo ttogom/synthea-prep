@@ -62,7 +62,7 @@ def is_extras(messages):
 
 
 def reference_action(messages):
-    return re.search(r"Reference action: (.*)\n", messages[0]["content"]).group(1)
+    return re.search(r"<reference_action>\n(.*?)\n</reference_action>", messages[0]["content"], re.S).group(1)
 
 
 def replies(credits=None, extras=0, action_content=None, extras_content=None):
@@ -140,16 +140,16 @@ class PromptTests(JudgeTestCase):
                   ("condition", "subjective", "objective", "reference_plan", "generated_plan")}
         self.assertEqual(PLAN_JUDGE_TEMPLATE.format(**fields), block)
 
-    def test_action_prompt_uses_the_rubric_scale_verbatim(self):
-        scale = re.search(r"(Score each reference action:\n.*?counseling\.\n)", PLAN_JUDGE_TEMPLATE, re.S).group(1)
-        self.assertIn(scale.replace("Score each reference action:", "Score the reference action:"),
+    def test_action_prompt_preserves_the_scale_and_explicit_missing_strength_rule(self):
+        scale = re.search(r"(- 1: Same action,.*?counseling\.\n)", PLAN_JUDGE_TEMPLATE, re.S).group(1)
+        self.assertIn(scale.replace("at a different stated strength", "at a different or no stated strength"),
                       PLAN_ACTION_JUDGE_TEMPLATE)
 
     def test_action_prompt_shows_one_reference_action_and_numbered_generated_actions(self):
         [message] = plan_action_messages(LABEL_CONDITION, "S", "O", "Amlodipine 5 mg", ["Diet, exercise", "ECG"])
         self.assertEqual(message["role"], "user")
-        self.assertIn("Reference action: Amlodipine 5 mg\n", message["content"])
-        self.assertIn("Generated plan: 1. Diet, exercise\n2. ECG\n", message["content"])
+        self.assertIn("<reference_action>\nAmlodipine 5 mg\n</reference_action>", message["content"])
+        self.assertIn("<generated_plan>\n1. Diet, exercise\n2. ECG\n</generated_plan>", message["content"])
         self.assertIn('Valid outputs are {"credit": 0}, {"credit": 0.5}, or {"credit": 1}.', message["content"])
 
     def test_extras_prompt_requires_a_nonnegative_integer_and_numbers_both_plans(self):
@@ -996,6 +996,93 @@ class DeferredPlanTests(JudgeTestCase):
             with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "plan_execution"):
                 CorrectnessJudges(None, (), self.cache, plan_judge=JUDGE, plan_execution=mode)
         self.assertFalse(self.cache.exists())
+
+
+class RequestTimingTests(JudgeTestCase):
+    def test_completed_request_is_timed_before_durable_save_and_cache_hits_are_excluded(self):
+        judges = CorrectnessJudges(lambda *_: response('{"credit": 1}'), [JUDGE], self.cache,
+                                   plan_judge=JUDGE)
+        messages = [{"role": "user", "content": "Timing fixture"}]
+        original_add = judges.cache.add
+
+        def save(entry):
+            self.assertEqual(entry["elapsed_seconds"], 2.5)
+            self.assertIsNone(judges.cache.get(entry["key"]))
+            original_add(entry)
+
+        with patch("scripts.med_copilot_judges.time.monotonic", side_effect=[10, 12.5]), \
+                patch.object(judges.cache, "add", side_effect=save):
+            record = judges._ask(JUDGE, "plan_action", messages, parse_action_judgement)
+        self.assertEqual((record["status"], record["credit"], record["elapsed_seconds"]), ("scored", 1, 2.5))
+        saved = json.loads(self.cache.read_text())
+        self.assertEqual(saved["elapsed_seconds"], 2.5)
+        before = self.cache.read_bytes()
+        with patch("scripts.med_copilot_judges.time.monotonic", side_effect=AssertionError("cache hit timed")):
+            cached = judges._ask(JUDGE, "plan_action", messages, parse_action_judgement)
+        self.assertEqual(cached["elapsed_seconds"], 2.5)
+        self.assertEqual(cached, record)
+        self.assertEqual(self.cache.read_bytes(), before)
+        self.assertEqual((judges.calls, judges.cache_hits), (1, 1))
+        self.assertEqual(judges.request_timing(), {"attempted": 1, "failed": 0, "interrupted": 0,
+                                                 "invalid": 0, "total_seconds": 2.5, "max_seconds": 2.5})
+        snapshot = judges.request_timing()
+        snapshot["attempted"] = 99
+        self.assertEqual(judges.request_timing()["attempted"], 1)
+
+    def test_failed_and_interrupted_attempts_are_timed_without_new_journal_writes(self):
+        for failure in (RuntimeError("offline"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                def complete(*_):
+                    raise failure
+                judges = CorrectnessJudges(complete, [JUDGE], self.cache, plan_judge=JUDGE)
+                with patch("scripts.med_copilot_judges.time.monotonic", side_effect=[3, 7]):
+                    if isinstance(failure, Exception):
+                        result = judges._ask(JUDGE, "plan_action", [], parse_action_judgement)
+                        self.assertEqual((result["status"], result["elapsed_seconds"]), ("error", 4))
+                    else:
+                        with self.assertRaises(KeyboardInterrupt):
+                            judges._ask(JUDGE, "plan_action", [], parse_action_judgement)
+                timing = judges.request_timing()
+                self.assertEqual((timing["attempted"], timing["total_seconds"], timing["max_seconds"]), (1, 4, 4))
+                self.assertEqual(timing["failed"], int(isinstance(failure, Exception)))
+                self.assertEqual(timing["interrupted"], int(not isinstance(failure, Exception)))
+                self.assertEqual((judges.calls, judges.cache_hits), (0, 0))
+                self.assertFalse(self.cache.exists())
+
+    def test_invalid_responses_retain_timing_and_are_retried(self):
+        replies_iter = iter([response("not JSON"), response(None, refusal="refused"), response('{"credit": 0}')])
+        judges = CorrectnessJudges(lambda *_: next(replies_iter), [JUDGE], self.cache, plan_judge=JUDGE)
+        with patch("scripts.med_copilot_judges.time.monotonic", side_effect=[1, 2, 3, 5, 6, 9]):
+            records = [judges._ask(JUDGE, "plan_action", [], parse_action_judgement) for _ in range(3)]
+        self.assertEqual([record["status"] for record in records], ["invalid_response", "invalid_response", "scored"])
+        saved = [json.loads(line) for line in self.cache.read_text().splitlines()]
+        self.assertEqual([entry["elapsed_seconds"] for entry in saved], [1, 2, 3])
+        self.assertEqual([entry["valid"] for entry in saved], [False, False, True])
+        self.assertEqual(judges.request_timing(), {"attempted": 3, "failed": 0, "interrupted": 0,
+                                                 "invalid": 2, "total_seconds": 6, "max_seconds": 3})
+
+    def test_parallel_timing_counts_actual_requests_without_losing_updates(self):
+        judges = CorrectnessJudges(lambda *_: response('{"credit": 0}'), [JUDGE], self.cache, plan_judge=JUDGE)
+        def ask(number):
+            return judges._ask(JUDGE, "plan_action", [{"role": "user", "content": str(number)}],
+                               parse_action_judgement)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            records = list(executor.map(ask, range(24)))
+        timing = judges.request_timing()
+        self.assertEqual((timing["attempted"], timing["failed"], timing["invalid"], timing["interrupted"]),
+                         (24, 0, 0, 0))
+        self.assertAlmostEqual(timing["total_seconds"], sum(record["elapsed_seconds"] for record in records))
+        self.assertEqual(timing["max_seconds"], max(record["elapsed_seconds"] for record in records))
+        self.assertEqual(len(self.cache.read_text().splitlines()), 24)
+
+    def test_persistence_failure_keeps_request_time_without_publishing_a_reply(self):
+        judges = CorrectnessJudges(lambda *_: response('{"credit": 0}'), [JUDGE], self.cache, plan_judge=JUDGE)
+        with patch("scripts.med_copilot_judges.time.monotonic", side_effect=[0, 1]), \
+                patch.object(judges.cache, "add", side_effect=OSError("disk failed")):
+            with self.assertRaises(RunMetadataError):
+                judges._ask(JUDGE, "plan_action", [], parse_action_judgement)
+        self.assertEqual((judges.request_timing()["attempted"], judges.request_timing()["total_seconds"]), (1, 1))
+        self.assertEqual(judges.cache.entries, {})
 
 
 class JudgeRedactionTests(JudgeTestCase):

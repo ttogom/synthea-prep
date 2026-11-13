@@ -5,7 +5,7 @@ Usage: python judge_treatment_plans.py RUN_DIRECTORY [--concurrency N] [--contex
 Reads the recorded cohort and loads only its recorded Plan judge. Completed
 Plan judgements and scalar replies are reused. Text metrics, diagnosis scores,
 generation, and evidence are preserved. Concurrent requests are bounded by the
-last Plan stage's settings, or the experiment defaults on its first invocation.
+last Plan stage's settings, or plan_judging.yaml on its first invocation.
 Optional runtime overrides are recorded in the Plan stage without changing the experiment.
 
 Exit status: 0 when every Plan entry finished; 1 when the run directory or
@@ -32,7 +32,7 @@ from scripts.collate_med_copilot_results import generate_report
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
-from scripts.experiment_runtime.ollama import ollama_for_saved_run, plan_judge_settings
+from scripts.experiment_runtime.ollama import ollama_for_saved_run
 from scripts.experiment_runtime.plan_judging import load_judge_profile
 from scripts.experiment_runtime.judge_provenance import save_verified_runtime
 from scripts.med_copilot_plan_evaluation import PlanJudgeUnavailableError, resume_plan_evaluation
@@ -110,6 +110,9 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
                                                         "plan_judge", PIPELINE_DEFAULTS["plan_judge"]),
                                                     run_dir, root))
                 print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
+                timing = judges.request_timing()
+                print(f"Model requests: {timing['attempted']}; failed: {timing['failed']}; "
+                      f"invalid replies: {timing['invalid']}; longest request: {timing['max_seconds']:.2f}s")
                 print(f"HTML results: {generate_report(run_dir, root=root)}")
                 failed = _failed_entries(run_dir)
     except KeyboardInterrupt:

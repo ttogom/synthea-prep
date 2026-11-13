@@ -763,6 +763,11 @@ status, start/finish times, concurrency, context length, counts, and judge prove
 Before each new invocation, the previous stage object is appended to
 `run.json.plan_evaluation_history`; changing runtime settings preserves earlier
 measurements and valid cached replies in the same run directory.
+Each invocation records `elapsed_seconds` (including preparation, native
+verification and export) and a small `request_timing` summary of actual model
+requests, failures, interruptions and invalid replies. Summed request durations
+overlap under concurrency and are not wall time. Cache hits add no model time;
+response records retain their original request duration when reused.
 It exits 0 when every applicable Plan entry finished, 1 when inputs cannot be
 used or some Plan entries still failed (rerun to retry them), and 130 when
 interrupted. Neither generation nor completed text/diagnosis scoring is repeated.
