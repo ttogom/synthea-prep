@@ -50,7 +50,7 @@ class FakeModels:
                 raise content
             if content is None:
                 content = ('{"credit": 1}' if messages[0]["content"].startswith(
-                    "Grade whether the generated plan covers") else '{"unsupported_extra_count": 0}')
+                    "Use the patient's Subjective and Objective notes to grade whether") else '{"unsupported_extra_count": 0}')
             return SimpleNamespace(id="reply", model="judge", usage=None,
                                    choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(
                                        content=content, refusal=None))])
@@ -521,12 +521,12 @@ class PlanStageTests(unittest.TestCase):
 
     def test_failed_responses_are_retried_and_valid_responses_reused(self):
         self.run_stage(FakeModels(lambda model, messages: "invalid" if messages[0]["content"].startswith(
-            "Grade whether the generated plan covers") else None))
+            "Use the patient's Subjective and Objective notes to grade whether") else None))
         self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
         second = FakeModels()
         self.run_stage(second)
         self.assertEqual(len(second.requests), 9)
-        self.assertTrue(all(messages[0]["content"].startswith("Grade whether") for _, messages in second.requests))
+        self.assertTrue(all(messages[0]["content"].startswith("Use the patient") for _, messages in second.requests))
 
     def test_guideline_chat_rate_change_allows_plan_only_resume_and_reuses_valid_scalar_cache(self):
         directory = self.root / "guidelines"
@@ -673,6 +673,9 @@ class PlanStageTests(unittest.TestCase):
                 self.assertEqual(self.saved()[0]["plan_evaluation"]["context_length"], value)
 
     def test_cli_runtime_overrides_reach_server_and_stage_and_restart_without_flags_reuses_them(self):
+        profile_path = self.root / "experiments/configs/plan_judging.yaml"
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profile_path.write_bytes((ROOT / "experiments/configs/plan_judging.yaml").read_bytes())
         self.metadata["experiment"]["execution"] = {"ollama_judge_context_length": 8192}
         self.write()
         models = FakeModels()
@@ -681,11 +684,15 @@ class PlanStageTests(unittest.TestCase):
                 patch.object(command, "generate_report", return_value=self.run_dir / "report.html"):
             self.assertEqual(command.main([str(self.run_dir), "--concurrency", "8", "--context-length", "4096"],
                                           root=self.root), 0)
-            server.assert_called_once_with(self.run_dir.resolve(), concurrency=8, context_length=4096)
+            self.assertEqual(server.call_args.kwargs["concurrency"], 8)
+            self.assertEqual(server.call_args.kwargs["context_length"], 4096)
+            profile = server.call_args.kwargs["runtime_profile"]
+            self.assertEqual(profile["settings"]["host_cache_mib"], 2048)
             before = len(models.requests)
             server.reset_mock()
             self.assertEqual(command.main([str(self.run_dir)], root=self.root), 0)
-            server.assert_called_once_with(self.run_dir.resolve(), concurrency=8, context_length=4096)
+            server.assert_called_once_with(self.run_dir.resolve(), concurrency=8, context_length=4096,
+                                           runtime_profile=profile)
             self.assertEqual(len(models.requests), before)
         metadata, _ = self.saved()
         self.assertEqual(metadata["experiment"], self.metadata["experiment"])
@@ -731,7 +738,7 @@ class PlanStageTests(unittest.TestCase):
             cache = self.run_dir / "judge_responses.jsonl"
             cache.unlink(missing_ok=True)
             models = FakeModels(lambda model, messages: value if messages[0]["content"].startswith(
-                "Grade whether the generated plan covers") else None)
+                "Use the patient's Subjective and Objective notes to grade whether") else None)
             self.run_stage(models)
             for path in (self.run_dir / "run.json", self.run_dir / "results.jsonl", cache):
                 if path.exists():

@@ -33,6 +33,7 @@ from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.experiment_runtime.ollama import ollama_for_saved_run, plan_judge_settings
+from scripts.experiment_runtime.plan_judging import load_judge_profile
 from scripts.med_copilot_plan_evaluation import PlanJudgeUnavailableError, resume_plan_evaluation
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.med_copilot_run_lock import exclusive_run_lock
@@ -96,11 +97,13 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
         # a resumed generator and later overwrite its newer results.
         with exclusive_run_lock(run_dir):
             metadata = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-            settings = plan_judge_settings(metadata, concurrency=args.concurrency, context_length=args.context_length)
-            with ollama_for_saved_run(run_dir, **settings):
+            profile = load_judge_profile(root / "experiments/configs/plan_judging.yaml", metadata,
+                                         concurrency=args.concurrency, context_length=args.context_length)
+            settings = {key: profile["settings"][key] for key in ("concurrency", "context_length")}
+            with ollama_for_saved_run(run_dir, **settings, runtime_profile=profile):
                 scorer, _, judge_models = _prepare(run_dir, root, models_factory)
                 judges = resume_plan_evaluation(run_dir, scorer, judge_models, root=root,
-                                                **settings, _lock_held=True)
+                                                **settings, runtime_profile=profile, _lock_held=True)
                 print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
                 print(f"HTML results: {generate_report(run_dir, root=root)}")
                 failed = _failed_entries(run_dir)

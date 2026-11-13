@@ -1,0 +1,7 @@
+# Separate Plan-stage runtime settings; generation provenance stays unchanged.
+# Resume uses the saved profile. Existing CLI concurrency/context flags override it.
+concurrency: 4
+context_length: 4096
+flash_attention: true
+kv_cache_type: f16
+host_cache_mib: 2048
