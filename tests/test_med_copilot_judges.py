@@ -58,7 +58,7 @@ def response(content, refusal=None):
 
 
 def is_extras(messages):
-    return messages[0]["content"].startswith("Count the distinct generated actions")
+    return messages[0]["content"].startswith("Count the distinct actions in the generated plan")
 
 
 def reference_action(messages):
@@ -155,10 +155,11 @@ class PromptTests(JudgeTestCase):
     def test_extras_prompt_requires_a_nonnegative_integer_and_numbers_both_plans(self):
         [message] = plan_extras_messages(LABEL_CONDITION, "S", "O", ["Amlodipine", "Lifestyle education"],
                                          ["Diet", "ECG", "Antibiotics"])
-        self.assertIn("Reference plan: 1. Amlodipine\n2. Lifestyle education\n", message["content"])
-        self.assertIn("Generated plan: 1. Diet\n2. ECG\n3. Antibiotics\n", message["content"])
+        self.assertIn("<reference_plan>\n1. Amlodipine\n2. Lifestyle education\n</reference_plan>", message["content"])
+        self.assertIn("<generated_plan>\n1. Diet\n2. ECG\n3. Antibiotics\n</generated_plan>", message["content"])
         self.assertIn('{"unsupported_extra_count": N}, where N is a nonnegative integer.', message["content"])
-        self.assertIn("bundled actions, count each distinct unsupported action once", message["content"])
+        self.assertIn("Split bundled generated actions into individual actions before counting.", message["content"])
+        self.assertIn("Count each distinct unsupported action only once.", message["content"])
         self.assertNotIn("from 0 to", message["content"])
 
     def test_prompts_never_contain_example_credit_arrays(self):

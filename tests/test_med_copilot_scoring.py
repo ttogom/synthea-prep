@@ -954,8 +954,8 @@ def judge_response(content):
         finish_reason="stop", message=SimpleNamespace(content=content, refusal=None))])
 
 
-ACTION_PROMPT = "Grade whether the generated plan covers"
-EXTRAS_PROMPT = "Count the distinct generated actions"
+ACTION_PROMPT = "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover"
+EXTRAS_PROMPT = "Count the distinct actions in the generated plan"
 
 
 class FakeJudgeModels:
@@ -1025,8 +1025,8 @@ class CorrectnessScoringTests(unittest.TestCase):
         self.assertEqual({model for model, _ in models.requests}, {"llama"})
         self.assertFalse(any("DX by" in prompt for _, prompt in models.requests))
         self.assertEqual({prompt.split("\n", 1)[0] for _, prompt in models.requests},
-                         {"Grade whether the generated plan covers one reference action for the labeled condition.",
-                          "Count the distinct generated actions that are unsupported by the case."})
+                         {"Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.",
+                          "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported."})
         gemma = record["variants"]["llm_only"]["assessment_plans"]["gemma"]["evaluation"][0]
         self.assertEqual(gemma["plan_correctness"]["judges"][0]["judge_model"], "llama")
 
@@ -1344,6 +1344,9 @@ class ResumeCommandTests(unittest.TestCase):
     result = PatientScorerTests.result
 
     def build_run(self):
+        profile = self.directory / "experiments/configs/plan_judging.yaml"
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_bytes((ROOT / "experiments/configs/plan_judging.yaml").read_bytes())
         self.input_path = self.directory / "input.jsonl"
         self.input_path.write_text("".join(json.dumps(p) + "\n" for p in self.patients), encoding="utf-8")
         self.run_dir = self.directory / "experiments/output/run"
@@ -1374,6 +1377,7 @@ class ResumeCommandTests(unittest.TestCase):
         with patch.object(Evaluator, "evaluate_metrics", return_value=self.metrics), \
                 patch("scripts.med_copilot_scoring.TextMetricEvaluator", side_effect=lambda: SingletonMetricDouble(
                     lambda *args, **kw: Evaluator.evaluate_metrics(*args, **kw))), \
+                patch.dict(namespace["main"].__globals__, {"save_verified_runtime": lambda *a: {"file": "provenance/fake.json"}}), \
                 redirect_stderr(stderr), patch("sys.stdout", stdout):
             status = namespace["main"](list(argv) or [str(self.run_dir)], root=self.directory,
                                        models_factory=models_factory or (lambda *args, **kwargs: models))
