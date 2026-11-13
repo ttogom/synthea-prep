@@ -142,8 +142,13 @@ class PromptTests(JudgeTestCase):
 
     def test_action_prompt_preserves_the_scale_and_explicit_missing_strength_rule(self):
         scale = re.search(r"(- 1: Same action,.*?counseling\.\n)", PLAN_JUDGE_TEMPLATE, re.S).group(1)
-        self.assertIn(scale.replace("at a different stated strength", "at a different or no stated strength"),
-                      PLAN_ACTION_JUDGE_TEMPLATE)
+        self.assertIn(" ".join(scale.split()), " ".join(PLAN_ACTION_JUDGE_TEMPLATE.split()))
+        for template in (PLAN_ACTION_JUDGE_TEMPLATE, PLAN_JUDGE_TEMPLATE):
+            normalized = " ".join(template.split())
+            self.assertIn("For the same drug, award 0.5 if the reference specifies a strength "
+                          "and the generated plan omits strength or states a different strength.", normalized)
+            self.assertIn("If the reference does not specify a drug strength, do not lower credit solely "
+                          "because the generated plan also omits strength.", normalized)
 
     def test_action_prompt_shows_one_reference_action_and_numbered_generated_actions(self):
         [message] = plan_action_messages(LABEL_CONDITION, "S", "O", "Amlodipine 5 mg", ["Diet, exercise", "ECG"])

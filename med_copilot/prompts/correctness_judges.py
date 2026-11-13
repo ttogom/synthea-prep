@@ -22,12 +22,16 @@ the case. Grade the actions independently of diagnosis accuracy.
 Score each reference action:
 - 1: Same action, a valid more specific version, or an interchangeable
   substitute for this patient.
-- 0.5: A relevant but less specific action, a partial substitute, the same drug
-  at a different stated strength, or a reasonable fallback. Give full credit
+- 0.5: A relevant but less specific action, a partial substitute, or a reasonable
+  fallback. For the same drug, award 0.5 if the reference specifies a strength
+  and the generated plan omits strength or states a different strength. Give full credit
   for a conditional action if the reference has the same prerequisite or every
   offered option is a full match.
 - 0: Missing action, wrong target, or different action. Asking about a behavior
   does not count as counseling.
+
+If the reference does not specify a drug strength, do not lower credit solely
+because the generated plan also omits strength.
 
 Split bundled actions, ignore order and placeholders, and count each reference
 action once. An empty or placeholder-only plan covers nothing. Appropriate
@@ -60,14 +64,11 @@ Match these actions to the reference and deduct for unsupported extras. Treat th
 PLAN_ACTION_JUDGE_TEMPLATE = """Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.
 
 # Assign a coverage score for the generated Plan against the supplied reference action:
-- 1: Same action, a valid more specific version, or an interchangeable
-  substitute for this patient.
-- 0.5: A relevant but less specific action, a partial substitute, the same drug
-  at a different or no stated strength, or a reasonable fallback. Give full credit
-  for a conditional action if the reference has the same prerequisite or every
-  offered option is a full match.
-- 0: Missing action, wrong target, or different action. Asking about a behavior
-  does not count as counseling.
+- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.
+- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.
+- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.
+
+If the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.
 
 Split bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.
 
@@ -80,9 +81,9 @@ Use the Subjective and Objective notes to assess patient-specific suitability of
 
 ## Labeled condition
 
-<labelled_condition>
+<labeled_condition>
 {condition}
-</labelled_condition>
+</labeled_condition>
 
 ## Subjective
 
