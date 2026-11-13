@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import re
 from threading import Lock, RLock
+import time
 
 from med_copilot.prompts.correctness_judges import PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE
 from scripts.med_copilot_helpers import model_response_metadata, repo_path
@@ -346,6 +347,18 @@ class CorrectnessJudges:
         self._cache = JudgeCache(cache_path) if plan_execution == "inline" else None
         self.calls = 0
         self.cache_hits = 0
+        self._request_timing = {"attempted": 0, "failed": 0, "interrupted": 0, "invalid": 0,
+                                "total_seconds": 0.0, "max_seconds": 0.0}
+
+    def request_timing(self):
+        """Snapshot actual provider work; cached replies never count as model time.
+
+        Durations include provider-wrapper retries, but exclude cache waiting,
+        parsing and persistence. Concurrent durations overlap and must not be
+        interpreted as stage wall time.
+        """
+        with self._lock:
+            return dict(self._request_timing)
 
     @property
     def cache(self):
@@ -514,18 +527,37 @@ class CorrectnessJudges:
                 self.cache_hits += 1
             record.update(status="scored", raw_response=entry["content"],
                           model_response=entry["model_response"], **parsed)
+            if "elapsed_seconds" in entry:
+                # This is the original request duration, not work done on resume.
+                record["elapsed_seconds"] = entry["elapsed_seconds"]
             return record
         label = f"{task} judge {judge} (request {key[:12]})"
+        started = time.monotonic()
+        outcome = None
         try:
-            response = self.complete(judge, messages)
+            try:
+                response = self.complete(judge, messages)
+            finally:
+                # Stop the provider timer before parsing or saving errors.
+                elapsed = time.monotonic() - started
+                record["elapsed_seconds"] = elapsed
         except Exception as exc:
+            outcome = "failed"
             record.update(status="error", error={"type": type(exc).__name__, "message": str(exc)})
             self._record(JudgeCallError(f"{label} failed: {type(exc).__name__}: {exc}"), exc)
             return record
         except BaseException as exc:
+            outcome = "interrupted"
             record.update(status="interrupted", error={"type": type(exc).__name__,
                                                         "message": "Judge call interrupted"})
             raise
+        finally:
+            with self._lock:
+                self._request_timing["attempted"] += 1
+                if outcome is not None:
+                    self._request_timing[outcome] += 1
+                self._request_timing["total_seconds"] += elapsed
+                self._request_timing["max_seconds"] = max(self._request_timing["max_seconds"], elapsed)
         with self._lock:
             self.calls += 1
         choices = getattr(response, "choices", None)
@@ -535,6 +567,7 @@ class CorrectnessJudges:
                  "recorded_at": pacific_now().isoformat(), "messages": messages,
                  "content": content if isinstance(content, str) else None,
                  "refusal": refusal if isinstance(refusal, str) else None,
+                 "elapsed_seconds": elapsed,
                  "model_response": model_response_metadata(response), "valid": False, "error": None}
         record.update(raw_response=entry["content"], model_response=entry["model_response"])
         try:
@@ -542,6 +575,8 @@ class CorrectnessJudges:
                 raise JudgeResponseError("Judge refused the request")
             parsed = parse(entry["content"])
         except JudgeResponseError as exc:
+            with self._lock:
+                self._request_timing["invalid"] += 1
             entry["error"] = {"type": type(exc).__name__, "message": str(exc)}
             self._save_response(entry)
             record.update(status="invalid_response", error=entry["error"])
