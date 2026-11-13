@@ -39,12 +39,16 @@ def native_settings(log, profile):
         effective[key] = int(effective[key])
     expected = {"parallel_slots": profile["concurrency"], "context_length": profile["context_length"],
                 "total_context": profile["concurrency"] * profile["context_length"],
-                "batch": 1024, "microbatch": 1024,
                 "flash_attention": "enabled" if profile["flash_attention"] else "disabled",
                 "kv_cache_type": (profile["kv_cache_type"], profile["kv_cache_type"])}
     for key, value in expected.items():
         if effective[key] != value:
             raise ValueError(f"Native judge {key}: requested {value}, observed {effective[key]}")
+    # Ollama chooses this automatically from available memory. The profile does
+    # not request a batch size; retain the native memory decision rather than
+    # forcing the benchmark's observed 1024 on a busier machine.
+    if effective["batch"] not in (512, 1024) or effective["microbatch"] != effective["batch"]:
+        raise ValueError("Cannot verify supported automatic native judge batch/microbatch")
     layers, total = map(int, effective["gpu_layers"])
     if not layers or layers != total:
         raise ValueError(f"Native judge requires full GPU placement; observed {layers}/{total} layers")

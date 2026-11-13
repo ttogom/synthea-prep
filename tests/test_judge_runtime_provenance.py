@@ -81,6 +81,13 @@ class NativeSettingsTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "batch"):
                 native_settings(changed, PROFILE)
 
+    def test_memory_constrained_native_batch_is_recorded_without_forcing_more_memory(self):
+        changed = "\n".join(line.replace("1024", "512") if "n_batch" in line or "n_ubatch" in line
+                            else line for line in NATIVE_LOG.splitlines())
+        self.assertEqual(native_settings(changed, PROFILE)["settings"]["batch"], 512)
+        with self.assertRaisesRegex(ValueError, "batch"):
+            native_settings(changed.replace("= 512", "= 2048"), PROFILE)
+
     def test_partial_or_zero_gpu_offload_is_rejected(self):
         for layers in ("48/49", "0/49", "0/0"):
             with self.subTest(layers=layers), self.assertRaisesRegex(ValueError, "GPU"):

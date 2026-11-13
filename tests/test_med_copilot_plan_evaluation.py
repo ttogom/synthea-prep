@@ -384,7 +384,7 @@ class PlanStageTests(unittest.TestCase):
                     entry["rank"], entry["plan_correctness"]["reference_actions"], prediction["plan"])
         self.write()
         models = FakeModels(lambda model, messages: '{"unsupported_extra_count": 2}'
-                            if messages[0]["content"].startswith("Count the distinct generated actions") else None)
+                            if messages[0]["content"].startswith("Count the distinct actions in the generated plan") else None)
         self.run_stage(models)
         self.assertEqual(len(models.requests), 6)  # Identical plans across ranks share judge requests.
         metadata, records = self.saved()

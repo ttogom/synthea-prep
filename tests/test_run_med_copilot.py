@@ -58,7 +58,7 @@ OLLAMA_MODULE = ROOT / "scripts/experiment_runtime/ollama.py"
 PLAN_EVALUATION_MODULE = ROOT / "scripts/med_copilot_plan_evaluation.py"
 PLAN_EVALUATION_COMMAND = ROOT / "judge_treatment_plans.py"
 # Plan judge prompts (per reference action, then unsupported extras); diagnoses use BioLORD.
-JUDGE_PROMPT_PREFIXES = ("Grade whether the generated plan covers", "Count the distinct generated actions")
+JUDGE_PROMPT_PREFIXES = ("Use the patient's Subjective and Objective notes to grade whether", "Count the distinct actions in the generated plan")
 BIOLORD_MODEL = "FremyCompany/BioLORD-2023"
 # Text metrics per field plus the preliminary correctness entries per rank.
 EVALUATION_KEYS = {"rank", "condition", "plan", "diagnosis_correctness", "plan_correctness"}
@@ -406,6 +406,8 @@ class PipelineFixture:
         runtime.mkdir()
         (runtime / "__init__.py").write_bytes((OLLAMA_MODULE.parent / "__init__.py").read_bytes())
         (runtime / OLLAMA_MODULE.name).write_bytes(OLLAMA_MODULE.read_bytes())
+        for name in ("plan_judging.py", "judge_provenance.py"):
+            (runtime / name).write_bytes((OLLAMA_MODULE.parent / name).read_bytes())
         (self.script.parent / PLAN_EVALUATION_MODULE.name).write_bytes(PLAN_EVALUATION_MODULE.read_bytes())
         (self.root / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
         (self.script.parent / JUDGES_MODULE.name).write_bytes(JUDGES_MODULE.read_bytes())
@@ -416,6 +418,8 @@ class PipelineFixture:
         self.model_config.write_bytes(MODEL_CONFIG.read_bytes())
         self.experiment_config = self.model_config.with_name("experiment.yaml")
         self.experiment_config.write_bytes(EXPERIMENT_CONFIG.read_bytes())
+        self.experiment_config.with_name("plan_judging.yaml").write_bytes(
+            EXPERIMENT_CONFIG.with_name("plan_judging.yaml").read_bytes())
         # Pipeline regressions use an explicit single-model, uncapped selection.
         experiment = yaml.safe_load(self.experiment_config.read_text())
         experiment["selected_models"] = ["gpt_4o_mini"]
@@ -824,7 +828,8 @@ class PipelineFixture:
                              "scripts.med_copilot_observability", "scripts.med_copilot_startup", "scripts.med_copilot_variants",
                              "scripts.med_copilot_run_file", "scripts.med_copilot_judges",
                              "scripts.med_copilot_run_lock", "scripts.med_copilot_plan_evaluation",
-                             "scripts.experiment_runtime.ollama", "scripts.experiment_runtime",
+                             "scripts.experiment_runtime.ollama", "scripts.experiment_runtime.plan_judging",
+                             "scripts.experiment_runtime.judge_provenance", "scripts.experiment_runtime",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
@@ -6803,7 +6808,10 @@ class RunnerResumeTests(unittest.TestCase):
         model_count = len(f.model_configs)
         with f.runtime():
             command = runpy.run_path(str(f.root / PLAN_EVALUATION_COMMAND.name))
-            self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
+            with patch.dict(command["main"].__globals__, {
+                    "save_verified_runtime": lambda *args: {"file": "provenance/fake-runtime.json"}}):
+                self.assertEqual(command["main"]([str(folder), "--concurrency", "2"], root=f.root), 0,
+                                 f.stderr.getvalue())
         _, metadata, judged = self.saved()
         self.assertEqual(metadata["plan_evaluation"]["status"], "completed")
         self.assertEqual(metadata["plan_evaluation"]["concurrency"], 2)
@@ -6827,7 +6835,9 @@ class RunnerResumeTests(unittest.TestCase):
         cache = (folder / "judge_responses.jsonl").read_bytes()
         with f.runtime():
             command = runpy.run_path(str(f.root / PLAN_EVALUATION_COMMAND.name))
-            self.assertEqual(command["main"]([str(folder)], root=f.root), 0)
+            with patch.dict(command["main"].__globals__, {
+                    "save_verified_runtime": lambda *args: {"file": "provenance/fake-runtime.json"}}):
+                self.assertEqual(command["main"]([str(folder)], root=f.root), 0, f.stderr.getvalue())
         self.assertEqual(self.invoke(runner, folder), "completed")
         self.assertEqual(len(f.judge_calls), calls)
         self.assertEqual((folder / "judge_responses.jsonl").read_bytes(), cache)
