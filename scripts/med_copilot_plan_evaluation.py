@@ -20,6 +20,7 @@ from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.experiment_runtime.ollama import plan_judge_settings
 from scripts.experiment_runtime.plan_judging import validate_profile
+from scripts.experiment_runtime.memory_supervisor import MemoryPressureStop
 from scripts.med_copilot_judges import (
     DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
     parse_action_judgement, parse_extras_judgement, plan_action_messages,
@@ -331,14 +332,18 @@ def _run_job(run_file, judges, patient_id, entry, condition, patient):
         return result
 
 
-def _parallel(jobs, judges, run_file, concurrency):
+def _parallel(jobs, judges, run_file, concurrency, stop_requested=None):
     executor = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="plan-judge")
     pending = set()
     iterator = iter(jobs)
     exhausted = False
     try:
         while pending or not exhausted:
+            if stop_requested is not None and stop_requested():
+                raise MemoryPressureStop("Memory guard requested a stop")
             while not exhausted and len(pending) < concurrency * 2:
+                if stop_requested is not None and stop_requested():
+                    raise MemoryPressureStop("Memory guard requested a stop")
                 try:
                     job = next(iterator)
                 except StopIteration:
@@ -346,7 +351,8 @@ def _parallel(jobs, judges, run_file, concurrency):
                     break
                 pending.add(executor.submit(copy_context().run, _run_job, run_file, judges, *job))
             if pending:
-                finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+                finished, pending = wait(pending, return_when=FIRST_COMPLETED,
+                                         timeout=1 if stop_requested is not None else None)
                 for future in finished:
                     future.result()
     finally:
@@ -370,7 +376,8 @@ def _counts(records):
 
 
 def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None,
-                           runtime_profile=None, runtime_verifier=None, _lock_held=False):
+                           runtime_profile=None, runtime_verifier=None, _lock_held=False,
+                           stop_requested=None, guard_metadata=None):
     """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
 
     models contains only the recorded judge. _lock_held is reserved for the CLI,
@@ -407,8 +414,15 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         runtime_provenance = runtime_verifier() if runtime_verifier is not None else None
         run_file = RunFile(run_dir, metadata)
         run_file.redact = models.redact
+        def complete(model, messages):
+            # Running Plans must not start their next action/extras call while
+            # the scheduler drains after a stop. Saved replies remain reusable.
+            if stop_requested is not None and stop_requested():
+                raise MemoryPressureStop("Memory guard requested a stop")
+            return models.judge(model, messages)
+
         judges = CorrectnessJudges(
-            models.judge, models.model_ids, run_dir / JUDGE_FILE, plan_judge=judge,
+            complete, models.model_ids, run_dir / JUDGE_FILE, plan_judge=judge,
             generator_models=metadata.get("assessment_plan_models", {}).get("selected_models"),
             judge_model_config=models.metadata(root) if hasattr(models, "metadata") else None,
             redact=models.redact,
@@ -425,11 +439,13 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
             stage["runtime_profile"] = deepcopy(runtime_profile)
         if runtime_provenance is not None:
             stage["runtime_provenance"] = runtime_provenance
+        if guard_metadata is not None:
+            stage["memory_guard"] = deepcopy(guard_metadata)
         run_file.update(plan_evaluation=stage, plan_evaluation_history=history)
         interrupted = None
         changes = {"any": False}
         try:
-            _parallel(_jobs(records, scorer, judge, changes), judges, run_file, concurrency)
+            _parallel(_jobs(records, scorer, judge, changes), judges, run_file, concurrency, stop_requested)
         except BaseException as exc:
             interrupted = exc
         try:

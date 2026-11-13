@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from threading import Lock
+from threading import Event, Lock
 import time
 from types import SimpleNamespace
 import unittest
@@ -740,6 +740,27 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(metadata["plan_evaluation"]["request_timing"]["attempted"], 0)
         self.assertEqual(metadata["plan_evaluation"]["request_timing"]["total_seconds"], 0)
         self.assertEqual(metadata["plan_evaluation_history"][0]["request_timing"], first["request_timing"])
+
+    def test_memory_stop_blocks_new_scalar_calls_and_resumes_from_durable_reply(self):
+        stop = Event()
+        def reply(model, messages):
+            stop.set()
+            return '{"credit": 1}'
+        models = FakeModels(reply)
+        with self.assertRaises(stage.MemoryPressureStop):
+            self.run_stage(models, concurrency=1, stop_requested=stop.is_set,
+                           guard_metadata={"events_file": "provenance/guard.jsonl", "attempt": 1})
+        self.assertEqual(len(models.requests), 1)
+        metadata, records = self.saved()
+        self.assertEqual(metadata["plan_evaluation"]["status"], "interrupted")
+        self.assertEqual(metadata["plan_evaluation"]["memory_guard"]["attempt"], 1)
+        cache = self.run_dir / "judge_responses.jsonl"
+        self.assertEqual(len(cache.read_text().splitlines()), 1)
+        self.assertTrue(json.loads(cache.read_text())["valid"])
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1)
+        self.assertNotIn(models.requests[0], resumed.requests)
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
 
     def test_cli_invalid_runtime_override_does_not_start_server_or_rewrite_metadata(self):
         original = (self.run_dir / "run.json").read_bytes()

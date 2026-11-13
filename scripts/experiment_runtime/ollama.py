@@ -196,6 +196,17 @@ class ManagedOllama:
             raise RuntimeError("Managed Ollama server is not running")
         return self._request("GET", "/api/ps")
 
+    def runtime_descriptor(self):
+        """Describe this owned server for a verification-only judging child."""
+        if (not self.enabled or self._process is None or self._process.poll() is not None
+                or self.profile is None or not self._version):
+            raise ValueError("A running owned judge server is required for a runtime descriptor")
+        return {"managed": True, "host": self.address, "parallel": self.parallel,
+                "context": self.context, "max_loaded_models": self.max_loaded_models,
+                "profile": dict(self.profile), "version": self._version,
+                "log_path": str(self.log_path), "log_start_byte": self._log_start,
+                "server_pid": self._process.pid}
+
     def preload(self, model):
         """Load the judge without generating an answer, before native verification."""
         if not self.enabled:
@@ -223,11 +234,28 @@ class ManagedOllama:
             raise RuntimeError("Managed Ollama server is not running")
         self._request("POST", "/api/generate", {"model": model, "keep_alive": 0, "stream": False}, timeout=30)
 
-    def close(self):
+    def close(self, *, force_group=False):
         """Stop our isolated process group and release its persistent port-lock inode."""
         try:
             if self._process is not None:
-                if self._process.poll() is None:
+                if force_group:
+                    # The watchdog already allowed its bounded request-drain
+                    # period. Do not equate leader exit with descendant exit:
+                    # native runners may still occupy this owned process group.
+                    try:
+                        os.killpg(self._process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    # Keep the leader unreaped until the last group signal so
+                    # its numeric identity cannot be recycled during cleanup.
+                    # Request draining already happened in the supervisor.
+                    time.sleep(0.1)
+                    try:
+                        os.killpg(self._process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    self._process.wait(timeout=5)
+                elif self._process.poll() is None:
                     # start_new_session=True makes this PID the group leader;
                     # the GPU runners it launches belong to the same owned group.
                     # Never discover or signal a process by its listening port.
@@ -258,6 +286,76 @@ class ManagedOllama:
 
     def __exit__(self, kind, value, traceback):
         self.close()
+
+
+class _ProcessPresence:
+    """Check presence only; ownership and process termination stay in the parent."""
+
+    def __init__(self, pid):
+        self.pid = _positive(pid, "Owned Ollama PID")
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+        except ProcessLookupError:
+            return 1
+        except PermissionError as exc:
+            raise RuntimeError("Cannot verify the owned Ollama process") from exc
+        return None
+
+
+class OllamaRuntimeView:
+    """A child's verification client for a parent-owned native server.
+
+    This object has no process-start, process-stop, unload, or context-manager
+    API. The parent retains the actual Popen object and port lock throughout.
+    """
+
+    def __init__(self, descriptor):
+        fields = {"managed", "host", "parallel", "context", "max_loaded_models", "profile",
+                  "version", "log_path", "log_start_byte", "server_pid"}
+        if (not isinstance(descriptor, dict) or set(descriptor) != fields
+                or descriptor["managed"] is not True):
+            raise ValueError("Invalid owned Ollama runtime descriptor")
+        self.enabled = True
+        self.hostname, self.port, self.address = _address(descriptor["host"])
+        self.base_url = "http://" + self.address
+        self.parallel = _positive(descriptor["parallel"], "Ollama parallel slots")
+        self.context = _positive(descriptor["context"], "Ollama context length")
+        self.max_loaded_models = _positive(descriptor["max_loaded_models"], "Ollama maximum loaded models")
+        self.profile = validate_profile(descriptor["profile"])
+        if (self.parallel != self.profile["concurrency"] or self.context != self.profile["context_length"]):
+            raise ValueError("Owned Ollama descriptor differs from its judge profile")
+        if (not isinstance(descriptor["version"], str) or not descriptor["version"].strip()
+                or not isinstance(descriptor["log_path"], str)
+                or not Path(descriptor["log_path"]).is_absolute()
+                or type(descriptor["log_start_byte"]) is not int or descriptor["log_start_byte"] < 0):
+            raise ValueError("Invalid owned Ollama software/log descriptor")
+        self._version = descriptor["version"]
+        self.log_path = Path(descriptor["log_path"])
+        self._log_start = descriptor["log_start_byte"]
+        self._process = _ProcessPresence(descriptor["server_pid"])
+
+    def _request(self, method, path, payload=None, *, timeout=2):
+        return ManagedOllama._request(self, method, path, payload, timeout=timeout)
+
+    def metadata(self):
+        """Read the same whitelisted native metadata as the owning parent."""
+        return ManagedOllama.metadata(self)
+
+    def ps_snapshot(self):
+        """Read live placement without gaining any process-control capability."""
+        return ManagedOllama.ps_snapshot(self)
+
+    def preload(self, model):
+        """Load the judge on the parent's already-owned server for verification."""
+        return ManagedOllama.preload(self, model)
+
+    def invocation_log(self):
+        """Read only the parent server's fresh log segment."""
+        if self._process.poll() is not None:
+            raise RuntimeError("Managed Ollama server is not running")
+        return ManagedOllama.invocation_log(self)
 
 
 def plan_judge_settings(metadata, *, concurrency=None, context_length=None):

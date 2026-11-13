@@ -10,10 +10,12 @@ Optional runtime overrides are recorded in the Plan stage without changing the e
 
 Exit status: 0 when every Plan entry finished; 1 when the run directory or
 its inputs cannot be used, or when some Plan entries still failed (rerun
-to retry them); 130 when interrupted (completed judge calls are kept for the next run).
+to retry them); 75 when memory protection pauses the run; 130 when interrupted
+(completed judge calls are kept for the next run).
 """
 
 import argparse
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
@@ -27,6 +29,15 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "med_copilot/upstream"))
 load_dotenv(ROOT / ".env", override=False)
+
+from scripts.experiment_runtime.memory_supervisor import (
+    MEMORY_STOP_EXIT, MemoryPressureStop, inherited_run_lock, supervise_cli,
+)
+
+# Keep the watchdog free of model/scoring imports and their memory footprint.
+# It launches this module's main() in a child while retaining the run lock.
+if __name__ == "__main__":
+    raise SystemExit(supervise_cli(sys.argv[1:], root=ROOT))
 
 from scripts.collate_med_copilot_results import generate_report
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
@@ -86,7 +97,8 @@ def _prepare(run_dir, root, models_factory):
     return scorer, judge_models, judge_models
 
 
-def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
+def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels,
+         _lock_fd=None, _server=None, _stop_file=None, _guard_metadata=None, _runtime_profile=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("run_directory", type=Path, help="Directory containing run.json and results.jsonl")
     parser.add_argument("--concurrency", type=int, help="Override the number of simultaneous judge requests")
@@ -96,25 +108,32 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
     try:
         # Lock before reading run.json, so model/cohort reconstruction cannot race
         # a resumed generator and later overwrite its newer results.
-        with exclusive_run_lock(run_dir):
+        with (exclusive_run_lock(run_dir) if _lock_fd is None else inherited_run_lock(run_dir, _lock_fd)):
             metadata = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-            profile = load_judge_profile(root / "experiments/configs/plan_judging.yaml", metadata,
-                                         concurrency=args.concurrency, context_length=args.context_length)
+            profile = (_runtime_profile if _runtime_profile is not None else load_judge_profile(
+                root / "experiments/configs/plan_judging.yaml", metadata,
+                concurrency=args.concurrency, context_length=args.context_length))
             settings = {key: profile["settings"][key] for key in ("concurrency", "context_length")}
-            with ollama_for_saved_run(run_dir, **settings, runtime_profile=profile) as server:
+            with (ollama_for_saved_run(run_dir, **settings, runtime_profile=profile)
+                  if _server is None else nullcontext(_server)) as server:
                 scorer, _, judge_models = _prepare(run_dir, root, models_factory)
                 judges = resume_plan_evaluation(run_dir, scorer, judge_models, root=root,
                                                 **settings, runtime_profile=profile, _lock_held=True,
                                                 runtime_verifier=lambda: save_verified_runtime(
                                                     server, judge_models, metadata["experiment"].get(
                                                         "plan_judge", PIPELINE_DEFAULTS["plan_judge"]),
-                                                    run_dir, root))
+                                                    run_dir, root),
+                                                stop_requested=(None if _stop_file is None else _stop_file.exists),
+                                                guard_metadata=_guard_metadata)
                 print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
                 timing = judges.request_timing()
                 print(f"Model requests: {timing['attempted']}; failed: {timing['failed']}; "
                       f"invalid replies: {timing['invalid']}; longest request: {timing['max_seconds']:.2f}s")
                 print(f"HTML results: {generate_report(run_dir, root=root)}")
                 failed = _failed_entries(run_dir)
+    except MemoryPressureStop:
+        print("Memory guard stopped judging. Durable responses will be reused on restart.", file=sys.stderr)
+        return MEMORY_STOP_EXIT
     except KeyboardInterrupt:
         print("Evaluation interrupted. Completed judge calls are saved; rerun this command to resume.",
               file=sys.stderr)
@@ -128,7 +147,3 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
               file=sys.stderr)
         return 1
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

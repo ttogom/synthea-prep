@@ -406,7 +406,7 @@ class PipelineFixture:
         runtime.mkdir()
         (runtime / "__init__.py").write_bytes((OLLAMA_MODULE.parent / "__init__.py").read_bytes())
         (runtime / OLLAMA_MODULE.name).write_bytes(OLLAMA_MODULE.read_bytes())
-        for name in ("plan_judging.py", "judge_provenance.py"):
+        for name in ("plan_judging.py", "judge_provenance.py", "memory_pressure.py", "memory_supervisor.py"):
             (runtime / name).write_bytes((OLLAMA_MODULE.parent / name).read_bytes())
         (self.script.parent / PLAN_EVALUATION_MODULE.name).write_bytes(PLAN_EVALUATION_MODULE.read_bytes())
         (self.root / PLAN_EVALUATION_COMMAND.name).write_bytes(PLAN_EVALUATION_COMMAND.read_bytes())
@@ -830,6 +830,7 @@ class PipelineFixture:
                              "scripts.med_copilot_run_lock", "scripts.med_copilot_plan_evaluation",
                              "scripts.experiment_runtime.ollama", "scripts.experiment_runtime.plan_judging",
                              "scripts.experiment_runtime.judge_provenance", "scripts.experiment_runtime",
+                             "scripts.experiment_runtime.memory_pressure", "scripts.experiment_runtime.memory_supervisor",
                              "med_copilot.prompts.correctness_judges", "scripts"]:
                     sys.modules.pop(name, None)
                 if self.real_scoring:
