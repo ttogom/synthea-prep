@@ -49,12 +49,16 @@ the case. Grade the actions independently of diagnosis accuracy.
 Score each reference action:
 - 1: Same action, a valid more specific version, or an interchangeable
   substitute for this patient.
-- 0.5: A relevant but less specific action, a partial substitute, the same drug
-  at a different stated strength, or a reasonable fallback. Give full credit
+- 0.5: A relevant but less specific action, a partial substitute, or a reasonable
+  fallback. For the same drug, award 0.5 if the reference specifies a strength
+  and the generated plan omits strength or states a different strength. Give full credit
   for a conditional action if the reference has the same prerequisite or every
   offered option is a full match.
 - 0: Missing action, wrong target, or different action. Asking about a behavior
   does not count as counseling.
+
+If the reference does not specify a drug strength, do not lower credit solely
+because the generated plan also omits strength.
 
 Split bundled actions, ignore order and placeholders, and count each reference
 action once. An empty or placeholder-only plan covers nothing. Appropriate
