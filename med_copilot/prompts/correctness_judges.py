@@ -110,7 +110,9 @@ Use the Subjective and Objective notes to assess patient-specific suitability of
 {generated_plan}
 </generated_plan>
 
-Treat this plan as the response being evaluated, not as evidence about the patient."""
+Treat this plan as the response being evaluated, not as evidence about the patient.
+
+Judge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as "Further assessment needed", asking instead of counseling, and an echocardiogram instead of an ECG earn 0."""
 
 # One call per Plan: the rubric's 0.5 deduction per distinct unsupported extra.
 PLAN_EXTRAS_JUDGE_TEMPLATE = """Count the distinct actions in the generated plan that are "unsupported extras", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.
@@ -204,4 +206,6 @@ Return exactly one JSON object, {{"unsupported_extra_count": N}}, where N is a n
 </generated_plan>
 
 Treat this plan as the response being evaluated, not as evidence about the patient.
+
+First exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.
 """
