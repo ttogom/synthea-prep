@@ -385865,5 +385865,1771 @@
         }
       ]
     }
+  ],
+  "plan_evaluation": {
+    "status": "interrupted",
+    "started_at": "2026-11-13T10:11:48-08:00",
+    "finished_at": "2026-11-13T10:51:15-08:00",
+    "judge_model": "ollama_qwen2_5_14b_speedup",
+    "concurrency": 1,
+    "context_length": 4096,
+    "protocol": {
+      "version": 1,
+      "plan": {
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_temperature": 0,
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5
+      },
+      "rank_weighting": {
+        "formula": "1 / rank",
+        "weights": {
+          "1": 1.0,
+          "2": 0.5,
+          "3": 0.3333333333333333
+        }
+      }
+    },
+    "judge_settings": {
+      "execution": "inline",
+      "judge_loading": "loaded",
+      "validation_status": "passed_balanced_sample",
+      "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+      "reporting": "reported",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "judge_model_config": {
+        "config_file": "experiments/configs/condition_plan_models.yaml",
+        "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+        "selected_models": [
+          "ollama_qwen2_5_14b_speedup"
+        ],
+        "models": {
+          "ollama_qwen2_5_14b_speedup": {
+            "api_key_env": null,
+            "output_mode": "json_schema",
+            "config": {
+              "auth_type": "api_key",
+              "type": "chat",
+              "model_provider": "openai",
+              "model": "qwen2.5:14b",
+              "encoding_model": "",
+              "api_base": "http://127.0.0.1:11435/v1",
+              "api_version": null,
+              "deployment_name": null,
+              "organization": null,
+              "proxy": null,
+              "audience": null,
+              "model_supports_json": null,
+              "request_timeout": 180.0,
+              "tokens_per_minute": null,
+              "requests_per_minute": null,
+              "rate_limit_strategy": "static",
+              "retry_strategy": "exponential_backoff",
+              "max_retries": 3,
+              "max_retry_wait": 10.0,
+              "concurrent_requests": 25,
+              "async_mode": "threaded",
+              "responses": null,
+              "max_tokens": 64,
+              "temperature": 1.0,
+              "max_completion_tokens": null,
+              "reasoning_effort": null,
+              "top_p": 1.0,
+              "n": 1,
+              "frequency_penalty": 0.0,
+              "presence_penalty": 0.0
+            }
+          }
+        }
+      },
+      "judge_count": 1,
+      "judge_available": true,
+      "generator_models": [
+        "gpt_4o_mini",
+        "ollama_gemma3_4b",
+        "ollama_llama3_2_3b",
+        "ollama_ministral_3_3b"
+      ],
+      "self_judging": "the judge is not a generating model",
+      "judge_temperature": 0,
+      "response_format": "json_object unless the model's output_mode is prompt",
+      "responses_file": "judge_responses.jsonl",
+      "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+      "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+      "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+      "credit_values": [
+        0,
+        0.5,
+        1
+      ],
+      "deduction_per_unsupported_extra": 0.5,
+      "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+      "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+      "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+      "strength_mismatch_items": "not collected (they never change credit)",
+      "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+      "actions": "generated actions stay separate, numbered in order",
+      "shown_to_judge": {
+        "action_call": [
+          "labeled_condition",
+          "subjective",
+          "objective",
+          "one_reference_action",
+          "generated_actions"
+        ],
+        "extras_call": [
+          "labeled_condition",
+          "subjective",
+          "objective",
+          "reference_actions",
+          "generated_actions"
+        ]
+      },
+      "unavailable_references": [
+        "[\"none recorded\"]",
+        "missing or empty plan",
+        "any action containing '(record artifact)' (any case or spacing)"
+      ],
+      "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+      "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+      "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+      "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+      "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+    },
+    "responses_file": "judge_responses.jsonl",
+    "calls": 2554,
+    "cache_hits": 0,
+    "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+    "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+    "runtime_profile": {
+      "settings": {
+        "concurrency": 1,
+        "context_length": 4096,
+        "flash_attention": true,
+        "kv_cache_type": "f16",
+        "host_cache_mib": 512
+      },
+      "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/provenance/plan-judge-runtime-profile-fa76abbb376a4b81b1ce367a61781cb4.yaml",
+      "config_sha256": "ea78431fe8465cea5112375051e54e45b1d57aee985b882b1f8fed74106fb0e8"
+    },
+    "runtime_provenance": {
+      "file": "provenance/plan-judge-runtime-73eb43a2ece840ef9ed63c9ad6e34180.json",
+      "sha256": "5d88d1d5af0b27fb689bf42bb9f636baa62c465bbf13033790f4a8c082f913af"
+    },
+    "memory_guard": {
+      "events_file": "provenance/plan-judge-memory-813672fc2047440eaab5f5045e1b586d.jsonl",
+      "attempt": 1,
+      "policy": {
+        "sample_seconds": 5,
+        "warning_seconds": 60,
+        "warning_sample_fraction": 0.8,
+        "swapout_growth_bytes": 67108864,
+        "maximum_warning_seconds": 180,
+        "normal_recovery_seconds": 30,
+        "recovery_timeout_seconds": 300,
+        "max_sample_failures": 3,
+        "grace_seconds": 30,
+        "worker_exit_seconds": 5,
+        "max_attempts": 2
+      }
+    },
+    "counts": {
+      "scored": 43756,
+      "unavailable": 3535,
+      "pending": 66853,
+      "error": 0,
+      "interrupted": 0
+    },
+    "elapsed_seconds": 2374.299790249992,
+    "request_timing": {
+      "attempted": 2554,
+      "failed": 0,
+      "interrupted": 0,
+      "invalid": 0,
+      "total_seconds": 1187.1809951965406,
+      "max_seconds": 2.30918462498812
+    },
+    "error": {
+      "type": "MemoryPressureStop",
+      "message": "Memory guard requested a stop"
+    }
+  },
+  "plan_evaluation_history": [
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-12T22:29:10-08:00",
+      "finished_at": "2026-11-12T22:37:07-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 4,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 1297,
+      "cache_hits": 3,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 4,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-eb6b40c8092a4854b535279a9bedff3a.json",
+        "sha256": "b6342a414071aa962bd44fb3fbf816a9a5ea7c5ae272149981ea5cb7c05814a8"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-8de1ccc900a840ffb1c878ac16a5d965.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 2464,
+        "unavailable": 3535,
+        "pending": 108141,
+        "error": 0,
+        "interrupted": 4
+      },
+      "elapsed_seconds": 483.0591752920009,
+      "request_timing": {
+        "attempted": 1301,
+        "failed": 0,
+        "interrupted": 4,
+        "invalid": 0,
+        "total_seconds": 1896.9348387648351,
+        "max_seconds": 7.01518312501139
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-12T22:37:50-08:00",
+      "finished_at": "2026-11-13T06:19:22-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 2,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 66387,
+      "cache_hits": 29,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 2,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-8d10d71fa3b2487290acac8fc68e3305.json",
+        "sha256": "22b1e84b1e4b4e0aa3db0d9060b4a5e553cfa91b2d180d1870c262394954110b"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-8de1ccc900a840ffb1c878ac16a5d965.jsonl",
+        "attempt": 2,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 30667,
+        "unavailable": 3535,
+        "pending": 79940,
+        "error": 0,
+        "interrupted": 2
+      },
+      "elapsed_seconds": 27680.764160124992,
+      "request_timing": {
+        "attempted": 66389,
+        "failed": 0,
+        "interrupted": 2,
+        "invalid": 0,
+        "total_seconds": 51307.13583676383,
+        "max_seconds": 5.463251916982699
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T06:20:48-08:00",
+      "finished_at": "2026-11-13T07:36:47-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 2,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 10248,
+      "cache_hits": 12,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 2,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-4e619cabe21b4b198bac318954adb6c5.json",
+        "sha256": "65075bfd396a6895dc085574df24ccc24e813c33048e4223c40c4cf196b8eff6"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-7f248b6e68ff40cf8fb78f8790eb6d8e.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 36326,
+        "unavailable": 3535,
+        "pending": 74280,
+        "error": 0,
+        "interrupted": 3
+      },
+      "elapsed_seconds": 4564.985585874994,
+      "request_timing": {
+        "attempted": 10251,
+        "failed": 0,
+        "interrupted": 3,
+        "invalid": 0,
+        "total_seconds": 7673.855738903163,
+        "max_seconds": 3.246144667005865
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T07:38:12-08:00",
+      "finished_at": "2026-11-13T07:46:11-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 2,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 1033,
+      "cache_hits": 4,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 2,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-434f6088891a4903b496d206a4bb633a.json",
+        "sha256": "48c4ed890458d1243ef638421fa9fe88291cbf5cdba5bb63cf64dbbc2da78307"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-100d594138924fe3b6e5c7d91c30be9f.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 36952,
+        "unavailable": 3535,
+        "pending": 73654,
+        "error": 0,
+        "interrupted": 3
+      },
+      "elapsed_seconds": 485.5688872500032,
+      "request_timing": {
+        "attempted": 1036,
+        "failed": 0,
+        "interrupted": 3,
+        "invalid": 0,
+        "total_seconds": 746.8773165511375,
+        "max_seconds": 2.746048666012939
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T07:47:57-08:00",
+      "finished_at": "2026-11-13T08:11:33-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 1,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 1852,
+      "cache_hits": 2,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 1,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-fb281d3ccb804421965ebc766b7dbdfa.json",
+        "sha256": "9098d2112bdc157ca8ef93a7b31e343f9c068f733b548a0bd356e6e6d4d721f9"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-4c43873f51b640d5ac84d993c4469aa0.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 37854,
+        "unavailable": 3535,
+        "pending": 72754,
+        "error": 0,
+        "interrupted": 1
+      },
+      "elapsed_seconds": 1422.6436670000257,
+      "request_timing": {
+        "attempted": 1853,
+        "failed": 0,
+        "interrupted": 1,
+        "invalid": 0,
+        "total_seconds": 756.3489228386024,
+        "max_seconds": 2.089889208000386
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T08:13:51-08:00",
+      "finished_at": "2026-11-13T08:17:09-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 1,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 284,
+      "cache_hits": 0,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 1,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 2048
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/configs/plan_judging.yaml",
+        "config_sha256": "75eb908245446e88436211bbe3f7e329103adb70f432812d8f511903e049fd22"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-360dd58725064fa892e190e721cc253f.json",
+        "sha256": "a38402379137ca1525ab01b8a8d0b762bf59e952ab5e65aa740b72c8ad87c8fd"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-6625651736dc4ba3b4ccffff5027f3bb.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 37997,
+        "unavailable": 3535,
+        "pending": 72610,
+        "error": 0,
+        "interrupted": 2
+      },
+      "elapsed_seconds": 204.412514458003,
+      "request_timing": {
+        "attempted": 286,
+        "failed": 0,
+        "interrupted": 2,
+        "invalid": 0,
+        "total_seconds": 117.83271061000414,
+        "max_seconds": 1.4936782910081092
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T08:18:28-08:00",
+      "finished_at": "2026-11-13T08:42:44-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 2,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 2193,
+      "cache_hits": 1,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 2,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 512
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/provenance/plan-judge-runtime-profile-fa76abbb376a4b81b1ce367a61781cb4.yaml",
+        "config_sha256": "ea78431fe8465cea5112375051e54e45b1d57aee985b882b1f8fed74106fb0e8"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-6ff0c5107ec5460eb908bf958def7f7e.json",
+        "sha256": "b8e1dfba5456c1ed65ee33876dae0a18ba281c89bcffb67aabc3755f69d02c9e"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-bfb52991b017474da527ba8ee4c7babe.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 39075,
+        "unavailable": 3535,
+        "pending": 71534,
+        "error": 0,
+        "interrupted": 0
+      },
+      "elapsed_seconds": 1462.8029998329876,
+      "request_timing": {
+        "attempted": 2193,
+        "failed": 0,
+        "interrupted": 0,
+        "invalid": 0,
+        "total_seconds": 2443.58451197698,
+        "max_seconds": 4.67959700000938
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    },
+    {
+      "status": "interrupted",
+      "started_at": "2026-11-13T08:46:24-08:00",
+      "finished_at": "2026-11-13T10:08:52-08:00",
+      "judge_model": "ollama_qwen2_5_14b_speedup",
+      "concurrency": 1,
+      "context_length": 4096,
+      "protocol": {
+        "version": 1,
+        "plan": {
+          "judge_model": "ollama_qwen2_5_14b_speedup",
+          "judge_temperature": 0,
+          "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+          "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+          "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+          "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993",
+          "credit_values": [
+            0,
+            0.5,
+            1
+          ],
+          "deduction_per_unsupported_extra": 0.5
+        },
+        "rank_weighting": {
+          "formula": "1 / rank",
+          "weights": {
+            "1": 1.0,
+            "2": 0.5,
+            "3": 0.3333333333333333
+          }
+        }
+      },
+      "judge_settings": {
+        "execution": "inline",
+        "judge_loading": "loaded",
+        "validation_status": "passed_balanced_sample",
+        "validation_evidence": "2026-11-06 balanced sample, 3 cohort patients (essential hypertension, streptococcal sore throat, chronic congestive heart failure) x 6 Plans: 2 correct (reference verbatim; hand-written equivalent), 2 off-target (other patients' references), 2 placeholder. Pass = all valid, mean correct >= 0.7, placeholder <= 0.1, off-target <= 0.2, and every correct Plan above every other Plan per patient. ollama_qwen2_5_14b passed: 18/18 valid; correct 1.00, off-target 0.00, placeholder 0.083. ollama_llama3 failed: 18/18 valid; correct 1.00, off-target 0.15, placeholder 0.83. Small sample; placeholder credit was sometimes given and offset by the extras deduction.",
+        "reporting": "reported",
+        "judge_model": "ollama_qwen2_5_14b_speedup",
+        "judge_model_config": {
+          "config_file": "experiments/configs/condition_plan_models.yaml",
+          "config_sha256": "59aa703bec66bbc9d1109e0774dde0b3586a926e49fdf7a5e1d7a6ea36fbebae",
+          "selected_models": [
+            "ollama_qwen2_5_14b_speedup"
+          ],
+          "models": {
+            "ollama_qwen2_5_14b_speedup": {
+              "api_key_env": null,
+              "output_mode": "json_schema",
+              "config": {
+                "auth_type": "api_key",
+                "type": "chat",
+                "model_provider": "openai",
+                "model": "qwen2.5:14b",
+                "encoding_model": "",
+                "api_base": "http://127.0.0.1:11435/v1",
+                "api_version": null,
+                "deployment_name": null,
+                "organization": null,
+                "proxy": null,
+                "audience": null,
+                "model_supports_json": null,
+                "request_timeout": 180.0,
+                "tokens_per_minute": null,
+                "requests_per_minute": null,
+                "rate_limit_strategy": "static",
+                "retry_strategy": "exponential_backoff",
+                "max_retries": 3,
+                "max_retry_wait": 10.0,
+                "concurrent_requests": 25,
+                "async_mode": "threaded",
+                "responses": null,
+                "max_tokens": 64,
+                "temperature": 1.0,
+                "max_completion_tokens": null,
+                "reasoning_effort": null,
+                "top_p": 1.0,
+                "n": 1,
+                "frequency_penalty": 0.0,
+                "presence_penalty": 0.0
+              }
+            }
+          }
+        },
+        "judge_count": 1,
+        "judge_available": true,
+        "generator_models": [
+          "gpt_4o_mini",
+          "ollama_gemma3_4b",
+          "ollama_llama3_2_3b",
+          "ollama_ministral_3_3b"
+        ],
+        "self_judging": "the judge is not a generating model",
+        "judge_temperature": 0,
+        "response_format": "json_object unless the model's output_mode is prompt",
+        "responses_file": "judge_responses.jsonl",
+        "resumption": "valid judgements are reused by request key; failed calls and malformed or refused replies are kept in responses_file but requested again",
+        "rubric_file": "med_copilot/docs/treatment_plan_evaluation.md",
+        "rubric_sha256": "d9d1e824e357cbba8549860816fe100f5ba3a263d12e0a1e1933b0d21aa3d7cb",
+        "credit_values": [
+          0,
+          0.5,
+          1
+        ],
+        "deduction_per_unsupported_extra": 0.5,
+        "implementation": "one scalar 0/0.5/1 call per reference action; count unsupported extras unless all reference credits are valid zeros; deduction = 0.5 x that count",
+        "zero_reference_coverage": "scores 0 without an extras call; unsupported_extra_count and deduction stay null because they were not measured",
+        "implementation_reason": "a single call returning the full credits array, with the exact length stated and a JSON example of that length, returned valid arrays but local judges copied the example credits instead of grading",
+        "strength_mismatch_items": "not collected (they never change credit)",
+        "formula": "max(0, (sum of action credits - 0.5 x unsupported extras) / number of reference actions)",
+        "actions": "generated actions stay separate, numbered in order",
+        "shown_to_judge": {
+          "action_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "one_reference_action",
+            "generated_actions"
+          ],
+          "extras_call": [
+            "labeled_condition",
+            "subjective",
+            "objective",
+            "reference_actions",
+            "generated_actions"
+          ]
+        },
+        "unavailable_references": [
+          "[\"none recorded\"]",
+          "missing or empty plan",
+          "any action containing '(record artifact)' (any case or spacing)"
+        ],
+        "empty_generated_plan": "scores 0 without judge calls when a reference exists",
+        "action_prompt_template": "Use the patient's Subjective and Objective notes to grade whether the generated plan's actions cover one reference action for the labeled condition.\n\n# Assign a coverage score for the generated Plan against the supplied reference action:\n- 1: Same action, a valid more specific version, or an interchangeable substitute for this patient.\n- 0.5: A relevant but less specific action, a partial substitute, or a reasonable fallback. For the same drug, award 0.5 if the reference specifies a strength and the generated plan omits strength or states a different strength. Give full credit for a conditional action if the reference has the same prerequisite or every offered option is a full match.\n- 0: Missing action, wrong target, or different action. Asking about a behavior does not count as counseling.\n\nIf the reference does not specify a drug strength, do not lower credit solely because the generated plan also omits strength.\n\nSplit bundled generated actions and ignore their order and placeholders. An empty or placeholder-only generated plan covers nothing. Evaluate the generated plan’s coverage of only the supplied reference action.\n\n# What to Output\nReturn exactly one JSON object. Valid outputs are {{\"credit\": 0}}, {{\"credit\": 0.5}}, or {{\"credit\": 1}}.\n\n# Source Data\n\nUse the Subjective and Objective notes to assess patient-specific suitability of the generated plan's recommendations, including proposed substitutes. Use the labeled condition to interpret the reference action’s clinical purpose. Do not infer unreported patient findings or assume the generated plan recommends an action merely because it is associated with that condition.\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n\n# Reference action\n\n<reference_action>\n{reference_action}\n</reference_action>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nJudge only coverage of the supplied reference action. An explicit match, including any specified strength, earns 1 even if other recommendations are unsupported; those are assessed separately. Mere relevance does not earn partial credit: placeholders such as \"Further assessment needed\", asking instead of counseling, and an echocardiogram instead of an ECG earn 0.",
+        "action_prompt_template_sha256": "cd01ad7fb734da47758af69bc3991d87c13c0f1ee89a0c7314f466fcf6db0969",
+        "extras_prompt_template": "Count the distinct actions in the generated plan that are \"unsupported extras\", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.\n\nUse the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.\n\n# Counting Rules\n\n- Split bundled generated actions into individual actions before counting.\n- Count each distinct unsupported action only once.\n- Count recommendations, not observations or background facts. An explicit recommendation to continue existing care still counts as a recommendation.\n- Do not count placeholders.\n\n## Examples of Splitting Bundled Generated Actions\n\n**Actions separated by commas**\n\nBefore: \"Order a urine culture, prescribe an antibiotic, arrange follow-up.\"\n\nAfter:\n\n- Order a urine culture.\n- Prescribe an antibiotic.\n- Arrange follow-up.\n\n**Actions joined by \"and\"**\n\nBefore: \"Recommend hydration and arrange follow-up.\"\n\nAfter:\n\n- Recommend hydration.\n- Arrange follow-up.\n\nSplit only independently recommended actions. A comma or \"and\" within a single action does not by itself create separate actions; for example, \"Discuss the risks and benefits of treatment\" remains one action.\n\nThese examples illustrate splitting only. Assess each resulting action against the reference plan and patient context before deciding whether it is an unsupported extra; do not count every resulting action as unsupported.\n\n## Examples of Appropriate Additional Care\n\nFor both examples, the Subjective and Objective notes describe a patient with a sore throat, fever, and painful swallowing. The reference plan contains only a throat culture. \n\n**Symptom relief**\n\nGenerated plan: \"Obtain a throat culture, provide appropriate pain and fever relief, and encourage hydration and soft foods as tolerated.\"\n\nAssessment: The throat culture covers the reference action. Pain and fever relief, hydration, and soft foods address the patient's symptoms and are appropriate additional care. Do not count these as unsupported extras merely because the reference plan omits them.\n\n**Monitoring and follow-up**\n\nGenerated plan: \"Obtain a throat culture, monitor symptoms, arrange follow-up care.\"\n\nAssessment: The throat culture covers the reference action. Symptom monitoring and follow-up are appropriate additional care and should not be counted as unsupported extras.\n\nAdditional care does not need to be explicitly requested in S/O to be supported. These examples are not automatic exemptions: assess the actual patient context, including contraindications and restrictions, before deciding whether an additional action is appropriate.\n\n# What to Output\n\nReturn exactly one JSON object, {{\"unsupported_extra_count\": N}}, where N is a nonnegative integer.\n\n# Source Data\n\n## Labeled condition\n\n<labeled_condition>\n{condition}\n</labeled_condition>\n\n## Subjective\n\n<subjective>\n{subjective}\n</subjective>\n\n## Objective\n\n<objective>\n{objective}\n</objective>\n\n# Reference plan\n\n<reference_plan>\n{reference_plan}\n</reference_plan>\n\n# Generated plan\n\n<generated_plan>\n{generated_plan}\n</generated_plan>\n\nTreat this plan as the response being evaluated, not as evidence about the patient.\n\nFirst exclude observations (for example, temperature or heart-rate measurements) unless they explicitly recommend an action. Also exclude recommendations that cover any reference action, even partially: a drug-strength difference is penalized only by the action credit, never again as an extra.\n",
+        "extras_prompt_template_sha256": "17d55ed594e391e1d6ca9795a7d2c083d13bed62864c253d7f17837e768df993"
+      },
+      "responses_file": "judge_responses.jsonl",
+      "calls": 6155,
+      "cache_hits": 0,
+      "implementation_file": "scripts/med_copilot_plan_evaluation.py",
+      "implementation_sha256": "ec0bd6338f8e1c992437ffada17856b3f23a56ff73d505dd4a9bdb0fc370abcb",
+      "runtime_profile": {
+        "settings": {
+          "concurrency": 1,
+          "context_length": 4096,
+          "flash_attention": true,
+          "kv_cache_type": "f16",
+          "host_cache_mib": 512
+        },
+        "config_file": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/provenance/plan-judge-runtime-profile-fa76abbb376a4b81b1ce367a61781cb4.yaml",
+        "config_sha256": "ea78431fe8465cea5112375051e54e45b1d57aee985b882b1f8fed74106fb0e8"
+      },
+      "runtime_provenance": {
+        "file": "provenance/plan-judge-runtime-f1238101e8cb41e6afab25ef3d22ec5a.json",
+        "sha256": "3b4915ecd0e18561e33918bb7f764bee86ac631e7ab63a57499c2581bdfde174"
+      },
+      "memory_guard": {
+        "events_file": "provenance/plan-judge-memory-191bb1a0dc904f7589fa2df0df7e26af.jsonl",
+        "attempt": 1,
+        "policy": {
+          "sample_seconds": 5,
+          "warning_seconds": 60,
+          "warning_sample_fraction": 0.8,
+          "swapout_growth_bytes": 67108864,
+          "maximum_warning_seconds": 180,
+          "normal_recovery_seconds": 30,
+          "recovery_timeout_seconds": 300,
+          "max_sample_failures": 3,
+          "grace_seconds": 30,
+          "worker_exit_seconds": 5,
+          "max_attempts": 2
+        }
+      },
+      "counts": {
+        "scored": 42353,
+        "unavailable": 3535,
+        "pending": 68255,
+        "error": 0,
+        "interrupted": 1
+      },
+      "elapsed_seconds": 4954.513056917029,
+      "request_timing": {
+        "attempted": 6156,
+        "failed": 0,
+        "interrupted": 1,
+        "invalid": 0,
+        "total_seconds": 2895.577426038275,
+        "max_seconds": 2.43427695898572
+      },
+      "error": {
+        "type": "MemoryPressureStop",
+        "message": "Memory guard requested a stop"
+      }
+    }
   ]
 }
