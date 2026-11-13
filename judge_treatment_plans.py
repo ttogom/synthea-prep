@@ -34,6 +34,7 @@ from scripts.med_copilot_helpers import load_patient_records
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.experiment_runtime.ollama import ollama_for_saved_run, plan_judge_settings
 from scripts.experiment_runtime.plan_judging import load_judge_profile
+from scripts.experiment_runtime.judge_provenance import save_verified_runtime
 from scripts.med_copilot_plan_evaluation import PlanJudgeUnavailableError, resume_plan_evaluation
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.med_copilot_run_lock import exclusive_run_lock
@@ -100,10 +101,14 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels):
             profile = load_judge_profile(root / "experiments/configs/plan_judging.yaml", metadata,
                                          concurrency=args.concurrency, context_length=args.context_length)
             settings = {key: profile["settings"][key] for key in ("concurrency", "context_length")}
-            with ollama_for_saved_run(run_dir, **settings, runtime_profile=profile):
+            with ollama_for_saved_run(run_dir, **settings, runtime_profile=profile) as server:
                 scorer, _, judge_models = _prepare(run_dir, root, models_factory)
                 judges = resume_plan_evaluation(run_dir, scorer, judge_models, root=root,
-                                                **settings, runtime_profile=profile, _lock_held=True)
+                                                **settings, runtime_profile=profile, _lock_held=True,
+                                                runtime_verifier=lambda: save_verified_runtime(
+                                                    server, judge_models, metadata["experiment"].get(
+                                                        "plan_judge", PIPELINE_DEFAULTS["plan_judge"]),
+                                                    run_dir, root))
                 print(f"Judge calls made: {judges.calls}; reused from {run_dir.name}/judge_responses.jsonl: {judges.cache_hits}")
                 print(f"HTML results: {generate_report(run_dir, root=root)}")
                 failed = _failed_entries(run_dir)

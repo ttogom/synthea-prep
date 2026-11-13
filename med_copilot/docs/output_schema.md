@@ -737,12 +737,21 @@ Plan correctness after generation finishes. It rebuilds the recorded cohort
 preserves generation, evidence, text metrics, and diagnosis scores. Optional
 `--concurrency N` (1–64) and `--context-length N` (positive token count) change
 only that Plan stage's runtime. Explicit overrides take precedence over the
-previous `plan_evaluation.concurrency` and `context_length`, then the original
-experiment defaults (shipped concurrency/context: 8/4096; older defaults: 2/8192).
-Without overrides, subsequent invocations reuse the last saved stage settings.
+saved Plan-stage settings. New stages load `experiments/configs/plan_judging.yaml`
+(C4, context4096, Flash Attention, f16 KV, 2048 MiB native host cache).
+Subsequent invocations reuse the saved `runtime_profile`, including its config
+path/fingerprint, even if today's profile file changes. Legacy stages retain
+their recorded concurrency/context until explicitly overridden.
 The request pool and owned Ollama server use the same effective values; the
 original experiment YAML and `run.json.experiment` are unchanged. Identical concurrent valid requests share
-one response. Scalar replies are the durable incremental checkpoint;
+one response. The CLI requires an owned server and verifies actual native FA, K/V type,
+context, slots, batch/microbatch, host-cache cap, loaded model, and full GPU
+placement before opening/repairing the response cache. Unsupported settings
+fail clearly. Detailed requested/effective settings, software/model identity
+and native evidence are written once per invocation to a unique
+`provenance/plan-judge-runtime-<id>.json`; the stage stores its path and SHA-256.
+Only the current process's appended log segment is accepted as evidence.
+Scalar replies are the durable incremental checkpoint;
 `results.jsonl` is exported atomically once on completion or controlled stop,
 then the report is regenerated after a successful invocation. Following an
 abrupt crash, aggregate Plan scores are reconstructed using saved scalar replies.

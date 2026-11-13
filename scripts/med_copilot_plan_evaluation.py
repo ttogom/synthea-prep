@@ -369,7 +369,7 @@ def _counts(records):
 
 
 def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None,
-                           runtime_profile=None, _lock_held=False):
+                           runtime_profile=None, runtime_verifier=None, _lock_held=False):
     """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
 
     models contains only the recorded judge. _lock_held is reserved for the CLI,
@@ -402,6 +402,7 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
             if previous.get("context_length") is None:
                 previous["context_length"] = previous_settings["context_length"]
             history = [*history, previous]
+        runtime_provenance = runtime_verifier() if runtime_verifier is not None else None
         run_file = RunFile(run_dir, metadata)
         run_file.redact = models.redact
         judges = CorrectnessJudges(
@@ -420,6 +421,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
                  "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
         if runtime_profile is not None:
             stage["runtime_profile"] = deepcopy(runtime_profile)
+        if runtime_provenance is not None:
+            stage["runtime_provenance"] = runtime_provenance
         run_file.update(plan_evaluation=stage, plan_evaluation_history=history)
         interrupted = None
         changes = {"any": False}
