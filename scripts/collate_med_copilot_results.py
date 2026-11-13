@@ -455,8 +455,11 @@ def load_report_data(run_dir, *, root=ROOT):
         notices.append("Evidence variants were not recorded for some outputs. They are shown as “not recorded”; "
                        "no variant has been inferred and those outputs are excluded from baseline comparisons.")
     correctness = (metadata.get("evaluation") or {}).get("correctness")
-    if isinstance(correctness, dict):
-        plan = correctness.get("plan") if isinstance(correctness.get("plan"), dict) else {}
+    plan_stage = metadata.get("plan_evaluation") or {}
+    stage_settings = plan_stage.get("judge_settings") if isinstance(plan_stage, dict) else None
+    if isinstance(correctness, dict) or isinstance(stage_settings, dict):
+        plan = stage_settings if isinstance(stage_settings, dict) else correctness.get("plan", {})
+        plan = plan if isinstance(plan, dict) else {}
         judge = plan.get("judge_model")
         notices.append("Correctness scores are a preliminary single-model midterm metric and will be revised: "
                        "diagnosis is a BioLORD-2023 clinical concept similarity score (not an accuracy or probability); "

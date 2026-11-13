@@ -105,6 +105,14 @@ starting Plan evaluation; its separate status is recorded in
 settings, start/finish times, call counts, and status, remain in
 `run.json.plan_evaluation_history`.
 
+The first Plan stage records its own versioned `plan_evaluation.protocol` before
+making judge requests. It can use updated Plan prompts or rubric when no judging
+has begun; generation-time `evaluation.correctness` and experiment fingerprints
+are preserved. Later invocations require the recorded Plan protocol to match.
+Older runs with judging evidence or stage history must still pass
+their original correctness checks before adopting this protocol. Report notices
+use the Plan stage's `judge_settings` when available.
+
 `--resume` continues a schema-4 run in its existing directory. It preserves
 completed evidence, exact final prompts, completed model responses, successful
 scores, and valid judge calls; failed or unstarted work is retried. Keep the

@@ -32,7 +32,8 @@ from scripts.med_copilot_judges import (
     METRIC_STATUS, PLAN_VALIDATION_STATUS, BioLordSimilarity,
     CorrectnessJudges, JudgeCache, diagnosis_entry, diagnosis_score, normalize_diagnosis, parse_action_judgement,
     parse_extras_judgement,
-    plan_action_messages, plan_entry, plan_extras_messages, plan_score, rank_weight, request_key, unavailable_plan_reason,
+    plan_action_messages, plan_entry, plan_evaluation_protocol, plan_extras_messages, plan_score,
+    rank_weight, request_key, unavailable_plan_reason,
 )
 from scripts.med_copilot_run_file import RunFile, RunMetadataError, error_scope, pipeline_stage
 
@@ -776,6 +777,22 @@ class ResumeValidationTests(JudgeTestCase):
 
 
 class MetadataTests(JudgeTestCase):
+    def test_plan_protocol_matches_guarded_semantics_without_opening_models_or_cache(self):
+        protocol = plan_evaluation_protocol(ROOT, plan_judge=JUDGE)
+        self.assertEqual(protocol["version"], 1)
+        metadata = self.judges()[0].metadata(ROOT)
+        for group in ("plan", "rank_weighting"):
+            for key, value in protocol[group].items():
+                self.assertEqual(value, metadata[group][key])
+        self.assertNotIn("diagnosis", protocol)
+        self.assertNotIn("judge_model_config", protocol["plan"])
+        self.assertFalse(self.cache.exists())
+        protocol["plan"]["credit_values"].clear()
+        self.assertEqual(plan_evaluation_protocol(ROOT, plan_judge=JUDGE)["plan"]["credit_values"], [0, 0.5, 1])
+        for alias in (None, "", " ", 1, False):
+            with self.subTest(alias=alias), self.assertRaisesRegex(ValueError, "plan_judge"):
+                plan_evaluation_protocol(ROOT, plan_judge=alias)
+
     def test_judge_alias_is_explicit_and_invalid_values_fail_before_opening_cache(self):
         with self.assertRaises(TypeError):
             CorrectnessJudges(None, MODELS, self.cache)

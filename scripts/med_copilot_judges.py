@@ -74,6 +74,33 @@ def rank_weight(rank):
     return 1 / rank
 
 
+def plan_evaluation_protocol(root, *, plan_judge):
+    """Snapshot Plan semantics independently of generation-time scoring provenance.
+
+    Bump the version for incompatible semantics not captured by these settings.
+    Runtime concurrency and provider settings remain separate from the protocol.
+    """
+    if not isinstance(plan_judge, str) or not plan_judge.strip():
+        raise ValueError("plan_judge must be a nonempty registry alias")
+    return {
+        "version": 1,
+        "plan": {
+            "judge_model": plan_judge,
+            "judge_temperature": JUDGE_TEMPERATURE,
+            "rubric_file": repo_path(PLAN_RUBRIC, root),
+            "rubric_sha256": hashlib.sha256(PLAN_RUBRIC.read_bytes()).hexdigest(),
+            "action_prompt_template_sha256": hashlib.sha256(PLAN_ACTION_JUDGE_TEMPLATE.encode()).hexdigest(),
+            "extras_prompt_template_sha256": hashlib.sha256(PLAN_EXTRAS_JUDGE_TEMPLATE.encode()).hexdigest(),
+            "credit_values": list(CREDIT_VALUES),
+            "deduction_per_unsupported_extra": DEDUCTION_PER_UNSUPPORTED_EXTRA,
+        },
+        "rank_weighting": {
+            "formula": "1 / rank",
+            "weights": {str(rank): rank_weight(rank) for rank in (1, 2, 3)},
+        },
+    }
+
+
 def unavailable_plan_reason(plan):
     """Why a reference Plan cannot be judged, or None when it can."""
     if not isinstance(plan, list) or not plan or not any(item.strip() for item in plan):
@@ -349,6 +376,7 @@ class CorrectnessJudges:
         correctness = (metadata.get("evaluation") or {}).get("correctness")
         if correctness is None:
             return
+        protocol = plan_evaluation_protocol(root, plan_judge=plan_judge)
         expected = {
             "diagnosis": {
                 "model": BIOLORD_MODEL,
@@ -356,20 +384,8 @@ class CorrectnessJudges:
                 "normalization": {"rule": DIAGNOSIS_NORMALIZATION_RULE,
                                   "abbreviations": dict(DIAGNOSIS_ABBREVIATIONS)},
             },
-            "plan": {
-                "judge_model": plan_judge,
-                "judge_temperature": JUDGE_TEMPERATURE,
-                "rubric_file": repo_path(PLAN_RUBRIC, root),
-                "rubric_sha256": hashlib.sha256(PLAN_RUBRIC.read_bytes()).hexdigest(),
-                "action_prompt_template_sha256": hashlib.sha256(PLAN_ACTION_JUDGE_TEMPLATE.encode()).hexdigest(),
-                "extras_prompt_template_sha256": hashlib.sha256(PLAN_EXTRAS_JUDGE_TEMPLATE.encode()).hexdigest(),
-                "credit_values": list(CREDIT_VALUES),
-                "deduction_per_unsupported_extra": DEDUCTION_PER_UNSUPPORTED_EXTRA,
-            },
-            "rank_weighting": {
-                "formula": "1 / rank",
-                "weights": {str(rank): rank_weight(rank) for rank in (1, 2, 3)},
-            },
+            "plan": protocol["plan"],
+            "rank_weighting": protocol["rank_weighting"],
         }
         for group, settings in expected.items():
             saved = correctness.get(group) if isinstance(correctness, dict) else None
