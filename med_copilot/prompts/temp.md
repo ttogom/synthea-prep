@@ -1,6 +1,12 @@
-Count the distinct actions in the generated plan that are "unsupported extras", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. A generated plan action is an unsupported extra only if it does not cover a reference plan action and does not fit this patient's case. Appropriate extras are supported. Absence from the reference plan alone does not make an extra unsupported. Split bundled actions, count each distinct unsupported action once, and do not count placeholders.
+Count the distinct actions in the generated plan that are "unsupported extras", meaning that they neither cover an action in the reference plan nor represent appropriate additional care for the patient. Absence from the reference plan alone does not make an extra unsupported.
 
 Use the Subjective and Objective notes to assess whether the generated plan's actions are appropriate for this patient. Use the labeled condition to interpret the reference plan’s clinical purpose. Assess only recommendations actually present in the generated plan; do not assume additional patient findings from the condition label or from claims made in the generated plan.
+
+# Counting Rules
+
+- Split bundled generated actions into individual actions before counting.
+- Count each distinct unsupported action only once.
+- Do not count placeholders.
 
 # What to Output
 
