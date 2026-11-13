@@ -14,6 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+from scripts.experiment_runtime.plan_judging import validate_profile
+
 
 _SERVER_ENVIRONMENT = {
     "OLLAMA_MAX_LOADED_MODELS": "1",
@@ -62,7 +64,7 @@ class ManagedOllama:
     This class never kills or adopts a server it did not start.
     """
 
-    def __init__(self, settings, log_path, *, parallel=None, context=None, max_loaded_models=None):
+    def __init__(self, settings, log_path, *, parallel=None, context=None, max_loaded_models=None, profile=None):
         if not isinstance(settings, dict):
             raise TypeError("Ollama execution settings must be an object")
         self.enabled = settings.get("manage_ollama", True)
@@ -81,6 +83,10 @@ class ManagedOllama:
         self._process = self._log = self._port_lock = None
         self._entered = False
         self._version = None
+        self.profile = None if profile is None else validate_profile(profile)
+        if self.profile and (self.parallel != self.profile["concurrency"]
+                             or self.context != self.profile["context_length"]):
+            raise ValueError("Plan judge profile must match server slots and context")
 
     def _request(self, method, path, payload=None, *, timeout=2):
         body = None if payload is None else json.dumps(payload, allow_nan=False).encode("utf-8")
@@ -116,10 +122,15 @@ class ManagedOllama:
             raise ValueError(f"Dedicated Ollama port {self.port} is owned by another experiment") from exc
 
     def _environment(self):
-        return {**{name: os.environ[name] for name in _INHERITED_ENVIRONMENT if name in os.environ},
+        environment = {**{name: os.environ[name] for name in _INHERITED_ENVIRONMENT if name in os.environ},
                 **_SERVER_ENVIRONMENT, "OLLAMA_HOST": self.address,
                 "OLLAMA_NUM_PARALLEL": str(self.parallel), "OLLAMA_CONTEXT_LENGTH": str(self.context),
                 "OLLAMA_MAX_LOADED_MODELS": str(self.max_loaded_models)}
+        if self.profile:
+            environment.update(OLLAMA_FLASH_ATTENTION="1" if self.profile["flash_attention"] else "0",
+                               OLLAMA_KV_CACHE_TYPE=self.profile["kv_cache_type"],
+                               LLAMA_ARG_CACHE_RAM=str(self.profile["host_cache_mib"]), OLLAMA_DEBUG="1")
+        return environment
 
     def __enter__(self):
         if self._entered:
@@ -266,7 +277,7 @@ def plan_judge_settings(metadata, *, concurrency=None, context_length=None):
 
 
 @contextmanager
-def ollama_for_saved_run(run_dir, *, concurrency=None, context_length=None):
+def ollama_for_saved_run(run_dir, *, concurrency=None, context_length=None, runtime_profile=None):
     """Use a run's recorded server settings for its separate Plan-judging phase."""
     run_dir = Path(run_dir).resolve()
     metadata = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
@@ -277,5 +288,6 @@ def ollama_for_saved_run(run_dir, *, concurrency=None, context_length=None):
         raise ValueError("Recorded experiment.execution must be an object")
     settings = {"manage_ollama": False, **settings}
     with ManagedOllama(settings, run_dir / "ollama-judge.log",
-                       parallel=effective["concurrency"], context=effective["context_length"]) as server:
+                       parallel=effective["concurrency"], context=effective["context_length"],
+                       **({"profile": runtime_profile["settings"]} if runtime_profile is not None else {})) as server:
         yield server

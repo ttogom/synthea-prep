@@ -7,6 +7,7 @@ per invocation avoids rewriting the entire growing run after every patient.
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import nullcontext
 from contextvars import copy_context
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -17,6 +18,7 @@ from pathlib import Path
 from scripts.med_copilot_config import PIPELINE_DEFAULTS
 from scripts.med_copilot_helpers import load_patient_records
 from scripts.experiment_runtime.ollama import plan_judge_settings
+from scripts.experiment_runtime.plan_judging import validate_profile
 from scripts.med_copilot_judges import (
     DEDUCTION_PER_UNSUPPORTED_EXTRA, JUDGE_FILE, CorrectnessJudges,
     parse_action_judgement, parse_extras_judgement, plan_action_messages,
@@ -366,7 +368,8 @@ def _counts(records):
     return counts
 
 
-def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None, _lock_held=False):
+def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None,
+                           runtime_profile=None, _lock_held=False):
     """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
 
     models contains only the recorded judge. _lock_held is reserved for the CLI,
@@ -387,6 +390,10 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
             raise ValueError(f"Recorded Plan judge {judge} is unavailable; no Plan scores were changed")
         previous_settings = plan_judge_settings(metadata)
         settings = plan_judge_settings(metadata, concurrency=concurrency, context_length=context_length)
+        if runtime_profile is not None:
+            native = validate_profile(runtime_profile["settings"])
+            if any(native[key] != settings[key] for key in settings):
+                raise ValueError("Plan judge profile differs from effective stage settings")
         history = metadata.get("plan_evaluation_history", [])
         if not isinstance(history, list):
             raise ValueError("plan_evaluation_history must be a list")
@@ -411,6 +418,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
                  "implementation_file": str(Path(__file__).resolve().relative_to(Path(root).resolve()))
                  if Path(__file__).resolve().is_relative_to(Path(root).resolve()) else str(Path(__file__).resolve()),
                  "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+        if runtime_profile is not None:
+            stage["runtime_profile"] = deepcopy(runtime_profile)
         run_file.update(plan_evaluation=stage, plan_evaluation_history=history)
         interrupted = None
         changes = {"any": False}
