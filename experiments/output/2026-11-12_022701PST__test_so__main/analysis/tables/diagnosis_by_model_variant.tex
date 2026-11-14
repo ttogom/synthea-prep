@@ -1,0 +1,42 @@
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\caption{Diagnosis results on Synthea Subjective and Objective clinical notes.}
+\label{tab:diagnosis}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lcc@{}}
+\toprule
+\multirow{2}{*}{\textbf{Model}} & \multicolumn{2}{c}{\textbf{Diagnosis Scores}} \\
+\cmidrule(lr){2-3}
+ & BioLORD & BERTScore-F1 \\
+\midrule
+\multicolumn{3}{c}{\textbf{Baselines}} \\
+\midrule
+GPT-4o mini & \textbf{0.7583} & \textbf{0.8704} \\
+Gemma 3 4B & 0.6412 & 0.8553 \\
+Llama 3.2 3B & 0.4966 & 0.8386 \\
+Ministral 3 3B & 0.5347 & 0.8471 \\
+\midrule
+\multicolumn{3}{c}{\textbf{Baselines + Guideline RAG}} \\
+\midrule
+GPT-4o mini & \textbf{0.7491} & \textbf{0.8820} \\
+Gemma 3 4B & 0.6931 & 0.8674 \\
+Llama 3.2 3B & 0.6638 & 0.8697 \\
+Ministral 3 3B & 0.6038 & 0.8565 \\
+\midrule
+\multicolumn{3}{c}{\textbf{Baselines + Sim. Patient Retrieval}} \\
+\midrule
+GPT-4o mini & \textbf{0.8087} & \textbf{0.9113} \\
+Gemma 3 4B & 0.5009 & 0.8480 \\
+Llama 3.2 3B & 0.5088 & 0.8509 \\
+Ministral 3 3B & 0.5650 & 0.8600 \\
+\midrule
+\multicolumn{3}{c}{\shortstack{\textbf{Baselines + Guideline RAG}\\\textbf{+ Sim. Patient Retrieval}}} \\
+\midrule
+GPT-4o mini & \textbf{0.7847} & \textbf{0.9026} \\
+Gemma 3 4B & 0.6799 & 0.8653 \\
+Llama 3.2 3B & 0.5924 & 0.8608 \\
+Ministral 3 3B & 0.6023 & 0.8660 \\
+\bottomrule
+\end{tabular*}
+\end{table}

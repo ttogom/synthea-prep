@@ -1,0 +1,51 @@
+\begin{table}[t]
+\centering
+\fontsize{8}{9}\selectfont
+\setlength{\tabcolsep}{0.3pt}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}p{0.128\columnwidth}p{0.195\columnwidth}p{0.155\columnwidth}p{0.13\columnwidth}rrr@{}}
+\toprule
+\multirow{2}{*}{Group} & \multirow{2}{*}{Condition} & \multirow{2}{*}{Model} & \multirow{2}{*}{\shortstack{Best\\Variant}} & \multirow{2}{*}{n} & \multicolumn{2}{c}{\textbf{Diagnosis Scores}} \\
+\cmidrule(lr){6-7}
+ & & & & & BioLORD & \shortstack{BERT\\Score-F1} \\
+\midrule
+\multirow[t]{8}{0.128\columnwidth}{History} & \multirow[t]{4}{0.195\columnwidth}{COPD} & GPT-4o mini & Patient & 65 & \textbf{0.6641} & \textbf{0.8917} \\
+ &  & Gemma 3 4B & Guide. & 65 & 0.3773 & 0.8052 \\
+ &  & Llama 3.2 3B & Guide. & 65 & 0.5593 & 0.8201 \\
+ &  & Ministral 3 3B & None & 65 & 0.5215 & 0.8348 \\
+\cmidrule(lr){2-7}
+ & \multirow[t]{4}{0.195\columnwidth}{Essential hyper\-tension} & GPT-4o mini & Patient & 367 & \textbf{0.6867} & \textbf{0.9038} \\
+ &  & Gemma 3 4B & Guide. & 367 & 0.6174 & 0.8598 \\
+ &  & Llama 3.2 3B & Guide. & 367 & 0.4699 & 0.8590 \\
+ &  & Ministral 3 3B & Both & 367 & 0.5543 & 0.8795 \\
+\midrule
+\multirow[t]{16}{0.128\columnwidth}{Acute} & \multirow[t]{4}{0.195\columnwidth}{Strep. sore throat} & GPT-4o mini & Guide. & 603 & \textbf{0.8276} & \textbf{0.8857} \\
+ &  & Gemma 3 4B & Guide. & 603 & 0.6903 & 0.8537 \\
+ &  & Llama 3.2 3B & Guide. & 603 & 0.7416 & 0.8721 \\
+ &  & Ministral 3 3B & Both & 603 & 0.5530 & 0.8294 \\
+\cmidrule(lr){2-7}
+ & \multirow[t]{4}{0.195\columnwidth}{Acute viral pharyngitis} & GPT-4o mini & Patient & 815 & \textbf{0.9271} & \textbf{0.9760} \\
+ &  & Gemma 3 4B & Both & 815 & 0.7778 & 0.9040 \\
+ &  & Llama 3.2 3B & Guide. & 815 & 0.6619 & 0.8863 \\
+ &  & Ministral 3 3B & Guide. & 815 & 0.6423 & 0.8786 \\
+\cmidrule(lr){2-7}
+ & \multirow[t]{4}{0.195\columnwidth}{Acute bact. sinusitis} & GPT-4o mini & Both & 45 & 0.8435 & \textbf{0.9660} \\
+ &  & Gemma 3 4B & Guide. & 45 & 0.7396 & 0.9066 \\
+ &  & Llama 3.2 3B & Guide. & 45 & 0.7880 & 0.9135 \\
+ &  & Ministral 3 3B & Both & 45 & \textbf{0.8480} & 0.9606 \\
+\cmidrule(lr){2-7}
+ & \multirow[t]{4}{0.195\columnwidth}{Acute infective cystitis} & GPT-4o mini & Patient & 328 & \textbf{0.8758} & \textbf{0.9295} \\
+ &  & Gemma 3 4B & Guide. & 328 & 0.6834 & 0.8390 \\
+ &  & Llama 3.2 3B & Guide. & 328 & 0.6874 & 0.8413 \\
+ &  & Ministral 3 3B & Both & 328 & 0.7433 & 0.8728 \\
+\midrule
+\multirow[t]{4}{0.128\columnwidth}{Control} & \multirow[t]{4}{0.195\columnwidth}{Chronic CHF} & GPT-4o mini & None & 155 & \textbf{0.8381} & \textbf{0.8792} \\
+ &  & Gemma 3 4B & Guide. & 155 & 0.8286 & 0.8710 \\
+ &  & Llama 3.2 3B & Guide. & 155 & 0.7884 & 0.8672 \\
+ &  & Ministral 3 3B & Both & 155 & 0.7043 & 0.8637 \\
+\bottomrule
+\end{tabular*}
+\caption{Diagnosis results by condition. For each model and condition, the variant with the highest mean BioLORD is shown.}
+\label{tab:diagnosis_by_condition}
+\par\smallskip
+{\scriptsize None: no retrieval; Guide.: guidelines; Patient: similar-patient retrieval; Both: both sources. Bold marks the highest displayed score per condition.\par}
+\end{table}

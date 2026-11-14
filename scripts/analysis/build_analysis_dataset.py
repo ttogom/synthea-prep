@@ -4,7 +4,7 @@ import pandas as pd
 
 RESULTS = "experiments/output/2026-11-12_022701PST__test_so__main/results.jsonl"
 LABELS = "experiments/input/test_labels.jsonl"
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 results_df = pd.read_json(ROOT / RESULTS, lines=True).set_index("id")
 labels_df = pd.read_json(ROOT / LABELS, lines=True).set_index("id")
