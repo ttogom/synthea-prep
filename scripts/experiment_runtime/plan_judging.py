@@ -11,8 +11,9 @@ PROFILE_FIELDS = {"concurrency", "context_length", "flash_attention", "kv_cache_
 
 def validate_profile(settings):
     """Reject unknown, missing, or unsupported settings before server startup."""
-    if not isinstance(settings, dict) or set(settings) != PROFILE_FIELDS:
-        raise ValueError("Plan judge profile must contain exactly: " + ", ".join(sorted(PROFILE_FIELDS)))
+    if not isinstance(settings, dict) or set(settings) not in (PROFILE_FIELDS, PROFILE_FIELDS | {"client_workers"}):
+        raise ValueError("Plan judge profile must contain: " + ", ".join(sorted(PROFILE_FIELDS))
+                         + "; client_workers is optional for legacy profiles")
     for field, low, high in (("concurrency", 1, 64), ("context_length", 512, 262144),
                              ("host_cache_mib", 0, 8192)):
         value = settings[field]
@@ -20,12 +21,15 @@ def validate_profile(settings):
             raise ValueError(f"Plan judge {field} must be an integer from {low} to {high}")
     if type(settings["flash_attention"]) is not bool:
         raise ValueError("Plan judge flash_attention must be boolean")
+    if "client_workers" in settings and (type(settings["client_workers"]) is not int
+                                         or not 1 <= settings["client_workers"] <= 64):
+        raise ValueError("Plan judge client_workers must be an integer from 1 to 64")
     if settings["kv_cache_type"] != "f16":
         raise ValueError("Plan judge kv_cache_type must be f16 (the quality-tested profile)")
     return deepcopy(settings)
 
 
-def load_judge_profile(path, metadata, *, concurrency=None, context_length=None):
+def load_judge_profile(path, metadata, *, concurrency=None, context_length=None, client_workers=None):
     """Freeze a new stage's file settings; resume its saved profile without rereading it."""
     if not isinstance(metadata, dict):
         raise ValueError("Recorded run metadata must be an object")
@@ -40,8 +44,9 @@ def load_judge_profile(path, metadata, *, concurrency=None, context_length=None)
                    "config_sha256": fingerprint}
         # Older Plan invocations already allowed explicit C/context overrides.
         for field in ("concurrency", "context_length"):
-            if stage.get(field) is not None:
-                profile["settings"][field] = stage[field]
+            recorded = stage.get("gpu_slots", stage.get(field)) if field == "concurrency" else stage.get(field)
+            if recorded is not None:
+                profile["settings"][field] = recorded
     else:
         if (not isinstance(saved, dict) or set(saved) != {"settings", "config_file", "config_sha256"}
                 or not isinstance(saved["config_file"], str)
@@ -50,7 +55,13 @@ def load_judge_profile(path, metadata, *, concurrency=None, context_length=None)
             raise ValueError("Invalid recorded Plan judge runtime_profile")
         profile = deepcopy(saved)
         validate_profile(profile["settings"])
-    for field, override in (("concurrency", concurrency), ("context_length", context_length)):
+    # The productive trial recorded client workers separately from its native
+    # profile. Carry that setting forward without changing generation provenance.
+    if "client_workers" not in profile["settings"] and "client_workers" in stage:
+        profile["settings"]["client_workers"] = stage["client_workers"]
+        validate_profile(profile["settings"])
+    for field, override in (("concurrency", concurrency), ("context_length", context_length),
+                            ("client_workers", client_workers)):
         if override is not None:
             profile["settings"][field] = override
     profile["settings"] = validate_profile(profile["settings"])

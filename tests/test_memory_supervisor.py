@@ -187,7 +187,8 @@ class SupervisorTests(unittest.TestCase):
         self.run.mkdir()
         config = self.root / "experiments/configs/plan_judging.yaml"
         config.parent.mkdir(parents=True)
-        config.write_bytes((ROOT / "experiments/configs/plan_judging.yaml").read_bytes())
+        config.write_text(json.dumps({"concurrency": 4, "context_length": 4096, "flash_attention": True,
+                                      "kv_cache_type": "f16", "host_cache_mib": 2048}))
         (self.run / "run.json").write_text(json.dumps({"experiment": {"execution": {"manage_ollama": True}}}))
         self.original = (self.run / "run.json").read_bytes()
         self.bootstraps = []
@@ -241,6 +242,39 @@ class SupervisorTests(unittest.TestCase):
                 patch.object(guard, "_watch", return_value=None):
             self.assertEqual(guard.supervise_cli([str(self.run)], root=self.root), 0)
         self.assertEqual(len(self.bootstraps), 1)
+
+    def test_shipped_two_clients_one_slot_retries_with_one_client_and_one_slot(self):
+        config = self.root / "experiments/configs/plan_judging.yaml"
+        config.write_bytes((ROOT / "experiments/configs/plan_judging.yaml").read_bytes())
+        with patch.object(guard, "_headroom", side_effect=self.headroom), \
+                patch.object(guard, "ollama_for_saved_run", side_effect=self.server), \
+                patch.object(guard.subprocess, "Popen", side_effect=self.popen), \
+                patch.object(guard, "_watch", side_effect=["sustained_warning_with_swap_growth", None]):
+            self.assertEqual(guard.supervise_cli([str(self.run)], root=self.root), 0)
+        self.assertEqual([b["profile"]["settings"]["client_workers"] for b in self.bootstraps], [2, 1])
+        self.assertEqual([b["profile"]["settings"]["concurrency"] for b in self.bootstraps], [1, 1])
+        self.assertEqual([s["concurrency"] for s in self.servers], [1, 1])
+        self.assertEqual((self.run / "run.json").read_bytes(), self.original)
+        with exclusive_run_lock(self.run):
+            pass
+
+    def test_resume_of_productive_trial_preserves_one_native_slot_and_two_clients(self):
+        settings = {"concurrency": 1, "context_length": 4096, "flash_attention": True,
+                    "kv_cache_type": "f16", "host_cache_mib": 512}
+        metadata = json.loads(self.original)
+        metadata["plan_evaluation"] = {"status": "interrupted", "concurrency": 2,
+            "client_workers": 2, "gpu_slots": 1, "runtime_profile": {
+                "settings": settings, "config_file": "/external/trial/profile.yaml", "config_sha256": "a" * 64}}
+        (self.run / "run.json").write_text(json.dumps(metadata))
+        original = (self.run / "run.json").read_bytes()
+        with patch.object(guard, "_headroom", return_value=True), \
+                patch.object(guard, "ollama_for_saved_run", side_effect=self.server), \
+                patch.object(guard.subprocess, "Popen", side_effect=self.popen), \
+                patch.object(guard, "_watch", return_value=None):
+            guard.supervise_cli([str(self.run)], root=self.root)
+        self.assertEqual(self.servers[0]["concurrency"], 1)
+        self.assertEqual(self.bootstraps[0]["profile"]["settings"], {**settings, "client_workers": 2})
+        self.assertEqual((self.run / "run.json").read_bytes(), original)
 
     def test_one_slot_recovers_once_and_two_slots_fall_back_to_one(self):
         for concurrency, expected in ((1, [1, 1]), (2, [2, 1])):

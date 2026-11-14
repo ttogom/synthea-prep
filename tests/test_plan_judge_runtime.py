@@ -37,7 +37,50 @@ class PlanJudgeRuntimeTests(unittest.TestCase):
 
     def test_shipped_profile_matches_the_measured_setup(self):
         profile = load_judge_profile(ROOT / "experiments/configs/plan_judging.yaml", {})
-        self.assertEqual(profile["settings"], PROFILE)
+        self.assertEqual(profile["settings"], {**PROFILE, "concurrency": 1,
+                                              "client_workers": 2, "host_cache_mib": 512})
+
+    def test_separate_workers_are_saved_and_do_not_allocate_extra_gpu_slots(self):
+        settings = {**PROFILE, "concurrency": 1, "client_workers": 2, "host_cache_mib": 512}
+        self.config.write_text(json.dumps(settings))
+        profile = load_judge_profile(self.config, {})
+        self.assertEqual(profile["settings"], settings)
+        server = ManagedOllama({}, self.directory / "judge.log", parallel=1,
+                               context=4096, profile=profile["settings"])
+        self.assertEqual(server._environment()["OLLAMA_NUM_PARALLEL"], "1")
+        self.config.unlink()
+        resumed = load_judge_profile(self.config, {"plan_evaluation": {"runtime_profile": profile}})
+        self.assertEqual(resumed, profile)
+
+    def test_productive_trial_workers_migrate_without_reading_config_or_changing_native_profile(self):
+        saved = self.snapshot({**PROFILE, "concurrency": 1, "host_cache_mib": 512})
+        metadata = {"plan_evaluation": {"runtime_profile": saved, "concurrency": 2,
+                                       "client_workers": 2, "gpu_slots": 1}}
+        before = deepcopy(metadata)
+        self.config.unlink()
+        result = load_judge_profile(self.config, metadata)
+        self.assertEqual(result["settings"], {**saved["settings"], "client_workers": 2})
+        self.assertEqual(metadata, before)
+
+    def test_legacy_stage_without_profile_reuses_separate_native_slots(self):
+        metadata = {"plan_evaluation": {"concurrency": 2, "client_workers": 2, "gpu_slots": 1}}
+        settings = load_judge_profile(self.config, metadata)["settings"]
+        self.assertEqual((settings["concurrency"], settings["client_workers"]), (1, 2))
+
+    def test_worker_validation_and_override_do_not_change_slots_or_hide_invalid_saved_values(self):
+        settings = {**PROFILE, "concurrency": 1, "client_workers": 2}
+        saved = self.snapshot(settings)
+        result = load_judge_profile(self.config, {"plan_evaluation": {"runtime_profile": saved}},
+                                    client_workers=4)
+        self.assertEqual(result["settings"], {**settings, "client_workers": 4})
+        self.assertEqual(saved["settings"], settings)
+        for value in (True, False, 0, 65, 2.0, "2", None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "client_workers"):
+                validate_profile({**settings, "client_workers": value})
+        for value in (True, 0, 65, 2.0, "2", None):
+            metadata = {"plan_evaluation": {"runtime_profile": self.snapshot(), "client_workers": value}}
+            with self.subTest(saved=value), self.assertRaisesRegex(ValueError, "client_workers"):
+                load_judge_profile(self.config, metadata, client_workers=2)
 
     def test_first_stage_uses_file_not_frozen_generation_concurrency(self):
         metadata = {"experiment": {"plan_judge_concurrency": 8, "execution": {

@@ -408,6 +408,19 @@ class SavedRunOllamaTests(unittest.TestCase):
 
 
 class PlanJudgeSettingsTests(unittest.TestCase):
+    def test_native_slots_take_precedence_over_recorded_client_concurrency(self):
+        metadata = {"plan_evaluation": {"concurrency": 2, "client_workers": 2,
+                                       "gpu_slots": 1, "context_length": 4096}}
+        before = deepcopy(metadata)
+        self.assertEqual(plan_judge_settings(metadata), {"concurrency": 1, "context_length": 4096})
+        self.assertEqual(plan_judge_settings(metadata, concurrency=4),
+                         {"concurrency": 4, "context_length": 4096})
+        self.assertEqual(metadata, before)
+        for value in (True, 0, 65, "1", 1.0):
+            metadata["plan_evaluation"]["gpu_slots"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                plan_judge_settings(metadata)
+
     def test_precedence_is_independent_per_field_and_metadata_is_unchanged(self):
         metadata = {"experiment": {"plan_judge_concurrency": 4, "execution": {
                         "ollama_judge_context_length": 8192, "ollama_context_length": 16384}},

@@ -385,6 +385,78 @@ class PlanStageTests(unittest.TestCase):
         self.run_stage(models, concurrency=2)
         self.assertEqual(models.maximum, 2)
 
+    def independent_profile(self):
+        path = self.root / "judge-profile.yaml"
+        settings = {"concurrency": 1, "client_workers": 2, "context_length": 4096,
+                    "flash_attention": True, "kv_cache_type": "f16", "host_cache_mib": 512}
+        path.write_text(json.dumps(settings))
+        return {"settings": settings, "config_file": str(path),
+                "config_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+    def test_two_workers_one_slot_overlap_and_resume_without_repeating_or_rewriting_results(self):
+        profile = self.independent_profile()
+        models = FakeModels(lambda *_: time.sleep(.01))
+        self.run_stage(models, concurrency=1, context_length=4096, runtime_profile=profile)
+        self.assertEqual(models.maximum, 2)
+        metadata, before = self.saved()
+        saved = metadata["plan_evaluation"]
+        self.assertEqual((saved["concurrency"], saved["client_workers"], saved["gpu_slots"]), (2, 2, 1))
+        self.assertEqual(saved["runtime_profile"], profile)
+        self.assertEqual(metadata["experiment"], self.metadata["experiment"])
+        contents = (self.run_dir / "results.jsonl").read_bytes()
+        resumed = FakeModels()
+        with self.result_replacements() as replacements:
+            self.run_stage(resumed, concurrency=1, context_length=4096, runtime_profile=saved["runtime_profile"])
+        self.assertEqual(resumed.requests, [])
+        self.assertEqual(replacements, [])
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), contents)
+        self.assertEqual(self.saved()[1], before)
+
+    def test_two_workers_one_slot_export_failure_recovers_all_durable_replies(self):
+        profile = self.independent_profile()
+        contents = (self.run_dir / "results.jsonl").read_bytes()
+        with self.result_replacements(fail=True), self.assertRaises(OSError):
+            self.run_stage(concurrency=1, context_length=4096, runtime_profile=profile)
+        self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), contents)
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1, context_length=4096, runtime_profile=profile)
+        self.assertEqual(resumed.requests, [])
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["counts"]["scored"], 9)
+
+    def test_two_workers_one_slot_interruption_preserves_every_durable_reply(self):
+        stop = Event()
+        def reply(*_):
+            stop.set()
+            return '{"credit": 1}'
+        profile = self.independent_profile()
+        with self.assertRaises(stage.MemoryPressureStop):
+            self.run_stage(FakeModels(reply), concurrency=1, context_length=4096,
+                           runtime_profile=profile, stop_requested=stop.is_set)
+        cache = self.run_dir / "judge_responses.jsonl"
+        durable = [json.loads(line) for line in cache.read_text().splitlines()]
+        self.assertTrue(durable)
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1, context_length=4096, runtime_profile=profile)
+        self.assertEqual(len(durable) + len(resumed.requests), 18)
+        final_keys = {json.loads(line)["key"] for line in cache.read_text().splitlines()}
+        self.assertTrue({entry["key"] for entry in durable}.issubset(final_keys))
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["counts"]["scored"], 9)
+        self.assertEqual(len(self.saved()[1]), 3)
+
+    def test_invalid_or_conflicting_client_workers_do_not_mutate_artifacts(self):
+        original = (self.run_dir / "run.json").read_bytes()
+        profile = self.independent_profile()
+        for value in (True, False, 0, 65, "2", 2.0):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "client"):
+                self.run_stage(concurrency=1, client_workers=value)
+            self.assertEqual((self.run_dir / "run.json").read_bytes(), original)
+            self.assertFalse((self.run_dir / "judge_responses.jsonl").exists())
+        with self.assertRaisesRegex(ValueError, "differ"):
+            self.run_stage(concurrency=1, context_length=4096, runtime_profile=profile, client_workers=3)
+        self.assertEqual((self.run_dir / "run.json").read_bytes(), original)
+        self.assertFalse((self.run_dir / "judge_responses.jsonl").exists())
+
     def test_export_happens_once_and_a_completed_resume_does_not_rewrite_results(self):
         path = self.run_dir / "results.jsonl"
         with self.result_replacements() as replacements:
@@ -789,7 +861,8 @@ class PlanStageTests(unittest.TestCase):
             self.assertEqual(server.call_args.kwargs["concurrency"], 8)
             self.assertEqual(server.call_args.kwargs["context_length"], 4096)
             profile = server.call_args.kwargs["runtime_profile"]
-            self.assertEqual(profile["settings"]["host_cache_mib"], 2048)
+            self.assertEqual(profile["settings"]["host_cache_mib"], 512)
+            self.assertEqual(profile["settings"]["client_workers"], 2)
             before = len(models.requests)
             server.reset_mock()
             self.assertEqual(command.main([str(self.run_dir)], root=self.root), 0)
@@ -799,7 +872,8 @@ class PlanStageTests(unittest.TestCase):
         metadata, _ = self.saved()
         self.assertEqual(metadata["experiment"], self.metadata["experiment"])
         self.assertEqual(metadata["plan_evaluation"]["context_length"], 4096)
-        self.assertEqual(metadata["plan_evaluation"]["concurrency"], 8)
+        self.assertEqual(metadata["plan_evaluation"]["concurrency"], 2)
+        self.assertEqual(metadata["plan_evaluation"]["gpu_slots"], 8)
 
     def test_failed_runtime_verification_does_not_repair_cache_or_change_saved_artifacts(self):
         self.run_stage()

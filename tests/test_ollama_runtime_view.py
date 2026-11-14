@@ -46,6 +46,17 @@ class RuntimeViewTests(unittest.TestCase):
         self.assertEqual(set(actual), {"managed", "host", "parallel", "context", "max_loaded_models",
                                       "profile", "version", "log_path", "log_start_byte", "server_pid"})
 
+    def test_two_worker_profile_crosses_process_boundary_with_one_native_slot(self):
+        self.server.parallel = 1
+        self.server.profile.update(concurrency=1, client_workers=2, host_cache_mib=512)
+        descriptor = json.loads(json.dumps(self.server.runtime_descriptor()))
+        view = OllamaRuntimeView(descriptor)
+        self.assertEqual(view.parallel, 1)
+        self.assertEqual(view.profile["client_workers"], 2)
+        self.assertEqual(view.profile, self.server.profile)
+        view.profile["client_workers"] = 1
+        self.assertEqual(self.server.profile["client_workers"], 2)
+
     def test_runtime_descriptor_requires_own_live_server_and_profile(self):
         self.server._process.poll.return_value = 0
         with self.assertRaisesRegex(ValueError, "running owned"):

@@ -6,6 +6,7 @@ Reads the recorded cohort and loads only its recorded Plan judge. Completed
 Plan judgements and scalar replies are reused. Text metrics, diagnosis scores,
 generation, and evidence are preserved. Concurrent requests are bounded by the
 last Plan stage's settings, or plan_judging.yaml on its first invocation.
+client_workers controls client requests; concurrency controls native GPU slots.
 Optional runtime overrides are recorded in the Plan stage without changing the experiment.
 
 Exit status: 0 when every Plan entry finished; 1 when the run directory or
@@ -102,7 +103,7 @@ def main(argv=None, *, root=ROOT, models_factory=AssessmentPlanModels,
          _lock_fd=None, _server=None, _stop_file=None, _guard_metadata=None, _runtime_profile=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("run_directory", type=Path, help="Directory containing run.json and results.jsonl")
-    parser.add_argument("--concurrency", type=int, help="Override the number of simultaneous judge requests")
+    parser.add_argument("--concurrency", type=int, help="Override native Ollama GPU slots")
     parser.add_argument("--context-length", type=int, help="Override the local judge's context window")
     args = parser.parse_args(argv)
     run_dir = args.run_directory.resolve()

@@ -201,8 +201,11 @@ def supervise_cli(argv, *, root):
                     _event(events, "paused", reason=reason)
                     return MEMORY_STOP_EXIT
                 reduced = 2 if effective["concurrency"] > 2 else 1
+                reduced_workers = min(effective.get("client_workers", effective["concurrency"]), reduced)
                 profile["settings"]["concurrency"] = reduced
-                _event(events, "retrying", concurrency=reduced, server_slots=reduced)
+                if "client_workers" in effective:
+                    profile["settings"]["client_workers"] = reduced_workers
+                _event(events, "retrying", concurrency=reduced_workers, server_slots=reduced)
             return MEMORY_STOP_EXIT
     except KeyboardInterrupt:
         return 130

@@ -404,7 +404,7 @@ def plan_judge_settings(metadata, *, concurrency=None, context_length=None):
     if not isinstance(execution, dict):
         raise ValueError("Recorded experiment.execution must be an object")
     if concurrency is None:
-        concurrency = stage.get("concurrency")
+        concurrency = stage.get("gpu_slots", stage.get("concurrency"))
         if concurrency is None:
             concurrency = experiment.get("plan_judge_concurrency", 2)
     if context_length is None:

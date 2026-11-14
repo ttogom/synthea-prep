@@ -2,6 +2,15 @@
 
 `python judge_treatment_plans.py RUN_DIRECTORY` enables this guard automatically; existing concurrency/context options remain available.
 
+New stages use two client workers feeding one native Ollama GPU slot, with a
+512 MiB host prompt-cache cap. In `experiments/configs/plan_judging.yaml`,
+`client_workers` controls the bounded Python request pool; `concurrency` controls
+native GPU slots. The existing `--concurrency` flag overrides native slots.
+Legacy profiles without `client_workers` retain their coupled worker/slot count.
+Resume uses the saved profile, including a separate worker count recorded by
+the productive configuration trial. Stage metadata records `client_workers`,
+`gpu_slots`, and client `concurrency`; runtime provenance verifies native slots.
+
 The command runs under a lightweight memory supervisor that retains the run
 lock and owns the dedicated Ollama process group. It samples macOS pressure,
 swap-in/out, compression, approximate reclaimable pages and owned-process RSS
@@ -56,8 +65,11 @@ can leave disposable scratch files, which are not used for recovery.
 
 The supervisor waits at most five minutes for 30 continuous normal seconds with
 no new swap-out and at least 1 GiB of reclaimable reserve when available, then
-retries once. Both client concurrency and native server slots fall from more
-than two to two, from two to one, or stay at one. It never promotes concurrency.
+retries once. Native server slots fall from more than two to two, from two to
+one, or stay at one. Client workers are capped at the reduced slot count, so the
+two-worker/one-slot setup retries with one worker and one slot. This server
+restart releases the old allocation; reducing clients alone does not. It never
+promotes concurrency.
 The reserve is an approximate safety floor, not a model-specific admission estimate;
 arbitrary model aliases do not provide a reliable pre-load memory budget. A second stop,
 monitor failure, or unrecovered headroom exits 75 with progress saved for manual

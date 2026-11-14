@@ -451,7 +451,7 @@ def _evaluated_records(records, scorer, judges, run_file, concurrency, stop_requ
 
 def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None,
                            runtime_profile=None, runtime_verifier=None, _lock_held=False,
-                           stop_requested=None, guard_metadata=None):
+                           stop_requested=None, guard_metadata=None, client_workers=None):
     """Finish only Plan fields; valid scalar replies survive crashes and failed exports.
 
     models contains only the recorded judge. _lock_held is reserved for the CLI,
@@ -477,6 +477,14 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
             native = validate_profile(runtime_profile["settings"])
             if any(native[key] != settings[key] for key in settings):
                 raise ValueError("Plan judge profile differs from effective stage settings")
+            if client_workers is None:
+                client_workers = native.get("client_workers", concurrency)
+            elif "client_workers" in native and client_workers != native["client_workers"]:
+                raise ValueError("Plan judge client workers differ from the runtime profile")
+        if client_workers is None:
+            client_workers = concurrency
+        if type(client_workers) is not int or not 1 <= client_workers <= 64:
+            raise ValueError("Plan judge client_workers must be an integer from 1 to 64")
         history = metadata.get("plan_evaluation_history", [])
         if not isinstance(history, list):
             raise ValueError("plan_evaluation_history must be a list")
@@ -504,7 +512,8 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         )
         started = pacific_now().isoformat()
         stage = {"status": "running", "started_at": started, "finished_at": None,
-                 "judge_model": judge, **settings, "protocol": protocol,
+                 "judge_model": judge, **settings, "concurrency": client_workers,
+                 "client_workers": client_workers, "gpu_slots": settings["concurrency"], "protocol": protocol,
                  "judge_settings": {**judges.metadata(root)["plan"], **protocol["plan"]},
                  "responses_file": JUDGE_FILE, "calls": 0, "cache_hits": 0,
                  "implementation_file": str(Path(__file__).resolve().relative_to(Path(root).resolve()))
@@ -521,9 +530,9 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         try:
             # One executor for the invocation; only two decoded patients are
             # resident, regardless of cohort size or the completed prefix.
-            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="plan-judge") as executor:
+            with ThreadPoolExecutor(max_workers=client_workers, thread_name_prefix="plan-judge") as executor:
                 _write_results(run_dir, _evaluated_records(
-                    records, scorer, judges, run_file, concurrency, stop_requested, changes, executor),
+                    records, scorer, judges, run_file, client_workers, stop_requested, changes, executor),
                     changes=changes, source=records)
             interrupted = changes["interrupted"]
             counts = changes["counts"]

@@ -145,6 +145,17 @@ class RuntimeProvenanceTests(unittest.TestCase):
     def save(self):
         return save_verified_runtime(self.server, self.models, self.alias, self.run, self.root)
 
+    def test_two_clients_recorded_separately_from_verified_one_slot_allocation(self):
+        self.server.profile.update(concurrency=1, client_workers=2, host_cache_mib=512)
+        self.server.invocation_log.return_value = NATIVE_LOG.replace("= 4\n", "= 1\n").replace(
+            "= 16384", "= 4096").replace("2048 MiB", "512 MiB")
+        reference = self.save()
+        document = json.loads((self.run / reference["file"]).read_text())
+        self.assertEqual(document["requested"]["client_workers"], 2)
+        self.assertEqual(document["effective"]["parallel_slots"], 1)
+        self.assertEqual(document["effective"]["total_context"], 4096)
+        self.assertEqual(document["model"]["digest"], self.placement["digest"])
+
     def test_unique_durable_files_contain_verified_whitelisted_evidence(self):
         with patch("scripts.experiment_runtime.judge_provenance.os.fsync", wraps=os.fsync) as sync:
             first = self.save()
