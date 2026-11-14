@@ -18,6 +18,7 @@ from scripts.experiment_runtime.memory_pressure import (
     WARNING_SECONDS, WARNING_SWAP_BYTES, MAX_WARNING_SECONDS, RECOVERY_NORMAL_SECONDS,
     MAX_SAMPLE_FAILURES, WARNING_SAMPLE_FRACTION,
     STARTUP_SECONDS, WARNING_CHURN_BYTES, WARNING_COMPRESSION_BYTES, MIN_RECLAIMABLE_BYTES,
+    policy_metadata,
 )
 from scripts.experiment_runtime.ollama import ollama_for_saved_run
 from scripts.experiment_runtime.plan_judging import load_judge_profile
@@ -165,18 +166,8 @@ def supervise_cli(argv, *, root):
                                          concurrency=args.concurrency, context_length=args.context_length)
             events = run_dir / "provenance" / f"plan-judge-memory-{uuid4().hex}.jsonl"
             events.parent.mkdir(parents=True, exist_ok=True)
-            policy = {"sample_seconds": SAMPLE_INTERVAL_SECONDS, "warning_seconds": WARNING_SECONDS,
-                      "warning_sample_fraction": WARNING_SAMPLE_FRACTION,
-                      "swapout_growth_bytes": WARNING_SWAP_BYTES, "warning_review_seconds": MAX_WARNING_SECONDS,
-                      "normal_recovery_seconds": RECOVERY_NORMAL_SECONDS, "recovery_timeout_seconds": RECOVERY_TIMEOUT_SECONDS,
-                      "max_sample_failures": MAX_SAMPLE_FAILURES, "grace_seconds": GRACE_SECONDS,
+            policy = {**policy_metadata(), "grace_seconds": GRACE_SECONDS,
                       "worker_exit_seconds": WORKER_EXIT_SECONDS, "max_attempts": 2}
-            policy.update(startup_seconds=STARTUP_SECONDS, warning_churn_bytes=WARNING_CHURN_BYTES,
-                          warning_compression_bytes=WARNING_COMPRESSION_BYTES,
-                          minimum_reclaimable_bytes=MIN_RECLAIMABLE_BYTES,
-                          stable_warning_requires_complete_telemetry=True,
-                          stable_warning_requires_zero_swapout_growth=True,
-                          early_churn_stop_requires_low_reserve=True)
             _event(events, "started", policy=policy)
             for attempt in range(2):
                 if not _headroom(events):

@@ -85,6 +85,23 @@ class WatchdogTests(unittest.TestCase):
         self.server.close.assert_not_called()
         self.assertFalse(self.stop.exists())
 
+    def test_isolated_paging_burst_and_compression_traffic_do_not_stop_work(self):
+        self.worker.poll.side_effect = lambda: 0 if self.clock.now >= 240 else None
+        def sample():
+            return {"pressure": 2, "swapout_bytes": 500 * 1024 ** 2 if self.clock.now >= 60 else 0,
+                    "swapin_bytes": 0, "compressor_bytes": 6 * 1024 ** 3,
+                    "compression_bytes": int(self.clock.now) * 128 * 1024 ** 2,
+                    "reclaimable_bytes": 5 * 1024 ** 3}
+        with patch.object(guard, "_sample", side_effect=sample), \
+                patch.object(guard.time, "monotonic", side_effect=self.clock.monotonic), \
+                patch.object(guard.time, "sleep", side_effect=self.clock.sleep):
+            self.assertIsNone(guard._watch(self.worker, self.server, self.stop, self.events))
+        self.server.close.assert_not_called()
+        self.assertFalse(self.stop.exists())
+        rows = [json.loads(line) for line in self.events.read_text().splitlines()]
+        self.assertFalse(any(row["event"] == "stopping" for row in rows))
+        self.assertTrue(any(row.get("phase") == "stable_warning" for row in rows))
+
     def test_every_sample_is_recorded_quietly_and_critical_skips_optional_diagnostics(self):
         with patch.object(guard, "_sample", return_value={"pressure": 4, "swapout_bytes": 0}), \
                 patch.object(guard, "_owned_rss") as rss, \
@@ -238,8 +255,12 @@ class SupervisorTests(unittest.TestCase):
                                                         root=self.root), 0)
                 self.assertEqual([entry["profile"]["settings"]["concurrency"] for entry in self.bootstraps], expected)
                 self.assertEqual([entry["concurrency"] for entry in self.servers], expected)
-                self.assertTrue(self.bootstraps[-1]["guard_metadata"]["policy"][
-                    "stable_warning_requires_complete_telemetry"])
+                recorded = self.bootstraps[-1]["guard_metadata"]["policy"]
+                self.assertEqual(recorded["version"], 2)
+                self.assertTrue(recorded["isolated_swap_bursts_continue"])
+                self.assertTrue(recorded["compression_traffic_diagnostic_only"])
+                self.assertTrue(recorded["critical_pressure_immediate"])
+                self.assertEqual({key: recorded[key] for key in guard.policy_metadata()}, guard.policy_metadata())
 
     def test_user_interrupt_never_launches_a_recovery_attempt(self):
         with patch.object(guard, "_headroom", return_value=True), \

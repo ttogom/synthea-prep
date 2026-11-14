@@ -6,20 +6,27 @@ The command runs under a lightweight memory supervisor that retains the run
 lock and owns the dedicated Ollama process group. It samples macOS pressure,
 swap-in/out, compression, approximate reclaimable pages and owned-process RSS
 every five seconds. RSS can include shared/GPU pages; these measurements are
-diagnostics, not independent quantities to add together. Brief warnings continue. It stops after 60
-seconds of warning plus 64 MiB of new swap-out (also covering a 60-second window
-with at least 80% warning samples despite brief normal blips), critical pressure,
-or three failed monitoring samples. Startup is labeled for diagnostics and never
-exempts critical pressure or growing swap from protection.
+diagnostics, not independent quantities to add together. Critical pressure stops
+immediately, without waiting for auxiliary readings. Three consecutive failed
+monitoring samples also stop judging. Startup is labeled for diagnostics and
+receives the same protection.
 
-At 180 seconds of continuous warning, continuing requires complete telemetry
-over the last minute, zero new swap-out, less than 64 MiB each of swap-in,
-compressor growth and reclaimable-page loss, less than 256 MiB of compression
-traffic, and at least 1 GiB of estimated reclaimable pages. Otherwise judging
-stops. Substantial churn with less than that reserve can stop after 60 seconds;
-churn with ample reserve does not shorten the original 180-second review window.
-These are conservative protections, not benchmark-calibrated performance values.
-Missing auxiliary readings retain the original strict warning timeout.
+Warning pressure, compression traffic and an isolated paging burst do not by
+themselves establish exhaustion. Under sustained or predominantly warning
+pressure, paging protection requires at least 64 MiB plus distributed activity:
+either activity over at least half a minute spanning 40 seconds in the latest
+minute, or three episodes separated by at least ten quiet seconds and spanning
+at least a minute within two minutes. Sub-MiB interval increments do not count
+as activity. A single 15-second burst dominating over 80% of the window cannot
+turn background trickle into sustained paging.
+
+Known reclaimable reserve below 1 GiB for 30 continuous warning seconds stops
+independently. After 180 seconds of warning, a complete recent minute of auxiliary
+telemetry is required; missing readings or sampling gaps cannot authorize blind
+continuation. Counter resets discard the prior activity evidence. Compression
+traffic remains diagnostic even when high, and low-rate paging may continue with
+adequate reserve. These are conservative protection thresholds, not a guarantee
+of a particular runtime or of preventing every OS intervention.
 
 On a warning stop, new scalar calls stop and existing work gets up to 30 seconds
 to drain; critical pressure skips that grace. Native TERM/KILL and worker-exit
@@ -28,6 +35,9 @@ results needing reconstruction, but completed fsynced scalar replies remain
 reusable. Only owned process groups are signaled. A redundant signal's macOS
 permission error is accepted only if process-table inspection proves the group
 has no live members. Genuine or unverifiable failures retain ownership for cleanup.
+
+Completed replies are durably saved independently of the guard. Even after a
+crash, they remain reusable; a few in-flight requests may need repeating.
 
 The supervisor waits at most five minutes for 30 continuous normal seconds with
 no new swap-out and at least 1 GiB of reclaimable reserve when available, then
@@ -38,5 +48,6 @@ arbitrary model aliases do not provide a reliable pre-load memory budget. A seco
 monitor failure, or unrecovered headroom exits 75 with progress saved for manual
 resume. Every sample, policy, pressure transition and stop/retry decision is recorded
 in `provenance/plan-judge-memory-<id>.jsonl`; stage metadata links to that trace.
+The versioned policy metadata records every effective detection threshold.
 This protects unattended operation; fallback can extend runtime and cannot
 promise completion by morning.
