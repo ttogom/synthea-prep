@@ -73,7 +73,7 @@ AGENTS.md
 
 med_copilot/docs/evaluation_literature_review.md
 
-# Keep run directories visible, exposing only approved results and provenance.
+# Keep run directories visible, exposing results, analysis, and provenance.
 # Other generated files (logs, checkpoints, launchers, monitors, PID files, etc.)
 # stay local. Existing tracked historical artifacts are unaffected.
 /experiments/output/*
@@ -82,6 +82,7 @@ med_copilot/docs/evaluation_literature_review.md
 !/experiments/output/*/results.jsonl
 !/experiments/output/*/run.json
 !/experiments/output/*/results_summary.html
+!/experiments/output/*/analysis/
 !/experiments/output/*/provenance/
 /experiments/output/*/provenance/*
 !/experiments/output/*/provenance/reported-usage-cost.json

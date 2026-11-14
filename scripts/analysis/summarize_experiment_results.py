@@ -24,24 +24,24 @@ SCORES = {
 }
 CONDITION_GROUPS = {
     "history": {
-        "chronic obstructive pulmonary disease": "COPD",
+        "chronic obstructive pulmonary disease": "Chronic obstructive pulmonary disease",
         "essential hypertension": "Essential hypertension",
     },
     "acute": {
-        "streptococcal sore throat": "Strep. sore throat",
+        "streptococcal sore throat": "Streptococcal sore throat",
         "acute viral pharyngitis": "Acute viral pharyngitis",
-        "acute bacterial sinusitis": "Acute bact. sinusitis",
+        "acute bacterial sinusitis": "Acute bacterial sinusitis",
         "acute infective cystitis": "Acute infective cystitis",
     },
     "control": {
-        "chronic congestive heart failure": "Chronic CHF",
+        "chronic congestive heart failure": "Chronic congestive heart failure",
     },
 }
-VARIANT_SHORT_LABELS = {
-    "llm_only": "None",
-    "guidelines": "Guide.",
-    "patient_retrieval": "Patient",
-    "patient_retrieval_guidelines": "Both",
+CONDITION_VARIANT_LABELS = {
+    "llm_only": "Baseline",
+    "guidelines": "Guideline retrieval",
+    "patient_retrieval": "Similar-patient retrieval",
+    "patient_retrieval_guidelines": "Guideline and similar-patient retrieval",
 }
 
 
@@ -133,7 +133,8 @@ def select_best_variants(summary):
                 available = choices["biolord_mean"].dropna()
                 best_variant = available.idxmax() if not available.empty else None
                 row = choices.loc[best_variant].to_dict() if best_variant is not None else dict.fromkeys(choices.columns)
-                row["best_variant_label"] = row.pop("variant_label")
+                row.pop("variant_label")
+                row["best_variant_label"] = CONDITION_VARIANT_LABELS.get(best_variant)
                 row.update(bin=group, condition_label=condition, model=model, model_label=model_label,
                            best_variant=best_variant)
                 rows.append(row)
@@ -187,18 +188,18 @@ def render_diagnosis_table(summary):
 def render_condition_table(summary):
     summary = summary.sort_index()
     lines = [
-        r"\begin{table}[t]",
+        r"\begin{table*}[t]",
         r"\centering",
-        r"\fontsize{8}{9}\selectfont",
-        r"\setlength{\tabcolsep}{0.3pt}",
-        r"\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}"
-        r"p{0.128\columnwidth}p{0.195\columnwidth}p{0.155\columnwidth}p{0.13\columnwidth}rrr@{}}",
+        r"\small",
+        r"\setlength{\tabcolsep}{1.5pt}",
+        r"\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}"
+        r"p{0.075\textwidth}p{0.225\textwidth}p{0.15\textwidth}p{0.225\textwidth}rrr@{}}",
         r"\toprule",
         r"\multirow{2}{*}{Group} & \multirow{2}{*}{Condition} & \multirow{2}{*}{Model} & "
-        r"\multirow{2}{*}{\shortstack{Best\\Variant}} & \multirow{2}{*}{n} & "
+        r"\multirow{2}{*}{Best Variant} & \multirow{2}{*}{n} & "
         r"\multicolumn{2}{c}{\textbf{Diagnosis Scores}} \\",
         r"\cmidrule(lr){6-7}",
-        r" & & & & & BioLORD & \shortstack{BERT\\Score-F1} \\",
+        r" & & & & & BioLORD & BERTScore-F1 \\",
         r"\midrule",
     ]
     for group, conditions in CONDITION_GROUPS.items():
@@ -209,11 +210,10 @@ def render_condition_table(summary):
                 group_cell = ""
                 condition_cell = ""
                 if condition_index == 0 and model_index == 0:
-                    group_cell = rf"\multirow[t]{{{len(conditions) * len(MODEL_LABELS)}}}{{0.128\columnwidth}}{{{group.title()}}}"
+                    group_cell = rf"\multirow[t]{{{len(conditions) * len(MODEL_LABELS)}}}{{0.075\textwidth}}{{{group.title()}}}"
                 if model_index == 0:
-                    label = condition_label.replace("hypertension", r"hyper\-tension")
-                    condition_cell = rf"\multirow[t]{{{len(MODEL_LABELS)}}}{{0.195\columnwidth}}{{{label}}}"
-                variant = VARIANT_SHORT_LABELS.get(row["best_variant"], "--")
+                    condition_cell = rf"\multirow[t]{{{len(MODEL_LABELS)}}}{{0.225\textwidth}}{{{condition_label}}}"
+                variant = CONDITION_VARIANT_LABELS.get(row["best_variant"], "--")
                 n = "--" if pd.isna(row["n_total"]) else str(int(row["n_total"]))
                 values = [_format_mean(row[metric], best_means[metric]) for metric in ("biolord_mean", "bertf1_mean")]
                 cells = [group_cell, condition_cell, model_label, variant, n, *values]
@@ -229,9 +229,8 @@ def render_condition_table(summary):
         r"the variant with the highest mean BioLORD is shown.}",
         r"\label{tab:diagnosis_by_condition}",
         r"\par\smallskip",
-        r"{\scriptsize None: no retrieval; Guide.: guidelines; Patient: similar-patient retrieval; "
-        r"Both: both sources. Bold marks the highest displayed score per condition.\par}",
-        r"\end{table}",
+        r"{\scriptsize Bold marks the highest displayed score per condition.\par}",
+        r"\end{table*}",
     ])
     return "\n".join(lines) + "\n"
 
