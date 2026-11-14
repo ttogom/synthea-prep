@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from contextvars import copy_context
 from copy import deepcopy
 import hashlib
+from itertools import islice
 import json
 import math
 from numbers import Real
@@ -80,6 +81,41 @@ def _outputs(record):
         yield None, None, record
 
 
+class _SavedResults:
+    """Replay a validated file without retaining the decoded cohort.
+
+    The run lock excludes cooperating writers. Identity checks and a streaming
+    digest also reject edits by other writers between validation and export.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self._signature = self._stat_signature()
+        self._sha256 = None
+
+    def _stat_signature(self):
+        stat = self.path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    def assert_unchanged(self):
+        if self._stat_signature() != self._signature:
+            raise ValueError("Saved results changed after validation; rerun before judging")
+
+    def __iter__(self):
+        self.assert_unchanged()
+        digest = hashlib.sha256()
+        with self.path.open(encoding="utf-8", newline="") as handle:
+            for line in handle:
+                digest.update(line.encode("utf-8"))
+                if line.strip():
+                    yield _read_object(line)
+        self.assert_unchanged()
+        checksum = digest.hexdigest()
+        if self._sha256 is not None and checksum != self._sha256:
+            raise ValueError("Saved results changed after validation; rerun before judging")
+        self._sha256 = checksum
+
+
 def _records(run_dir, metadata, scorer):
     if metadata.get("status") not in ("completed", "completed_with_errors"):
         raise ValueError("Generation must finish before Plan evaluation")
@@ -88,14 +124,15 @@ def _records(run_dir, metadata, scorer):
         raise ValueError("The scorer's cohort does not match the run's selected_patient_ids")
     if len(set(selected)) != len(selected):
         raise ValueError("selected_patient_ids contains duplicate patients")
-    with (run_dir / "results.jsonl").open(encoding="utf-8") as handle:
-        records = [_read_object(line) for line in handle if line.strip()]
-    ids = [record.get("id") for record in records]
-    if len(ids) != len(selected) or set(ids) != set(selected) or len(set(ids)) != len(ids):
-        raise ValueError("Saved results must contain every selected patient exactly once")
+    records = _SavedResults(run_dir / "results.jsonl")
+    selected_ids, seen = set(selected), set()
     expected_models = metadata.get("assessment_plan_models", {}).get("selected_models")
     expected_variants = metadata.get("experiment", {}).get("selected_variants")
     for record in records:
+        patient_id = record.get("id")
+        if not isinstance(patient_id, str) or patient_id not in selected_ids or patient_id in seen:
+            raise ValueError("Saved results must contain every selected patient exactly once")
+        seen.add(patient_id)
         if record.get("status") not in ("completed", "failed_incomplete"):
             raise ValueError(f"Generation is incomplete for patient {record['id']}")
         if "variants" in record and expected_variants and set(record["variants"]) != set(expected_variants):
@@ -131,6 +168,8 @@ def _records(run_dir, metadata, scorer):
         if expected_models and any(None not in values and set(values) != set(expected_models)
                                    for values in groups.values()):
             raise ValueError("Saved generation models do not match the recorded experiment")
+    if seen != selected_ids:
+        raise ValueError("Saved results must contain every selected patient exactly once")
     return records
 
 
@@ -302,16 +341,22 @@ def _jobs(records, scorer, judge, changes):
                     yield record["id"], expected, condition, patient
 
 
-def _write_results(run_dir, records):
+def _write_results(run_dir, records, *, changes=None, source=None):
     temporary = run_dir / ".results.jsonl.tmp"
     try:
         with temporary.open("w", encoding="utf-8") as handle:
             for record in records:
                 handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, run_dir / "results.jsonl")
-        _fsync_directory(run_dir)
+                # Release the writer's reference before the next window loads.
+                del record
+            if changes is None or changes["any"]:
+                handle.flush()
+                os.fsync(handle.fileno())
+        if changes is None or changes["any"]:
+            if source is not None:
+                source.assert_unchanged()
+            os.replace(temporary, run_dir / "results.jsonl")
+            _fsync_directory(run_dir)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -332,8 +377,7 @@ def _run_job(run_file, judges, patient_id, entry, condition, patient):
         return result
 
 
-def _parallel(jobs, judges, run_file, concurrency, stop_requested=None):
-    executor = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="plan-judge")
+def _parallel(jobs, judges, run_file, concurrency, stop_requested=None, *, executor):
     pending = set()
     iterator = iter(jobs)
     exhausted = False
@@ -360,7 +404,11 @@ def _parallel(jobs, judges, run_file, concurrency, stop_requested=None):
             future.cancel()
         # Running requests save replies in the cache before we export any shared
         # entries. A future exception or Ctrl-C stops new work, not durable saves.
-        executor.shutdown(wait=True, cancel_futures=True)
+        if pending:
+            wait(pending)
+        # A stopped jobs generator can otherwise retain its current patient
+        # through an exception traceback while the unchanged tail is copied.
+        iterator.close()
 
 
 def _counts(records):
@@ -369,10 +417,36 @@ def _counts(records):
         for _, _, output in _outputs(record):
             if output.get("status") != "completed":
                 continue
-            for entry in output.get("evaluation") or []:
-                status = entry.get("plan_correctness", {}).get("status", "pending")
+            for entry in output.get("evaluation") or ({}, {}, {}):
+                plan = entry.get("plan_correctness")
+                status = plan.get("status", "pending") if isinstance(plan, dict) else "pending"
+                if not isinstance(status, str):
+                    status = "pending"
                 counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _evaluated_records(records, scorer, judges, run_file, concurrency, stop_requested, state, executor):
+    """Drain two patients at a time, then export them before loading the next two.
+
+    A stopped window is exported only after its workers finish. The untouched
+    tail is copied as well; failure before replacement leaves the original file
+    intact, with durable scalar replies available for reconstruction on restart.
+    """
+    iterator = iter(records)
+    while batch := list(islice(iterator, 2)):
+        if state["interrupted"] is None:
+            try:
+                _parallel(_jobs(batch, scorer, judges.plan_judge, state), judges, run_file,
+                          concurrency, stop_requested, executor=executor)
+            except BaseException as exc:
+                state["interrupted"] = exc
+        for record in batch:
+            for status, count in _counts((record,)).items():
+                state["counts"][status] = state["counts"].get(status, 0) + count
+            yield record
+            del record
+        batch.clear()
 
 
 def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, context_length=None,
@@ -412,6 +486,7 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
                 previous["context_length"] = previous_settings["context_length"]
             history = [*history, previous]
         runtime_provenance = runtime_verifier() if runtime_verifier is not None else None
+        records.assert_unchanged()
         run_file = RunFile(run_dir, metadata)
         run_file.redact = models.redact
         def complete(model, messages):
@@ -442,16 +517,16 @@ def resume_plan_evaluation(run_dir, scorer, models, *, root, concurrency=2, cont
         if guard_metadata is not None:
             stage["memory_guard"] = deepcopy(guard_metadata)
         run_file.update(plan_evaluation=stage, plan_evaluation_history=history)
-        interrupted = None
-        changes = {"any": False}
+        changes = {"any": False, "interrupted": None, "counts": _counts(())}
         try:
-            _parallel(_jobs(records, scorer, judge, changes), judges, run_file, concurrency, stop_requested)
-        except BaseException as exc:
-            interrupted = exc
-        try:
-            if changes["any"]:
-                _write_results(run_dir, records)
-            counts = _counts(records)
+            # One executor for the invocation; only two decoded patients are
+            # resident, regardless of cohort size or the completed prefix.
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="plan-judge") as executor:
+                _write_results(run_dir, _evaluated_records(
+                    records, scorer, judges, run_file, concurrency, stop_requested, changes, executor),
+                    changes=changes, source=records)
+            interrupted = changes["interrupted"]
+            counts = changes["counts"]
             stage.update(status=("interrupted" if isinstance(interrupted, KeyboardInterrupt)
                                  else "failed_incomplete" if interrupted is not None
                                  or any(counts.get(key, 0) for key in ("pending", "error", "interrupted"))

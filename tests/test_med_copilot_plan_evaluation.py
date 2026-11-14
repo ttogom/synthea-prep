@@ -1,7 +1,8 @@
 """Offline regression tests for the independently resumable Plan-only stage."""
 
 from copy import deepcopy
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+import gc
 import hashlib
 import json
 from pathlib import Path
@@ -11,6 +12,7 @@ from threading import Event, Lock
 import time
 from types import SimpleNamespace
 import unittest
+import weakref
 from unittest.mock import patch
 
 import nltk
@@ -124,6 +126,23 @@ class PlanStageTests(unittest.TestCase):
         return stage.resume_plan_evaluation(self.run_dir, self.scorer, models,
                                              root=self.root, **kwargs)
 
+    @contextmanager
+    def result_replacements(self, *, fail=False, captured=None):
+        """Observe the durable commit boundary rather than the streaming writer."""
+        replace = stage.os.replace
+        replacements = []
+        def observed(source, destination):
+            if Path(destination).resolve() == (self.run_dir / "results.jsonl").resolve():
+                replacements.append((source, destination))
+                if captured is not None:
+                    with Path(source).open(encoding="utf-8") as handle:
+                        captured.extend(json.loads(line) for line in handle if line.strip())
+                if fail:
+                    raise OSError("disk full")
+            return replace(source, destination)
+        with patch.object(stage.os, "replace", side_effect=observed):
+            yield replacements
+
     def entries(self, records):
         return [entry for row in records for variant in row["variants"].values()
                 for output in variant["assessment_plans"].values() for entry in output["evaluation"]]
@@ -172,7 +191,7 @@ class PlanStageTests(unittest.TestCase):
         self.metadata["evaluation"]["correctness"]["plan"]["rubric_sha256"] = "old-generation-rubric"
         self.write()
         original = (self.run_dir / "results.jsonl").read_bytes()
-        with patch.object(stage, "_write_results", side_effect=OSError("disk full")), self.assertRaises(OSError):
+        with self.result_replacements(fail=True), self.assertRaises(OSError):
             self.run_stage()
         metadata, _ = self.saved()
         self.assertIn("protocol", metadata["plan_evaluation"])
@@ -367,14 +386,17 @@ class PlanStageTests(unittest.TestCase):
         self.assertEqual(models.maximum, 2)
 
     def test_export_happens_once_and_a_completed_resume_does_not_rewrite_results(self):
-        with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+        path = self.run_dir / "results.jsonl"
+        with self.result_replacements() as replacements:
             self.run_stage()
-            self.assertEqual(write.call_count, 1)
-            write.reset_mock()
+            self.assertEqual(len(replacements), 1)
+            replacements.clear()
+            before, timestamp = path.read_bytes(), path.stat().st_mtime_ns
             models = FakeModels()
             self.run_stage(models)
             self.assertEqual(models.requests, [])
-            write.assert_not_called()
+            self.assertEqual(replacements, [])
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), (before, timestamp))
 
     def test_bundled_extras_are_scored_and_resume_without_calls_or_result_writes(self):
         for row in self.records:
@@ -395,8 +417,9 @@ class PlanStageTests(unittest.TestCase):
             self.assertEqual((plan["status"], plan["unsupported_extra_count"], plan["deduction"], plan["score"]),
                              ("scored", 2, 1.0, 0.0))
         second = FakeModels()
-        with patch.object(stage, "_write_results", side_effect=AssertionError("completed results rewritten")):
+        with self.result_replacements() as replacements:
             self.run_stage(second)
+        self.assertEqual(replacements, [])
         self.assertEqual(second.requests, [])
 
     def test_zero_coverage_is_complete_and_a_resume_preserves_the_export_without_calls(self):
@@ -418,16 +441,16 @@ class PlanStageTests(unittest.TestCase):
                              {k: v for k, v in actual.items() if k != "plan_correctness"})
         results = (self.run_dir / "results.jsonl").read_bytes()
         cache = (self.run_dir / "judge_responses.jsonl").read_bytes()
-        with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+        with self.result_replacements() as replacements:
             resumed = self.run_stage(FakeModels())
             self.assertEqual((resumed.calls, resumed.cache_hits), (0, 0))
-            write.assert_not_called()
+            self.assertEqual(replacements, [])
         self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), results)
         self.assertEqual((self.run_dir / "judge_responses.jsonl").read_bytes(), cache)
 
     def test_zero_coverage_survives_a_crash_before_export_using_only_action_cache(self):
         original = (self.run_dir / "results.jsonl").read_bytes()
-        with patch.object(stage, "_write_results", side_effect=OSError("disk full")), self.assertRaises(OSError):
+        with self.result_replacements(fail=True), self.assertRaises(OSError):
             self.run_stage(FakeModels(lambda model, messages: '{"credit": 0}'))
         self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original)
         self.assertEqual(len((self.run_dir / "judge_responses.jsonl").read_text().splitlines()), 9)
@@ -461,10 +484,10 @@ class PlanStageTests(unittest.TestCase):
                 self.metadata, self.records = deepcopy(metadata), deepcopy(records)
                 tamper(self.entries(self.records)[0]["plan_correctness"])
                 self.write()
-                with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+                with self.result_replacements() as replacements:
                     judges = self.run_stage(FakeModels())
                     self.assertEqual((judges.calls, judges.cache_hits), (0, 1))
-                    write.assert_called_once()
+                    self.assertEqual(len(replacements), 1)
                 self.assertEqual(self.saved()[1], records)
 
     def test_legacy_zero_score_with_measured_extras_remains_reusable(self):
@@ -480,10 +503,10 @@ class PlanStageTests(unittest.TestCase):
         plan.update(reason=None, unsupported_extra_count=1, deduction=0.5)
         self.write()
         before = (self.run_dir / "results.jsonl").read_bytes()
-        with patch.object(stage, "_write_results", wraps=stage._write_results) as write:
+        with self.result_replacements() as replacements:
             judges = self.run_stage(FakeModels())
             self.assertEqual((judges.calls, judges.cache_hits), (0, 0))
-            write.assert_not_called()
+            self.assertEqual(replacements, [])
         self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), before)
 
     def test_existing_exact_pending_entries_are_exported_after_judging(self):
@@ -496,7 +519,7 @@ class PlanStageTests(unittest.TestCase):
     def test_hard_crash_before_export_reconstructs_from_durable_responses_without_calls(self):
         original = (self.run_dir / "results.jsonl").read_bytes()
         first = FakeModels()
-        with patch.object(stage, "_write_results", side_effect=OSError("disk full")), self.assertRaises(OSError):
+        with self.result_replacements(fail=True), self.assertRaises(OSError):
             self.run_stage(first)
         self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original)
         self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
@@ -530,13 +553,8 @@ class PlanStageTests(unittest.TestCase):
             return json.dumps({"unsupported_extra_count": 2 if "Reference action 2" in prompt else 0})
 
         expected = []
-        def fail_export(run_dir, records):
-            expected.extend(deepcopy(records))
-            raise OSError("disk full")
-
         with patch.object(Path, "read_text", no_whole_results_read):
-            with patch.object(stage, "_write_results", side_effect=fail_export), \
-                    self.assertRaises(OSError):
+            with self.result_replacements(fail=True, captured=expected), self.assertRaises(OSError):
                 self.run_stage(FakeModels(reply), concurrency=1)
             self.assertEqual(path.read_bytes(), original)
             replies = (self.run_dir / "judge_responses.jsonl").read_bytes()
@@ -626,7 +644,7 @@ class PlanStageTests(unittest.TestCase):
         self.write()
         original_results = (self.run_dir / "results.jsonl").read_bytes()
         first = FakeModels()
-        with patch.object(stage, "_write_results", side_effect=OSError("export interrupted")), self.assertRaises(OSError):
+        with self.result_replacements(fail=True), self.assertRaises(OSError):
             self.run_stage(first)
         self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), original_results)
         cache = (self.run_dir / "judge_responses.jsonl").read_bytes()
@@ -890,6 +908,246 @@ class PlanStageTests(unittest.TestCase):
                 if path.exists():
                     self.assertNotIn("test-private-key", path.read_text())
             self.assertIn("[REDACTED]", (self.run_dir / "results.jsonl").read_text())
+
+    def test_last_patient_validation_finishes_before_runtime_cache_or_stage_mutation(self):
+        original = deepcopy(self.records)
+        path = self.run_dir / "results.jsonl"
+        cache = self.run_dir / "judge_responses.jsonl"
+        for mutation in ("missing", "duplicate", "invalid slot", "incomplete patient"):
+            with self.subTest(mutation=mutation):
+                self.records = deepcopy(original)
+                if mutation == "missing":
+                    self.records.pop()
+                elif mutation == "duplicate":
+                    self.records[-1]["id"] = self.records[0]["id"]
+                elif mutation == "invalid slot":
+                    self.records[-1]["variants"]["llm_only"]["assessment_plans"]["generator"]["predictions"] = []
+                else:
+                    self.records[-1]["status"] = "running"
+                self.write()
+                cache.write_bytes(b'{"torn":')
+                before = {file: file.read_bytes() for file in (path, cache, self.run_dir / "run.json")}
+                verifier = unittest.mock.Mock()
+                models = FakeModels()
+                with patch("scripts.med_copilot_judges.JudgeCache", side_effect=AssertionError("cache opened")), \
+                        self.assertRaises(ValueError):
+                    self.run_stage(models, runtime_verifier=verifier)
+                verifier.assert_not_called()
+                self.assertEqual(models.requests, [])
+                self.assertEqual({file: file.read_bytes() for file in before}, before)
+
+    def test_middle_patient_stop_preserves_tail_counts_and_every_durable_reply_on_restart(self):
+        before = deepcopy(self.records)
+        stop = Event()
+        def reply(model, messages):
+            if "S 1" in messages[0]["content"]:
+                stop.set()
+                return '{"credit": 1}'
+        models = FakeModels(reply)
+        with self.assertRaises(stage.MemoryPressureStop):
+            self.run_stage(models, concurrency=1, stop_requested=stop.is_set)
+        metadata, records = self.saved()
+        self.assertEqual([record["id"] for record in records], [record["id"] for record in before])
+        self.assertEqual(records[-1], before[-1])
+        self.assertEqual(sum(metadata["plan_evaluation"]["counts"].values()), 9)
+        self.assertGreaterEqual(metadata["plan_evaluation"]["counts"]["pending"], 3)
+        for original, actual in zip(self.entries(before), self.entries(records)):
+            self.assertEqual({key: value for key, value in original.items() if key != "plan_correctness"},
+                             {key: value for key, value in actual.items() if key != "plan_correctness"})
+        cache = self.run_dir / "judge_responses.jsonl"
+        durable = [json.loads(line) for line in cache.read_text().splitlines()]
+        self.assertTrue(durable)
+        self.assertTrue(all(record["valid"] for record in durable))
+        durable_keys = {record["key"] for record in durable}
+        resumed = FakeModels()
+        judges = self.run_stage(resumed, concurrency=1)
+        self.assertEqual(metadata["plan_evaluation"]["status"], "interrupted")
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+        self.assertFalse(durable_keys & {stage.request_key(model, messages) for model, messages in resumed.requests})
+        self.assertEqual(len(durable) + len(resumed.requests), 18)
+        self.assertGreaterEqual(judges.cache_hits, 1)  # Partially finished middle-patient Plan.
+
+    def test_stop_before_first_patient_retains_all_rows_and_full_pending_counts(self):
+        original = deepcopy(self.records)
+        for saved_state in ("pending", "missing evaluation", "missing correctness", "invalid status"):
+            with self.subTest(saved_state=saved_state):
+                self.records = deepcopy(original)
+                if saved_state == "missing evaluation":
+                    for record in self.records:
+                        record["variants"]["llm_only"]["assessment_plans"]["generator"]["evaluation"] = None
+                elif saved_state == "missing correctness":
+                    for entry in self.entries(self.records):
+                        entry["plan_correctness"] = None
+                elif saved_state == "invalid status":
+                    for entry in self.entries(self.records):
+                        entry["plan_correctness"]["status"] = []
+                self.write()
+                (self.run_dir / "judge_responses.jsonl").unlink(missing_ok=True)
+                before = (self.run_dir / "results.jsonl").read_bytes()
+                models = FakeModels()
+                with self.assertRaises(stage.MemoryPressureStop):
+                    self.run_stage(models, stop_requested=lambda: True)
+                metadata, records = self.saved()
+                self.assertEqual(models.requests, [])
+                self.assertEqual((self.run_dir / "results.jsonl").read_bytes(), before)
+                self.assertEqual(records, self.records)
+                self.assertEqual(metadata["plan_evaluation"]["counts"]["pending"], 9)
+                self.run_stage()
+                self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_mid_export_write_failure_preserves_source_and_reuses_finished_window_after_restart(self):
+        path = self.run_dir / "results.jsonl"
+        before = path.read_bytes()
+        dumps = stage.json.dumps
+        def fail_second_patient(value, *args, **kwargs):
+            if isinstance(value, dict) and value.get("id") == "patient-1" and "variants" in value:
+                raise OSError("result write failed")
+            return dumps(value, *args, **kwargs)
+        with patch.object(stage.json, "dumps", side_effect=fail_second_patient), \
+                self.assertRaisesRegex(OSError, "result write failed"):
+            self.run_stage(concurrency=1)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse((self.run_dir / ".results.jsonl.tmp").exists())
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
+        durable = [json.loads(line) for line in (self.run_dir / "judge_responses.jsonl").read_text().splitlines()]
+        self.assertTrue(durable)
+        self.assertLess(len(durable), 18)
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1)
+        self.assertFalse({record["key"] for record in durable} & {
+            stage.request_key(model, messages) for model, messages in resumed.requests})
+        self.assertEqual(len(durable) + len(resumed.requests), 18)
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_stale_partial_results_temp_is_ignored_and_removed_on_successful_restart(self):
+        temporary = self.run_dir / ".results.jsonl.tmp"
+        temporary.write_text('{"id": "lost-patient", "truncated":')
+        self.run_stage()
+        metadata, records = self.saved()
+        self.assertEqual([record["id"] for record in records], [patient["id"] for patient in self.patients])
+        self.assertEqual(metadata["plan_evaluation"]["counts"]["scored"], 9)
+        self.assertFalse(temporary.exists())
+
+    def test_results_changed_after_validation_are_not_judged_or_overwritten(self):
+        path = self.run_dir / "results.jsonl"
+        changed = deepcopy(self.records)
+        changed[-1]["components"]["evidence"] = "external modification after validation"
+        changed_bytes = "".join(json.dumps(record) + "\n" for record in changed).encode()
+        def verifier():
+            path.write_bytes(changed_bytes)
+            return {"file": "provenance/verified.json"}
+        models = FakeModels()
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.run_stage(models, runtime_verifier=verifier)
+        self.assertEqual(models.requests, [])
+        self.assertEqual(path.read_bytes(), changed_bytes)
+        self.assertFalse((self.run_dir / "judge_responses.jsonl").exists())
+
+    def test_source_changed_while_flushing_temp_cannot_be_replaced(self):
+        path = self.run_dir / "results.jsonl"
+        original = path.read_bytes()
+        changed = original + b"\n"
+        fsync = stage.os.fsync
+        changed_source = Event()
+        def mutate_source(descriptor):
+            fsync(descriptor)
+            temporary = self.run_dir / ".results.jsonl.tmp"
+            if not changed_source.is_set() and temporary.exists():
+                descriptor_stat, temporary_stat = stage.os.fstat(descriptor), temporary.stat()
+                if (descriptor_stat.st_dev, descriptor_stat.st_ino) == (temporary_stat.st_dev, temporary_stat.st_ino):
+                    path.write_bytes(changed)
+                    changed_source.set()
+        with patch.object(stage.os, "fsync", side_effect=mutate_source), \
+                self.assertRaisesRegex(ValueError, "changed"):
+            self.run_stage(concurrency=1)
+        self.assertTrue(changed_source.is_set())
+        self.assertEqual(path.read_bytes(), changed)
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1)
+        self.assertEqual(resumed.requests, [])
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_results_changed_during_judging_do_not_replace_source_and_saved_replies_remain_reusable(self):
+        path = self.run_dir / "results.jsonl"
+        changed = deepcopy(self.records)
+        changed[0]["components"]["evidence"] = "external modification during judging"
+        changed_bytes = "".join(json.dumps(record) + "\n" for record in changed).encode()
+        modified = Event()
+        def reply(model, messages):
+            if not modified.is_set():
+                modified.set()
+                path.write_bytes(changed_bytes)
+        models = FakeModels(reply)
+        with self.assertRaises(ValueError):
+            self.run_stage(models, concurrency=1)
+        self.assertEqual(path.read_bytes(), changed_bytes)
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "failed_incomplete")
+        cache = self.run_dir / "judge_responses.jsonl"
+        durable = [json.loads(line) for line in cache.read_text().splitlines()]
+        self.assertTrue(durable)
+        resumed = FakeModels()
+        self.run_stage(resumed, concurrency=1)
+        self.assertEqual(len(durable) + len(resumed.requests), 18)
+        self.assertEqual(self.saved()[1][0]["components"], changed[0]["components"])
+        self.assertEqual(self.saved()[0]["plan_evaluation"]["status"], "completed")
+
+    def test_decoded_patient_working_set_is_bounded_during_model_requests(self):
+        # Twelve patients make an accidental all-cohort list fail decisively.
+        template = self.records[0]
+        self.patients = [{"id": f"patient-{number}", "subjective": f"S {number}", "objective": f"O {number}"}
+                         for number in range(12)]
+        self.labels = [{"id": patient["id"], "condition": "reference_condition", "plan": ["Reference action"],
+                        "has_presenting_evidence": True} for patient in self.patients]
+        self.records = [deepcopy(template) for _ in self.patients]
+        for record, patient in zip(self.records, self.patients):
+            record["id"] = patient["id"]
+        self.input_path.write_text("".join(json.dumps(row) + "\n" for row in self.patients))
+        self.labels_path.write_text("".join(json.dumps(row) + "\n" for row in self.labels))
+        self.metadata["input"]["sha256"] = hashlib.sha256(self.input_path.read_bytes()).hexdigest()
+        self.metadata["evaluation"].update(
+            labels_sha256=hashlib.sha256(self.labels_path.read_bytes()).hexdigest(),
+            selected_patient_ids=[patient["id"] for patient in self.patients])
+        self.scorer = PatientScorer(self.labels_path, self.patients, False, metric_evaluator=object())
+        self.write()
+        original = stage._read_object
+        tracking = Lock()
+        class TrackedPatient(dict):
+            pass
+        for stopping in (False, True):
+            with self.subTest(stopping=stopping):
+                self.write()
+                (self.run_dir / "judge_responses.jsonl").unlink(missing_ok=True)
+                live, observed, parsed = {}, [], []
+                stop = Event()
+                def read_object(text):
+                    value = original(text)
+                    if "variants" in value and "id" in value:
+                        value = TrackedPatient(value)
+                        with tracking:
+                            live[id(value)] = weakref.ref(value)
+                            parsed.append(sum(reference() is not None for reference in live.values()))
+                    return value
+                def reply(model, messages):
+                    gc.collect()
+                    with tracking:
+                        observed.append(sum(reference() is not None for reference in live.values()))
+                    if stopping:
+                        stop.set()
+                    return '{"credit": 1}' if "<reference_action>" in messages[0]["content"] else None
+                with patch.object(stage, "_read_object", side_effect=read_object):
+                    if stopping:
+                        with self.assertRaises(stage.MemoryPressureStop):
+                            self.run_stage(FakeModels(reply), concurrency=2, stop_requested=stop.is_set)
+                    else:
+                        self.run_stage(FakeModels(reply), concurrency=2)
+                self.assertTrue(observed)
+                self.assertLessEqual(max(observed), 2)
+                self.assertLessEqual(max(parsed), 2)  # Includes copying the untouched tail after a stop.
+                self.assertEqual(len(self.saved()[1]), 12)
+                self.assertEqual(sum(self.saved()[0]["plan_evaluation"]["counts"].values()), 36)
+                if not stopping:
+                    self.assertEqual(self.saved()[0]["plan_evaluation"]["counts"]["scored"], 36)
 
     def test_lock_excludes_a_second_owner_and_remains_reusable_after_release(self):
         with exclusive_run_lock(self.run_dir):
