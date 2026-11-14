@@ -39,6 +39,21 @@ has no live members. Genuine or unverifiable failures retain ownership for clean
 Completed replies are durably saved independently of the guard. Even after a
 crash, they remain reusable; a few in-flight requests may need repeating.
 
+Reply lookup uses a disposable SQLite file in the system temporary directory,
+with a 2 MiB page-cache target and memory mapping disabled. It stores request
+keys, byte offsets, lengths and checksums, rather than decoded reply payloads.
+Each hit reads one audit record on demand and rechecks its checksum and parser.
+Opening the cache still streams and validates every complete JSONL line; it
+rebuilds the index, repairs only an unterminated tail after validation, and
+fsyncs recovered evidence before reuse. The last valid duplicate wins.
+
+JSONL remains the sole durable authority: appending/fsyncing precedes index
+publication. The derived index does not need durable commits and is never reused
+on restart. An index/write failure or interrupted append stops that cache owner
+from publishing or appending more replies; a fresh owner reconstructs progress
+from the audit. Normal cleanup deletes the temporary index. Abrupt process exit
+can leave disposable scratch files, which are not used for recovery.
+
 The supervisor waits at most five minutes for 30 continuous normal seconds with
 no new swap-out and at least 1 GiB of reclaimable reserve when available, then
 retries once. Both client concurrency and native server slots fall from more

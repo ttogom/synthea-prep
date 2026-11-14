@@ -7,11 +7,15 @@ BioLordSanityOrderingTests uses the pinned BioLORD-2023 when it is already cache
 """
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 import re
+import sqlite3
+import subprocess
 import sys
+import tracemalloc
 from tempfile import TemporaryDirectory
 from threading import Barrier, Event
 from types import ModuleType, SimpleNamespace
@@ -764,6 +768,159 @@ class CompactJudgeCacheTests(JudgeTestCase):
         self.assertEqual((again.requests, resumed.cache_hits), ([], 1))
         self.assertEqual(len(fake.requests), 1)
         self.assertEqual(len(self.cache.read_text().splitlines()), 2)
+
+
+class DiskBackedJudgeCacheTests(JudgeTestCase):
+    def test_index_creation_failure_is_a_filesystem_error_and_preserves_audit(self):
+        original = b'{"key":"saved","valid":true,"content":"complete"}\n'
+        self.cache.write_bytes(original)
+        with patch("scripts.med_copilot_judges.sqlite3.connect", side_effect=sqlite3.OperationalError("no space")):
+            with self.assertRaises(OSError):
+                JudgeCache(self.cache)
+        self.assertEqual(self.cache.read_bytes(), original)
+
+    def test_index_failure_after_durable_append_is_recovered_without_repeating_reply(self):
+        cache = JudgeCache(self.cache)
+        entry = {"key": "saved", "valid": True, "content": '{"credit": 1}', "model_response": None}
+        with patch.object(cache, "_index_entry", side_effect=sqlite3.OperationalError("index full")):
+            with self.assertRaises(OSError):
+                cache.add(entry)
+        self.assertEqual(json.loads(self.cache.read_text()), entry)
+        self.assertEqual(len(cache), 0)
+        with self.assertRaises(OSError):
+            cache.get("saved")
+        with self.assertRaises(OSError):
+            cache.add({**entry, "key": "later"})
+        self.assertEqual(JudgeCache(self.cache).get("saved")["content"], entry["content"])
+        self.assertEqual(len(self.cache.read_text().splitlines()), 1)
+
+    def test_process_crash_between_audit_fsync_and_index_update_preserves_reply(self):
+        script = ("import os,sys; from scripts.med_copilot_judges import JudgeCache; "
+                  "cache=JudgeCache(sys.argv[1]); "
+                  "cache._index_entry=lambda *args: os._exit(17); "
+                  "cache.add({'key':'crashed','valid':True,'content':'saved'})")
+        result = subprocess.run([sys.executable, "-c", script, str(self.cache)], cwd=ROOT,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "TMPDIR": str(self.directory)},
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 17, result.stderr)
+        self.assertEqual(JudgeCache(self.cache).get("crashed"), {"content": "saved"})
+
+    def test_temporary_index_loss_is_transparent_and_get_loads_fresh_values(self):
+        cache = JudgeCache(self.cache)
+        cache.add({"key": "key", "valid": True, "content": "saved", "model_response": {"model": "original"}})
+        first = cache.get("key")
+        first["model_response"]["model"] = "changed by caller"
+        self.assertEqual(cache.get("key")["model_response"], {"model": "original"})
+        cache._cleanup()  # Delete the disposable SQLite file, retaining the audit.
+        self.assertEqual(JudgeCache(self.cache).get("key")["content"], "saved")
+
+    def test_closed_or_failed_index_never_becomes_a_cache_miss(self):
+        cache = JudgeCache(self.cache)
+        cache.add({"key": "key", "valid": True, "content": "saved"})
+        cache._index.close()
+        with self.assertRaises(OSError):
+            cache.get("missing")
+        with self.assertRaises(OSError):
+            cache.add({"key": "another", "valid": True, "content": "saved"})
+        self.assertEqual(len(JudgeCache(self.cache)), 1)
+
+    def test_interrupted_index_publication_poison_owner_but_saved_reply_survives(self):
+        cache = JudgeCache(self.cache)
+        entry = {"key": "saved", "valid": True, "content": "completed"}
+        with patch.object(cache, "_index_entry", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            cache.add(entry)
+        with self.assertRaises(OSError):
+            cache.add({**entry, "key": "later"})
+        with self.assertRaises(OSError):
+            cache.get("saved")
+        self.assertEqual(JudgeCache(self.cache).get("saved"), {"content": "completed"})
+
+    def test_bad_keys_cannot_append_a_complete_unrecoverable_audit_line(self):
+        cache = JudgeCache(self.cache)
+        for entry in ({"valid": True}, {"key": 3, "valid": True}, {"key": [], "valid": True}, []):
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                cache.add(entry)
+        self.assertFalse(self.cache.exists())
+
+    def test_recovered_complete_lines_are_fsynced_before_becoming_reusable(self):
+        self.cache.write_text('{"key":"saved","valid":true,"content":"complete"}\n')
+        expected = self.cache.stat()
+        observed = []
+        original = os.fsync
+        def synchronize(fd):
+            stat = os.fstat(fd)
+            observed.append((stat.st_dev, stat.st_ino))
+            return original(fd)
+        with patch("scripts.med_copilot_judges.os.fsync", side_effect=synchronize):
+            cache = JudgeCache(self.cache)
+        self.assertIn((expected.st_dev, expected.st_ino), observed)
+        self.assertEqual(cache.get("saved"), {"content": "complete"})
+
+    def test_audit_truncation_replacement_and_same_length_edit_are_not_silent_hits(self):
+        entry = {"key": "key", "valid": True, "content": "saved"}
+        for mutation in ("truncate", "replace", "edit", "remove"):
+            with self.subTest(mutation=mutation):
+                self.cache.write_text(json.dumps(entry) + "\n")
+                cache = JudgeCache(self.cache)
+                if mutation == "truncate":
+                    self.cache.write_bytes(b"")
+                elif mutation == "replace":
+                    replacement = self.cache.with_suffix(".replacement")
+                    replacement.write_text(json.dumps(entry) + "\n")
+                    replacement.replace(self.cache)
+                elif mutation == "edit":
+                    self.cache.write_text(json.dumps({**entry, "content": "other"}) + "\n")
+                else:
+                    self.cache.unlink()
+                with self.assertRaises(OSError):
+                    cache.get("key")
+
+    def test_damaged_index_offsets_fail_closed_and_rebuild_from_audit(self):
+        for offset, length in ((-1, 20), (0, 10 ** 12), (0, 1), (1, 10)):
+            with self.subTest(offset=offset, length=length):
+                cache = JudgeCache(self.cache)
+                cache.add({"key": "saved", "valid": True, "content": "complete"})
+                with cache._index:
+                    cache._index.execute("UPDATE replies SET offset=?, length=? WHERE key='saved'", (offset, length))
+                with self.assertRaises(OSError):
+                    cache.get("saved")
+                self.assertEqual(JudgeCache(self.cache).get("saved"), {"content": "complete"})
+
+    def test_lookup_does_not_retain_payloads_as_cache_grows(self):
+        with self.cache.open("w") as handle:
+            for number in range(1000):
+                handle.write(json.dumps({"key": str(number), "valid": True, "content": "x" * 16384}) + "\n")
+        tracemalloc.start()
+        try:
+            cache = JudgeCache(self.cache)
+            retained, _ = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(retained, 2 * 1024 ** 2)  # Original dictionary retains >16MiB.
+        self.assertFalse(isinstance(cache.entries, dict))
+        self.assertEqual(len(cache), 1000)
+        self.assertEqual(cache.get("999"), {"content": "x" * 16384})
+        self.assertEqual(cache._index.execute("PRAGMA cache_size").fetchone()[0], -2048)
+        self.assertNotIn("content", [row[1] for row in cache._index.execute("PRAGMA table_info(replies)")])
+
+    def test_index_transaction_failure_does_not_repair_corrupt_complete_audit(self):
+        original = b'{"key":"saved","valid":true,"content":"ok"}\nnot JSON\n{"torn"'
+        self.cache.write_bytes(original)
+        with self.assertRaises(ValueError):
+            JudgeCache(self.cache)
+        self.assertEqual(self.cache.read_bytes(), original)
+
+    def test_binary_offsets_handle_unicode_and_last_valid_duplicate(self):
+        cache = JudgeCache(self.cache)
+        for entry in ({"key": "患者", "valid": True, "content": "初め"},
+                      {"key": "next", "valid": True, "content": "following"},
+                      {"key": "患者", "valid": True, "content": "最後"},
+                      {"key": "患者", "valid": False, "content": "invalid"}):
+            cache.add(entry)
+        for loaded in (cache, JudgeCache(self.cache)):
+            self.assertEqual(loaded.get("患者"), {"content": "最後"})
+            self.assertEqual(loaded.get("next"), {"content": "following"})
+            self.assertEqual(len(loaded), 2)
 
 
 class ResumeValidationTests(JudgeTestCase):

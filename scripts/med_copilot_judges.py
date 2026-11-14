@@ -16,6 +16,7 @@ evaluation never repeats them; malformed or refused replies stay in the file for
 auditing but are requested again.
 """
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 import hashlib
 import json
@@ -23,8 +24,11 @@ import math
 import os
 from pathlib import Path
 import re
+import sqlite3
+from tempfile import TemporaryDirectory
 from threading import Lock, RLock
 import time
+import weakref
 
 from med_copilot.prompts.correctness_judges import PLAN_ACTION_JUDGE_TEMPLATE, PLAN_EXTRAS_JUDGE_TEMPLATE
 from scripts.med_copilot_helpers import model_response_metadata, repo_path
@@ -252,74 +256,170 @@ class BioLordSimilarity:
         return cosine
 
 
-class JudgeCache:
-    """Append-only JSONL of completed judge calls, durable before each reply is used.
+def _close_judge_index(connection, directory):
+    try:
+        connection.close()
+    finally:
+        directory.cleanup()
 
-    Every reply is kept on disk for auditing. The in-memory lookup retains only
-    valid reply content, provider metadata and timing; parsers recheck each hit.
+
+class JudgeCache(Mapping):
+    """Durable JSONL replies with a disposable, disk-backed SQLite offset index.
+
+    Rebuilding on every open deliberately validates every complete audit line
+    and avoids a second persistent source of truth. SQLite retains only offsets
+    and checksums, with a 2 MiB page-cache target and no memory mapping. A crash
+    after audit fsync but before indexing is recovered by the next rebuild.
     """
 
     def __init__(self, path):
         self.path = Path(path).resolve()
-        self.entries = {}
         self._lock = RLock()
         self._write_error = None
-        if not self.path.exists():
-            return
-        complete_bytes = 0
-        torn_tail = False
-        with self.path.open("rb") as handle:
-            for number, line in enumerate(handle, 1):
-                # Do not decode a crash-truncated UTF-8 character in the tail.
-                if not line.endswith(b"\n"):
-                    torn_tail = True
-                    break
-                text = line.decode("utf-8")
-                if text.strip():
-                    entry = json.loads(text)
-                    if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
-                        raise ValueError(f"{self.path}:{number}: invalid judge response entry")
-                    self._remember(entry)
-                complete_bytes += len(line)
-        # Refuse corrupt complete lines without changing the input artifact.
-        if torn_tail:
+        self._identity = None
+        self._indexed_end = 0
+        # A real temporary file guarantees disk backing regardless of SQLite's
+        # compile-time TEMP_STORE setting. Never reuse scratch indexes on restart.
+        directory = TemporaryDirectory(prefix="medcopilot-judge-index-")
+        try:
+            self._index = sqlite3.connect(Path(directory.name) / "index.sqlite3", check_same_thread=False)
+        except BaseException as exc:
+            directory.cleanup()
+            if isinstance(exc, sqlite3.Error):
+                raise OSError("Could not create judge response index") from exc
+            raise
+        self._cleanup = weakref.finalize(self, _close_judge_index, self._index, directory)
+        try:
+            self._index.execute("PRAGMA cache_size=-2048")
+            self._index.execute("PRAGMA cache_spill=ON")
+            self._index.execute("PRAGMA mmap_size=0")
+            # Only the disposable index may lose buffered writes; JSONL fsync
+            # remains authoritative and rebuilds every index after a crash.
+            self._index.execute("PRAGMA synchronous=OFF")
+            self._index.execute("CREATE TABLE replies (key TEXT PRIMARY KEY, offset INTEGER, length INTEGER, sha256 TEXT)")
+            if not self.path.exists():
+                return
+            complete_bytes = 0
+            torn_tail = False
+            with self._index, self.path.open("rb") as handle:
+                stat = os.fstat(handle.fileno())
+                self._identity = (stat.st_dev, stat.st_ino)
+                for number, line in enumerate(handle, 1):
+                    if not line.endswith(b"\n"):
+                        torn_tail = True
+                        break
+                    if line.decode("utf-8").strip():
+                        entry = json.loads(line.decode("utf-8"))
+                        if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
+                            raise ValueError(f"{self.path}:{number}: invalid judge response entry")
+                        self._index_entry(entry, complete_bytes, line)
+                    complete_bytes += len(line)
+            # Validate ALL complete lines before repairing a crash-truncated tail.
+            # A complete line can survive a process crash that interrupted its
+            # writer before fsync. Make recovered evidence durable before use.
             with self.path.open("r+b") as handle:
-                handle.truncate(complete_bytes)
+                if torn_tail:
+                    handle.truncate(complete_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
             _fsync_directory(self.path.parent)
+            self._indexed_end = complete_bytes
+        except BaseException as exc:
+            self._cleanup()
+            if isinstance(exc, sqlite3.Error):
+                raise OSError("Could not build judge response index") from exc
+            raise
 
-    def _remember(self, entry):
-        if entry.get("valid") is True:
-            self.entries[entry["key"]] = {
-                field: entry[field] for field in ("content", "model_response", "elapsed_seconds")
-                if field in entry}
+    @property
+    def entries(self):
+        """Compatibility view; iterating it does not materialize reply payloads."""
+        return self
 
-    def get(self, key):
-        """The saved valid judgement for this request, or None to request it."""
+    def __len__(self):
         with self._lock:
-            if self._write_error is not None:
-                raise OSError("Judge response cache has a failed write; restart evaluation") from self._write_error
-            return self.entries.get(key)
+            return self._index.execute("SELECT count(*) FROM replies").fetchone()[0]
+
+    def __iter__(self):
+        with self._lock:
+            cursor = self._index.execute("SELECT key FROM replies")
+            try:
+                for row in cursor:
+                    yield row[0]
+            finally:
+                cursor.close()
+
+    def __getitem__(self, key):
+        entry = self.get(key)
+        if entry is None:
+            raise KeyError(key)
+        return entry
+
+    def _index_entry(self, entry, offset, line):
+        if entry.get("valid") is True:
+            self._index.execute("INSERT OR REPLACE INTO replies VALUES (?, ?, ?, ?)",
+                                (entry["key"], offset, len(line), hashlib.sha256(line).hexdigest()))
+
+    def _check_available(self):
+        if self._write_error is not None:
+            raise OSError("Judge response cache has a failed write; restart evaluation") from self._write_error
+        if self._identity is not None:
+            stat = self.path.stat()
+            if (stat.st_dev, stat.st_ino) != self._identity or stat.st_size < self._indexed_end:
+                raise OSError("Judge response audit changed; restart evaluation")
+
+    def get(self, key, default=None):
+        """Load one valid reply on demand; index/read errors never become misses."""
+        with self._lock:
+            try:
+                self._check_available()
+                row = self._index.execute("SELECT offset, length, sha256 FROM replies WHERE key=?", (key,)).fetchone()
+                if row is None:
+                    return default
+                offset, length, checksum = row
+                with self.path.open("rb") as handle:
+                    size = os.fstat(handle.fileno()).st_size
+                    if (type(offset) is not int or type(length) is not int or offset < 0
+                            or length <= 0 or offset + length > size):
+                        raise OSError("Judge response index offset is outside the audit")
+                    handle.seek(offset)
+                    # A damaged length must not cause a whole-file allocation.
+                    line = handle.readline(length)
+                if len(line) != length or hashlib.sha256(line).hexdigest() != checksum:
+                    raise OSError("Judge response audit/index mismatch; restart evaluation")
+                entry = json.loads(line.decode("utf-8"))
+                if not isinstance(entry, dict) or entry.get("key") != key or entry.get("valid") is not True:
+                    raise OSError("Judge response index refers to an invalid reply")
+                return {field: entry[field] for field in ("content", "model_response", "elapsed_seconds") if field in entry}
+            except (OSError, sqlite3.Error, ValueError) as exc:
+                self._write_error = exc
+                raise OSError("Could not read judge response cache; restart evaluation") from exc
 
     def add(self, entry):
-        line = json.dumps(entry, ensure_ascii=False, allow_nan=False) + "\n"
-        # Publish a reply only after its complete line and directory entry are
-        # durable. A failed append may leave a torn line: stop other threads
-        # from appending behind it until the next constructor repairs the tail.
+        if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
+            raise ValueError("Judge response entry must have a string key")
+        line = (json.dumps(entry, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
         with self._lock:
-            if self._write_error is not None:
-                raise OSError("Judge response cache has a failed write; restart evaluation") from self._write_error
             try:
-                with self.path.open("a", encoding="utf-8") as handle:
-                    handle.write(line)
+                self._check_available()
+                with self.path.open("ab") as handle:
+                    offset = handle.tell()
+                    if handle.write(line) != len(line):
+                        raise OSError("Incomplete judge response append")
                     handle.flush()
                     os.fsync(handle.fileno())
+                    stat = os.fstat(handle.fileno())
                 _fsync_directory(self.path.parent)
-            except OSError as exc:
+                # Publication follows durable audit persistence. An index failure
+                # poisons this owner; restart rebuilds and reuses the saved reply.
+                with self._index:
+                    self._index_entry(entry, offset, line)
+                self._identity = (stat.st_dev, stat.st_ino)
+                self._indexed_end = offset + len(line)
+            except BaseException as exc:
                 self._write_error = exc
+                if isinstance(exc, (OSError, sqlite3.Error)):
+                    raise OSError("Could not persist/index judge response; restart evaluation") from exc
                 raise
-            self._remember(entry)
 
 
 class CorrectnessJudges:
