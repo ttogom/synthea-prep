@@ -229,6 +229,80 @@ class ManagedOllamaTests(unittest.TestCase):
                 pass
         self.process.wait.assert_called_once_with(timeout=10)
 
+    def test_force_close_tolerates_permission_error_only_for_verified_zombie_only_group(self):
+        server = self.server()
+        server._process = self.process
+        self.signal_group.side_effect = [None, PermissionError(1, "Operation not permitted")]
+        with patch("scripts.experiment_runtime.ollama.subprocess.run", return_value=Mock(
+                stdout=f"{self.process.pid} {self.process.pid} Z\n42 42 S\n")) as inspect, \
+                patch("scripts.experiment_runtime.ollama.time.sleep"):
+            server.close(force_group=True)
+        self.assertEqual([call.args for call in self.signal_group.call_args_list], [
+            (self.process.pid, signal.SIGTERM), (self.process.pid, signal.SIGKILL)])
+        self.assertEqual(inspect.call_args.kwargs["timeout"], 2)
+        self.process.wait.assert_called_once_with(timeout=5)
+        self.assertIsNone(server._process)
+
+    def test_force_close_permission_error_with_survivors_preserves_ownership_for_retry(self):
+        server = self.server()
+        server._acquire_port()
+        server._process = self.process
+        self.signal_group.side_effect = [None, PermissionError(1, "Operation not permitted")]
+        with patch("scripts.experiment_runtime.ollama.subprocess.run", return_value=Mock(
+                stdout=f"{self.process.pid} {self.process.pid} Z\n99 {self.process.pid} S\n")), \
+                patch("scripts.experiment_runtime.ollama.time.sleep"), \
+                self.assertRaisesRegex(RuntimeError, "live processes.*99.*errno 1"):
+            server.close(force_group=True)
+        self.assertIs(server._process, self.process)
+        self.assertIsNotNone(server._port_lock)
+        with self.assertRaisesRegex(ValueError, "another experiment"):
+            self.server()._acquire_port()
+        self.process.wait.assert_not_called()
+        self.signal_group.side_effect = None
+        with patch("scripts.experiment_runtime.ollama.time.sleep"):
+            server.close(force_group=True)
+        self.assertIsNone(server._port_lock)
+
+    def test_force_close_does_not_suppress_unverifiable_permission_failure(self):
+        for failure in (subprocess.TimeoutExpired("ps", 2), Mock(stdout="invalid process row"), Mock(stdout="")):
+            with self.subTest(failure=failure):
+                server = self.server()
+                server._process = self.process
+                self.signal_group.side_effect = [None, PermissionError(1, "Operation not permitted")]
+                arguments = {"side_effect": failure} if isinstance(failure, BaseException) else {"return_value": failure}
+                with patch("scripts.experiment_runtime.ollama.subprocess.run", **arguments), \
+                        patch("scripts.experiment_runtime.ollama.time.sleep"), \
+                        self.assertRaisesRegex(RuntimeError, "Cannot verify owned Ollama group.*errno 1"):
+                    server.close(force_group=True)
+                self.assertIs(server._process, self.process)
+
+    def test_context_unwind_cannot_reap_zombie_leader_and_forget_surviving_owned_children(self):
+        server = self.server()
+        self.signal_group.side_effect = [None, PermissionError(1, "Operation not permitted"),
+                                        None, PermissionError(1, "Operation not permitted")]
+        with patch.object(ManagedOllama, "_port_busy", return_value=False), \
+                patch.object(ManagedOllama, "_request", return_value={"version": "test"}), \
+                patch("scripts.experiment_runtime.ollama.subprocess.Popen", return_value=self.process), \
+                patch("scripts.experiment_runtime.ollama.subprocess.run", return_value=Mock(
+                    stdout=f"{self.process.pid} {self.process.pid} Z\n99 {self.process.pid} S\n")), \
+                patch("scripts.experiment_runtime.ollama.time.sleep"), \
+                self.assertRaisesRegex(RuntimeError, "live processes"):
+            with server:
+                polls_before_close = self.process.poll.call_count
+                # A later poll would reap the zombie leader and overlook child 99.
+                self.process.poll.return_value = 0
+                server.close(force_group=True)
+        self.assertEqual(self.process.poll.call_count, polls_before_close)
+        self.process.wait.assert_not_called()
+        self.assertIs(server._process, self.process)
+        self.assertTrue(server._force_group_cleanup)
+        self.assertIsNotNone(server._port_lock)
+        self.signal_group.side_effect = None
+        with patch("scripts.experiment_runtime.ollama.time.sleep"):
+            server.close()
+        self.assertFalse(server._force_group_cleanup)
+        self.assertIsNone(server._port_lock)
+
     def test_unload_is_empty_native_request_and_does_not_generate(self):
         with patch.object(ManagedOllama, "_port_busy", return_value=False), \
                 patch.object(ManagedOllama, "_request", return_value={"version": "test"}) as request, \

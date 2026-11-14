@@ -56,6 +56,36 @@ def _positive(value, name):
     return value
 
 
+def _signal_owned_group(group, sig):
+    """Signal an anchored private group; distinguish macOS zombie-only EPERM.
+
+    The caller keeps its unreaped group leader until the final signal. A
+    PermissionError is benign only if a bounded process-table read proves no
+    live group members remain. Neither a port nor an unrelated PID is adopted.
+    """
+    try:
+        os.killpg(group, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        try:
+            result = subprocess.run(["/bin/ps", "-axo", "pid=,pgid=,stat="],
+                                    capture_output=True, text=True, check=True, timeout=2)
+            if not result.stdout.strip():
+                raise ValueError("Empty process table cannot establish cleanup")
+            members = []
+            for line in result.stdout.splitlines():
+                pid, pgid, state = line.split()
+                if int(pgid) == group and not state.startswith("Z"):
+                    members.append(int(pid))
+        except (OSError, ValueError, subprocess.SubprocessError) as inspection:
+            raise RuntimeError(f"Cannot verify owned Ollama group {group} after "
+                               f"signal {sig} failed with errno {exc.errno}") from inspection
+        if members:
+            raise RuntimeError(f"Owned Ollama group {group} still has live processes {members}; "
+                               f"signal {sig} failed with errno {exc.errno}") from exc
+
+
 class ManagedOllama:
     """A private server whose process, port lock, and log have one owner.
 
@@ -81,6 +111,7 @@ class ManagedOllama:
             "Ollama maximum loaded models")
         self.log_path = Path(log_path).resolve()
         self._process = self._log = self._port_lock = None
+        self._force_group_cleanup = False
         self._entered = False
         self._version = None
         self._log_start = 0
@@ -236,53 +267,48 @@ class ManagedOllama:
 
     def close(self, *, force_group=False):
         """Stop our isolated process group and release its persistent port-lock inode."""
+        self._force_group_cleanup = self._force_group_cleanup or force_group
+        cleaned = False
         try:
             if self._process is not None:
-                if force_group:
+                if self._force_group_cleanup:
                     # The watchdog already allowed its bounded request-drain
                     # period. Do not equate leader exit with descendant exit:
                     # native runners may still occupy this owned process group.
-                    try:
-                        os.killpg(self._process.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+                    _signal_owned_group(self._process.pid, signal.SIGTERM)
                     # Keep the leader unreaped until the last group signal so
                     # its numeric identity cannot be recycled during cleanup.
                     # Request draining already happened in the supervisor.
                     time.sleep(0.1)
-                    try:
-                        os.killpg(self._process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    _signal_owned_group(self._process.pid, signal.SIGKILL)
                     self._process.wait(timeout=5)
                 elif self._process.poll() is None:
                     # start_new_session=True makes this PID the group leader;
                     # the GPU runners it launches belong to the same owned group.
                     # Never discover or signal a process by its listening port.
-                    try:
-                        os.killpg(self._process.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+                    _signal_owned_group(self._process.pid, signal.SIGTERM)
                     try:
                         self._process.wait(timeout=10)
                     except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(self._process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
+                        _signal_owned_group(self._process.pid, signal.SIGKILL)
                         self._process.wait(timeout=5)
                 else:
                     self._process.wait()
+            cleaned = True
         finally:
-            self._process = None
-            if self._log is not None:
-                self._log.close()
-                self._log = None
-            if self._port_lock is not None:
-                fcntl.flock(self._port_lock.fileno(), fcntl.LOCK_UN)
-                self._port_lock.close()
-                self._port_lock = None
-            self._entered = False
+            # A genuine permission/termination failure must retain the anchored
+            # process and ownership lock so cleanup can be retried safely.
+            if cleaned:
+                self._process = None
+                self._force_group_cleanup = False
+                if self._log is not None:
+                    self._log.close()
+                    self._log = None
+                if self._port_lock is not None:
+                    fcntl.flock(self._port_lock.fileno(), fcntl.LOCK_UN)
+                    self._port_lock.close()
+                    self._port_lock = None
+                self._entered = False
 
     def __exit__(self, kind, value, traceback):
         self.close()

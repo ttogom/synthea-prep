@@ -12,12 +12,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.experiment_runtime.memory_pressure import (
-    MemoryPolicy, WARNING_SWAP_BYTES, sample_memory,
+    MemoryPolicy, WARNING_SWAP_BYTES, WARNING_CHURN_BYTES, WARNING_COMPRESSION_BYTES,
+    MIN_RECLAIMABLE_BYTES, sample_memory,
 )
 
 
 def sample(pressure=1, swapped=0):
     return {"pressure": pressure, "swapout_bytes": swapped}
+
+
+def detailed_sample(pressure=2, **changes):
+    return {"pressure": pressure, "swapout_bytes": 0, "swapin_bytes": 0,
+            "compressor_bytes": 2 * 1024 ** 3, "compression_bytes": 10 * 1024 ** 3,
+            "reclaimable_bytes": 4 * 1024 ** 3, **changes}
 
 
 class MemorySamplerTests(unittest.TestCase):
@@ -62,8 +69,97 @@ class MemorySamplerTests(unittest.TestCase):
                     self.assertRaises(type(error)):
                 sample_memory()
 
+    def test_reads_bounded_auxiliary_telemetry_without_adding_memory_categories(self):
+        vm = ('Mach Virtual Memory Statistics: (page size of 16384 bytes)\n'
+              'Swapouts: 9.\nSwapins: 7.\nPages occupied by compressor: 11.\n'
+              'Compressions: 123.\nPages free: 5.\nPages inactive: 17.\nPages speculative: 3.\n')
+        with patch("scripts.experiment_runtime.memory_pressure.subprocess.run", side_effect=[
+                SimpleNamespace(stdout="2"), SimpleNamespace(stdout=vm)]):
+            self.assertEqual(sample_memory(), {"pressure": 2, "swapout_bytes": 9 * 16384,
+                "swapin_bytes": 7 * 16384, "compressor_bytes": 11 * 16384,
+                "compression_bytes": 123 * 16384, "reclaimable_bytes": 25 * 16384})
+
 
 class MemoryPolicyTests(unittest.TestCase):
+    def test_stable_warning_with_complete_telemetry_does_not_force_pointless_restart(self):
+        policy = MemoryPolicy()
+        for now in range(0, 3605, 5):
+            self.assertIsNone(policy.observe(detailed_sample(), now))
+        self.assertEqual(policy.phase, "stable_warning")
+        self.assertLessEqual(len(policy._history), 14)
+        self.assertEqual(policy.last_observation["swapout_growth_bytes"], 0)
+
+    def test_startup_never_exempts_critical_or_growing_swap_protection(self):
+        critical = MemoryPolicy()
+        self.assertEqual(critical.observe(detailed_sample(4), 0), "critical_memory_pressure")
+        policy = MemoryPolicy()
+        for now in range(0, 60, 5):
+            self.assertIsNone(policy.observe(detailed_sample(swapout_bytes=now * WARNING_SWAP_BYTES // 60), now))
+        self.assertEqual(policy.observe(detailed_sample(swapout_bytes=WARNING_SWAP_BYTES), 60),
+                         "sustained_warning_with_swap_growth")
+
+    def test_sustained_compression_swapin_and_falling_headroom_stop_without_swapout(self):
+        changes = (("swapin_bytes", WARNING_CHURN_BYTES),
+                   ("compressor_bytes", WARNING_CHURN_BYTES),
+                   ("compression_bytes", WARNING_COMPRESSION_BYTES),
+                   ("reclaimable_bytes", -WARNING_CHURN_BYTES))
+        for key, change in changes:
+            with self.subTest(key=key):
+                policy = MemoryPolicy()
+                base = detailed_sample(reclaimable_bytes=MIN_RECLAIMABLE_BYTES - 1)
+                if key == "reclaimable_bytes":
+                    base[key] = MIN_RECLAIMABLE_BYTES + WARNING_CHURN_BYTES // 2
+                for now in range(0, 60, 5):
+                    reading = {**base, key: base[key] + change * now // 60}
+                    self.assertIsNone(policy.observe(reading, now))
+                self.assertEqual(policy.observe({**base, key: base[key] + change}, 60),
+                                 "sustained_warning_with_memory_churn")
+                self.assertEqual(policy.last_event["swapout_growth_bytes"], 0)
+
+    def test_high_reserve_loading_churn_cannot_stop_before_original_warning_review(self):
+        policy = MemoryPolicy()
+        base = detailed_sample()
+        for now in range(0, 180, 5):
+            reading = {**base, "compression_bytes": base["compression_bytes"] + now * WARNING_COMPRESSION_BYTES // 60}
+            self.assertIsNone(policy.observe(reading, now))
+        self.assertEqual(policy.observe({**base, "compression_bytes": base["compression_bytes"]
+                                        + 3 * WARNING_COMPRESSION_BYTES}, 180), "sustained_memory_warning")
+
+    def test_slow_continuing_swapout_is_never_classified_as_stable_warning(self):
+        policy = MemoryPolicy()
+        for now in range(0, 180, 5):
+            self.assertIsNone(policy.observe(detailed_sample(swapout_bytes=now * WARNING_SWAP_BYTES // 120), now))
+        self.assertEqual(policy.observe(detailed_sample(swapout_bytes=180 * WARNING_SWAP_BYTES // 120), 180),
+                         "sustained_memory_warning")
+
+    def test_incomplete_telemetry_or_low_reserve_cannot_exempt_warning_timeout(self):
+        for reading in (sample(2), {**detailed_sample(), "swapin_bytes": None},
+                        detailed_sample(reclaimable_bytes=MIN_RECLAIMABLE_BYTES - 1)):
+            with self.subTest(reading=reading):
+                policy = MemoryPolicy()
+                if reading.get("swapin_bytes", 0) is None:
+                    for now in (0, 5):
+                        self.assertIsNone(policy.observe(reading, now))
+                    self.assertEqual(policy.observe(reading, 10), "memory_monitor_failed")
+                else:
+                    for now in range(0, 180, 5):
+                        self.assertIsNone(policy.observe(reading, now))
+                    self.assertEqual(policy.observe(reading, 180), "sustained_memory_warning")
+
+    def test_counter_reset_cannot_be_mistaken_for_a_stable_full_window(self):
+        policy = MemoryPolicy()
+        for now in range(0, 180, 5):
+            self.assertIsNone(policy.observe(detailed_sample(), now))
+        self.assertEqual(policy.observe(detailed_sample(compression_bytes=0), 180),
+                         "sustained_memory_warning")
+
+    def test_headroom_does_not_admit_with_a_known_small_reclaimable_reserve(self):
+        policy = MemoryPolicy()
+        for now in range(0, 65, 5):
+            self.assertFalse(policy.recovered(detailed_sample(1, reclaimable_bytes=MIN_RECLAIMABLE_BYTES - 1), now))
+        self.assertFalse(policy.recovered(detailed_sample(1), 65))
+        self.assertTrue(policy.recovered(detailed_sample(1), 95))
+
     def test_brief_warning_recovers_even_with_existing_swap(self):
         policy = MemoryPolicy()
         baseline = 50 * 1024 ** 3

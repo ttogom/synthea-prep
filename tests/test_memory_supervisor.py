@@ -85,6 +85,36 @@ class WatchdogTests(unittest.TestCase):
         self.server.close.assert_not_called()
         self.assertFalse(self.stop.exists())
 
+    def test_every_sample_is_recorded_quietly_and_critical_skips_optional_diagnostics(self):
+        with patch.object(guard, "_sample", return_value={"pressure": 4, "swapout_bytes": 0}), \
+                patch.object(guard, "_owned_rss") as rss, \
+                patch.object(guard.time, "monotonic", side_effect=self.clock.monotonic), \
+                patch.object(guard.time, "sleep", side_effect=self.clock.sleep):
+            guard._watch(self.worker, self.server, self.stop, self.events)
+        rss.assert_not_called()
+        rows = [json.loads(line) for line in self.events.read_text().splitlines()]
+        samples = [row for row in rows if row["event"] == "sample"]
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0]["phase"], "stopping")
+        self.assertEqual(samples[0]["sample"]["pressure"], 4)
+
+    def test_rss_diagnostics_include_only_explicit_worker_and_owned_server_group(self):
+        self.server._process.pid = 765432
+        with patch.object(guard.subprocess, "run", return_value=Mock(stdout=(
+                "987654 987654 100\n765432 765432 200\n765433 765432 300\n42 42 999\n"))) as run:
+            self.assertEqual(guard._owned_rss(self.worker, self.server), {
+                "worker_rss_bytes": 100 * 1024, "server_group_rss_bytes": 500 * 1024})
+        self.assertEqual(run.call_args.kwargs["timeout"], 2)
+        with patch.object(guard.subprocess, "run", side_effect=subprocess.TimeoutExpired("ps", 2)):
+            self.assertEqual(guard._owned_rss(self.worker, self.server), {"error": "TimeoutExpired"})
+
+    def test_quiet_samples_do_not_print_or_fsync_each_sample(self):
+        with patch.object(guard.os, "fsync") as sync, patch("builtins.print") as console:
+            guard._event(self.events, "sample", quiet=True, sample={"pressure": 1})
+        sync.assert_not_called()
+        console.assert_not_called()
+        self.assertEqual(json.loads(self.events.read_text())["event"], "sample")
+
     def test_headroom_requires_stable_normal_then_returns(self):
         with patch.object(guard, "_sample", return_value={"pressure": 1, "swapout_bytes": 123}), \
                 patch.object(guard.time, "monotonic", side_effect=self.clock.monotonic), \
@@ -164,7 +194,7 @@ class SupervisorTests(unittest.TestCase):
         self.workers.append(worker)
         return worker
 
-    def headroom(self):
+    def headroom(self, events=None):
         with self.assertRaises(RunLockError):
             with exclusive_run_lock(self.run):
                 self.fail("The original lock must cover waiting and retry")
@@ -193,6 +223,30 @@ class SupervisorTests(unittest.TestCase):
                 patch.object(guard.subprocess, "Popen", side_effect=popen), \
                 patch.object(guard, "_watch", return_value=None):
             self.assertEqual(guard.supervise_cli([str(self.run)], root=self.root), 0)
+        self.assertEqual(len(self.bootstraps), 1)
+
+    def test_one_slot_recovers_once_and_two_slots_fall_back_to_one(self):
+        for concurrency, expected in ((1, [1, 1]), (2, [2, 1])):
+            with self.subTest(concurrency=concurrency):
+                self.bootstraps.clear()
+                self.servers.clear()
+                with patch.object(guard, "_headroom", side_effect=self.headroom), \
+                        patch.object(guard, "ollama_for_saved_run", side_effect=self.server), \
+                        patch.object(guard.subprocess, "Popen", side_effect=self.popen), \
+                        patch.object(guard, "_watch", side_effect=["sustained_memory_warning", None]):
+                    self.assertEqual(guard.supervise_cli([str(self.run), "--concurrency", str(concurrency)],
+                                                        root=self.root), 0)
+                self.assertEqual([entry["profile"]["settings"]["concurrency"] for entry in self.bootstraps], expected)
+                self.assertEqual([entry["concurrency"] for entry in self.servers], expected)
+                self.assertTrue(self.bootstraps[-1]["guard_metadata"]["policy"][
+                    "stable_warning_requires_complete_telemetry"])
+
+    def test_user_interrupt_never_launches_a_recovery_attempt(self):
+        with patch.object(guard, "_headroom", return_value=True), \
+                patch.object(guard, "ollama_for_saved_run", side_effect=self.server), \
+                patch.object(guard.subprocess, "Popen", side_effect=self.popen), \
+                patch.object(guard, "_watch", side_effect=KeyboardInterrupt):
+            self.assertEqual(guard.supervise_cli([str(self.run)], root=self.root), 130)
         self.assertEqual(len(self.bootstraps), 1)
 
     def test_second_pressure_stop_exits_75_instead_of_retrying_forever(self):

@@ -17,6 +17,7 @@ from scripts.experiment_runtime.memory_pressure import (
     MemoryPolicy, sample_memory, SAMPLE_INTERVAL_SECONDS, RECOVERY_TIMEOUT_SECONDS,
     WARNING_SECONDS, WARNING_SWAP_BYTES, MAX_WARNING_SECONDS, RECOVERY_NORMAL_SECONDS,
     MAX_SAMPLE_FAILURES, WARNING_SAMPLE_FRACTION,
+    STARTUP_SECONDS, WARNING_CHURN_BYTES, WARNING_COMPRESSION_BYTES, MIN_RECLAIMABLE_BYTES,
 )
 from scripts.experiment_runtime.ollama import ollama_for_saved_run
 from scripts.experiment_runtime.plan_judging import load_judge_profile
@@ -50,28 +51,48 @@ def _sample():
         return None
 
 
-def _event(path, kind, **detail):
+def _event(path, kind, *, quiet=False, **detail):
     record = {"event": kind, "unix_seconds": time.time(), **detail}
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, allow_nan=False) + "\n")
         handle.flush()
-        os.fsync(handle.fileno())
-    print(f"Plan memory guard: {kind}" + (f" ({detail['reason']})" if 'reason' in detail else ""),
-          file=sys.stderr, flush=True)
+        if not quiet:
+            os.fsync(handle.fileno())
+    if not quiet:
+        print(f"Plan memory guard: {kind}" + (f" ({detail['reason']})" if 'reason' in detail else ""),
+              file=sys.stderr, flush=True)
 
 
-def _headroom():
+def _headroom(events=None):
     policy = MemoryPolicy()
     deadline = time.monotonic() + RECOVERY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         sample = _sample()
         now = time.monotonic()
+        if events is not None:
+            _event(events, "sample", quiet=True, phase="recovering", sample=sample, monotonic_seconds=now)
         if policy.observe(sample, now) == "memory_monitor_failed":
             return False
         if policy.recovered(sample, now):
             return True
         time.sleep(SAMPLE_INTERVAL_SECONDS)
     return False
+
+
+def _owned_rss(worker, server):
+    """Bounded RSS diagnostics only; shared/GPU pages are not unique footprint."""
+    process = getattr(server, "_process", None)
+    group = getattr(process, "pid", None)
+    if type(group) is not int or group <= 0:
+        return None
+    try:
+        result = subprocess.run(["/bin/ps", "-axo", "pid=,pgid=,rss="],
+                                capture_output=True, text=True, check=True, timeout=2)
+        rows = [tuple(map(int, line.split())) for line in result.stdout.splitlines()]
+        return {"worker_rss_bytes": sum(rss * 1024 for pid, _, rss in rows if pid == worker.pid),
+                "server_group_rss_bytes": sum(rss * 1024 for _, pgid, rss in rows if pgid == group)}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {"error": type(exc).__name__}
 
 
 def _terminate_worker(worker):
@@ -96,7 +117,13 @@ def _watch(worker, server, stop_file, events):
     previous_pressure = None
     while worker.poll() is None:
         sample = _sample()
-        reason = policy.observe(sample, time.monotonic())
+        now = time.monotonic()
+        reason = policy.observe(sample, now)
+        # Every sample goes to disk; policy retains only the latest minute.
+        # Emergency shutdown never waits for optional per-process diagnostics.
+        _event(events, "sample", quiet=True, sample=sample, monotonic_seconds=now,
+               **policy.last_observation,
+               owned_rss=None if reason == "critical_memory_pressure" else _owned_rss(worker, server))
         pressure = None if sample is None else sample["pressure"]
         if pressure != previous_pressure:
             _event(events, "pressure_changed", sample=sample)
@@ -124,7 +151,7 @@ def _watch(worker, server, stop_file, events):
 
 
 def supervise_cli(argv, *, root):
-    """Hold one run lock across a maximum of two owned-server attempts."""
+    """Hold one run lock across at most two attempts, including C1 recovery."""
     parser = argparse.ArgumentParser(description="Judge saved Plans with automatic memory protection")
     parser.add_argument("run_directory", type=Path)
     parser.add_argument("--concurrency", type=int)
@@ -140,13 +167,19 @@ def supervise_cli(argv, *, root):
             events.parent.mkdir(parents=True, exist_ok=True)
             policy = {"sample_seconds": SAMPLE_INTERVAL_SECONDS, "warning_seconds": WARNING_SECONDS,
                       "warning_sample_fraction": WARNING_SAMPLE_FRACTION,
-                      "swapout_growth_bytes": WARNING_SWAP_BYTES, "maximum_warning_seconds": MAX_WARNING_SECONDS,
+                      "swapout_growth_bytes": WARNING_SWAP_BYTES, "warning_review_seconds": MAX_WARNING_SECONDS,
                       "normal_recovery_seconds": RECOVERY_NORMAL_SECONDS, "recovery_timeout_seconds": RECOVERY_TIMEOUT_SECONDS,
                       "max_sample_failures": MAX_SAMPLE_FAILURES, "grace_seconds": GRACE_SECONDS,
                       "worker_exit_seconds": WORKER_EXIT_SECONDS, "max_attempts": 2}
+            policy.update(startup_seconds=STARTUP_SECONDS, warning_churn_bytes=WARNING_CHURN_BYTES,
+                          warning_compression_bytes=WARNING_COMPRESSION_BYTES,
+                          minimum_reclaimable_bytes=MIN_RECLAIMABLE_BYTES,
+                          stable_warning_requires_complete_telemetry=True,
+                          stable_warning_requires_zero_swapout_growth=True,
+                          early_churn_stop_requires_low_reserve=True)
             _event(events, "started", policy=policy)
             for attempt in range(2):
-                if not _headroom():
+                if not _headroom(events):
                     _event(events, "paused", reason="headroom_not_restored")
                     return MEMORY_STOP_EXIT
                 effective = profile["settings"]
@@ -173,11 +206,12 @@ def supervise_cli(argv, *, root):
                 if reason is None:
                     _event(events, "finished", worker_exit=code)
                     return code if code >= 0 else 1
-                if attempt or effective["concurrency"] <= 2 or reason == "memory_monitor_failed":
+                if attempt or reason == "memory_monitor_failed":
                     _event(events, "paused", reason=reason)
                     return MEMORY_STOP_EXIT
-                profile["settings"]["concurrency"] = 2
-                _event(events, "retrying", concurrency=2, server_slots=2)
+                reduced = 2 if effective["concurrency"] > 2 else 1
+                profile["settings"]["concurrency"] = reduced
+                _event(events, "retrying", concurrency=reduced, server_slots=reduced)
             return MEMORY_STOP_EXIT
     except KeyboardInterrupt:
         return 130
