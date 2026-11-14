@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 from copy import deepcopy
+from io import StringIO
 import json
 from pathlib import Path
 import signal
@@ -42,6 +43,86 @@ class WatchdogTests(unittest.TestCase):
         self.worker.poll.return_value = None
         self.worker.wait.return_value = 75
         self.server = Mock()
+
+    def test_pressure_output_uses_stdout_and_explains_metrics_and_continuation(self):
+        sample = {"pressure": 2, "swapout_bytes": 123, "reclaimable_bytes": 5 * 1024 ** 3}
+        output, errors = StringIO(), StringIO()
+        with patch.object(guard.sys, "stdout", output), patch.object(guard.sys, "stderr", errors):
+            guard._event(self.events, "pressure_changed", sample=sample, decision=None,
+                         swapout_growth_bytes=12582912, window_seconds=60)
+        self.assertIn("pressure warning", output.getvalue())
+        self.assertIn("judging continues", output.getvalue())
+        self.assertIn("5.00 GiB", output.getvalue())
+        self.assertIn("12.0 MiB over 60s", output.getvalue())
+        self.assertNotIn("pressure_changed", output.getvalue())
+        self.assertEqual(errors.getvalue(), "")
+        record = json.loads(self.events.read_text())
+        self.assertEqual(record["event"], "pressure_changed")
+        self.assertEqual(record["sample"], sample)
+
+    def test_pressure_messages_distinguish_recovery_critical_missing_and_stop_decision(self):
+        cases = [({"sample": {"pressure": 1}}, "pressure normal", "judging continues"),
+                 ({"sample": {"pressure": 4}}, "CRITICAL", "shutdown required immediately"),
+                 ({"sample": None}, "unavailable", "retrying the reading"),
+                 ({"sample": {"pressure": 2}, "decision": "sustained_warning_with_swap_growth"},
+                  "repeated paging", "shutdown required")]
+        for detail, label, action in cases:
+            with self.subTest(detail=detail):
+                message = guard._console_message("pressure_changed", detail)
+                self.assertIn(label, message)
+                self.assertIn(action, message)
+                if detail.get("decision") or (detail.get("sample") or {}).get("pressure") == 4:
+                    self.assertNotIn("judging continues", message)
+
+    def test_stop_and_retry_messages_explain_drain_durability_and_next_action(self):
+        warning = guard._console_message("stopping", {"reason": "sustained_warning_with_swap_growth"})
+        self.assertIn("repeated paging", warning)
+        self.assertIn("up to 30s", warning)
+        self.assertIn("saved replies remain reusable", warning)
+        critical = guard._console_message("stopping", {"reason": "critical_memory_pressure"})
+        self.assertIn("No request-drain grace", critical)
+        self.assertNotIn("up to 30s", critical)
+        retry = guard._console_message("retrying", {"concurrency": 1, "server_slots": 1})
+        self.assertIn("after memory recovery", retry)
+        self.assertIn("1 client worker and 1 server slot", retry)
+        paused = guard._console_message("paused", {"reason": "headroom_not_restored"})
+        self.assertIn("memory recovery conditions were not met", paused)
+        self.assertIn("No further automatic attempts", paused)
+        self.assertIn("rerun", paused)
+
+    def test_finished_message_does_not_claim_success_for_a_failed_worker(self):
+        self.assertIn("successfully", guard._console_message("finished", {"worker_exit": 0}))
+        failed = guard._console_message("finished", {"worker_exit": 1})
+        self.assertIn("status 1", failed)
+        self.assertNotIn("successfully", failed)
+
+    def test_recovery_wait_is_announced_once_and_readiness_after_stable_interval(self):
+        output = StringIO()
+        with patch.object(guard, "_sample", return_value={"pressure": 1, "swapout_bytes": 0}), \
+                patch.object(guard.time, "monotonic", side_effect=self.clock.monotonic), \
+                patch.object(guard.time, "sleep", side_effect=self.clock.sleep), \
+                patch.object(guard.sys, "stdout", output):
+            self.assertTrue(guard._headroom(self.events))
+        self.assertGreaterEqual(self.clock.now, guard.RECOVERY_NORMAL_SECONDS)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertIn("waiting for 30s", lines[0])
+        self.assertIn("up to 300s", lines[0])
+        self.assertIn("starting the judge attempt", lines[1])
+
+    def test_recovery_failure_distinguishes_missing_readings_from_timeout(self):
+        for sample, expected in ((None, "3 consecutive memory readings failed"),
+                                 ({"pressure": 2, "swapout_bytes": 0}, "timed out after 300s")):
+            with self.subTest(sample=sample):
+                clock, output = Clock(), StringIO()
+                with patch.object(guard, "_sample", return_value=sample), \
+                        patch.object(guard.time, "monotonic", side_effect=clock.monotonic), \
+                        patch.object(guard.time, "sleep", side_effect=clock.sleep), \
+                        patch.object(guard.sys, "stdout", output):
+                    self.assertFalse(guard._headroom(self.events))
+                self.assertIn(expected, output.getvalue())
+                self.assertIn("Judge attempt will not start", output.getvalue())
+                self.assertNotIn("starting the judge attempt", output.getvalue())
 
     def test_critical_pressure_stops_without_grace_and_closes_owned_group(self):
         with patch.object(guard, "_sample", return_value={"pressure": 4, "swapout_bytes": 0}), \

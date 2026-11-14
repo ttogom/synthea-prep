@@ -52,6 +52,58 @@ def _sample():
         return None
 
 
+def _console_message(kind, detail):
+    reasons = {
+        "critical_memory_pressure": "critical macOS memory pressure",
+        "sustained_warning_with_swap_growth": "sustained warning with repeated paging",
+        "sustained_warning_with_memory_churn": "persistently low reclaimable memory",
+        "sustained_memory_warning": "prolonged warning without complete monitoring evidence",
+        "memory_monitor_failed": f"{MAX_SAMPLE_FAILURES} consecutive memory readings failed",
+        "headroom_not_restored": "memory recovery conditions were not met",
+    }
+    reason = reasons.get(detail.get("reason"), str(detail.get("reason", "")).replace("_", " "))
+    if kind == "pressure_changed":
+        sample = detail.get("sample") or {}
+        pressure = sample.get("pressure")
+        label = {1: "normal", 2: "warning", 4: "CRITICAL"}.get(pressure, "unavailable")
+        if pressure == 4:
+            action = "protective shutdown required immediately."
+        elif detail.get("decision"):
+            action = "protective shutdown required (" + reasons.get(detail["decision"], detail["decision"]) + ")."
+        elif pressure == 1:
+            action = "judging continues."
+        elif pressure == 2:
+            action = "judging continues; watching for sustained paging or low headroom. Brief warnings alone do not stop judging."
+        else:
+            action = "retrying the reading; repeated monitoring failures will stop judging."
+        metrics = []
+        if type(sample.get("reclaimable_bytes")) is int:
+            metrics.append(f"Estimated reclaimable {sample['reclaimable_bytes'] / 1024 ** 3:.2f} GiB")
+        if pressure in (1, 2) and detail.get("window_seconds", 0) > 0 and "swapout_growth_bytes" in detail:
+            metrics.append(f"New swap-out {detail['swapout_growth_bytes'] / 1024 ** 2:.1f} MiB over {detail.get('window_seconds', 0):.0f}s")
+        suffix = " " + "; ".join(metrics) + "." if metrics else ""
+        return f"Plan memory guard: pressure {label}; {action}{suffix}"
+    workers, slots = detail.get("concurrency", "?"), detail.get("server_slots", "?")
+    messages = {
+        "started": f"monitoring every {SAMPLE_INTERVAL_SECONDS}s; critical pressure triggers immediate shutdown.",
+        "waiting_for_headroom": f"waiting for {RECOVERY_NORMAL_SECONDS}s of normal pressure without new swap-out before loading the judge (up to {RECOVERY_TIMEOUT_SECONDS}s).",
+        "headroom_ready": "memory recovery conditions met; starting the judge attempt.",
+        "recovery_failed": (f"cannot verify memory headroom: {reason}. Judge attempt will not start."
+                            if detail.get("reason") == "memory_monitor_failed"
+                            else f"headroom wait timed out after {RECOVERY_TIMEOUT_SECONDS}s without stable normal pressure. Judge attempt will not start."),
+        "stopping": (f"{reason}; stopping new judgments immediately. "
+                     + ("No request-drain grace for critical pressure. " if detail.get("reason") == "critical_memory_pressure"
+                        else f"Allowing up to {GRACE_SECONDS}s for in-flight requests to finish. ")
+                     + "Then shutting down only the owned judge processes; saved replies remain reusable."),
+        "stopped": f"judge worker stopped (exit {detail.get('worker_exit', '?')}); owned server shut down. Saved replies remain reusable.",
+        "paused": f"paused: {reason}. No further automatic attempts; rerun after restoring headroom to reuse saved replies.",
+        "retrying": f"will retry after memory recovery with {workers} client worker{'s' if workers != 1 else ''} and {slots} server slot{'s' if slots != 1 else ''}.",
+        "finished": ("judge worker finished successfully." if detail.get("worker_exit") == 0
+                     else f"judge worker exited with status {detail.get('worker_exit', '?')}; inspect the worker log/run.json. Saved replies remain reusable."),
+    }
+    return "Plan memory guard: " + messages.get(kind, kind.replace("_", " ") + (f": {reason}" if reason else ""))
+
+
 def _event(path, kind, *, quiet=False, **detail):
     record = {"event": kind, "unix_seconds": time.time(), **detail}
     with path.open("a", encoding="utf-8") as handle:
@@ -60,23 +112,30 @@ def _event(path, kind, *, quiet=False, **detail):
         if not quiet:
             os.fsync(handle.fileno())
     if not quiet:
-        print(f"Plan memory guard: {kind}" + (f" ({detail['reason']})" if 'reason' in detail else ""),
-              file=sys.stderr, flush=True)
+        print(_console_message(kind, detail), file=sys.stdout, flush=True)
 
 
 def _headroom(events=None):
     policy = MemoryPolicy()
     deadline = time.monotonic() + RECOVERY_TIMEOUT_SECONDS
+    if events is not None:
+        _event(events, "waiting_for_headroom")
     while time.monotonic() < deadline:
         sample = _sample()
         now = time.monotonic()
         if events is not None:
             _event(events, "sample", quiet=True, phase="recovering", sample=sample, monotonic_seconds=now)
         if policy.observe(sample, now) == "memory_monitor_failed":
+            if events is not None:
+                _event(events, "recovery_failed", reason="memory_monitor_failed")
             return False
         if policy.recovered(sample, now):
+            if events is not None:
+                _event(events, "headroom_ready")
             return True
         time.sleep(SAMPLE_INTERVAL_SECONDS)
+    if events is not None:
+        _event(events, "recovery_failed", reason="headroom_not_restored")
     return False
 
 
@@ -127,7 +186,9 @@ def _watch(worker, server, stop_file, events):
                owned_rss=None if reason == "critical_memory_pressure" else _owned_rss(worker, server))
         pressure = None if sample is None else sample["pressure"]
         if pressure != previous_pressure:
-            _event(events, "pressure_changed", sample=sample)
+            _event(events, "pressure_changed", sample=sample, decision=reason,
+                   swapout_growth_bytes=policy.last_observation.get("swapout_growth_bytes", 0),
+                   window_seconds=policy.last_observation.get("window_seconds", 0))
             previous_pressure = pressure
         if reason:
             _event(events, "stopping", **policy.last_event)
