@@ -176,6 +176,8 @@ def render_generator_retrieval_gains_table(summary):
         "% Use table* instead of table to span both columns; panel widths follow \\linewidth.",
         r"\begin{table}[t]", r"\centering", r"\small",
         r"\setlength{\tabcolsep}{2pt}",
+        r"\textbf{Retrieval gains over No retrieval across generators}\par",
+        r"\vspace{4pt}",
     ]
     for panel, (variant, label) in zip(("a", "b"), variants):
         if panel == "b":
@@ -261,6 +263,8 @@ def render_history_gains_over_others_table(scores):
     lines = [
         "% Generated from group_retrieval_gains.csv; regenerate rather than editing numerical cells.",
         r"\begin{table}[!hbp]", r"\centering", r"\small", r"\setlength{\tabcolsep}{2pt}",
+        r"\textbf{Similar patient retrieval gains across condition groups}\par",
+        r"\vspace{4pt}",
     ]
     for panel, group in zip(("a", "b"), ("acute", "control")):
         if panel == "b":
