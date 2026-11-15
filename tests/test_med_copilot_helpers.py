@@ -1157,6 +1157,14 @@ class ParseConditionPlanTests(unittest.TestCase):
         first["predictions"].reverse()
         self.assertEqual(self.parse(payload), payload)
 
+    def test_blank_plan_items_are_preserved_verbatim_at_every_rank(self):
+        for rank in range(3):
+            for plan in ([""], [" \n\t"], ["Rest", ""], ["", "Rest", " \t"]):
+                with self.subTest(rank=rank, plan=plan):
+                    payload = self.payload()
+                    payload["predictions"][rank]["plan"] = plan
+                    self.assertEqual(self.parse(payload), payload)
+
     def test_root_requires_exactly_the_predictions_key(self):
         for payload in ({}, {"condition": "A", "plan": ["P"]},
                         {**self.payload(), "reasoning": "why"},
@@ -1197,7 +1205,7 @@ class ParseConditionPlanTests(unittest.TestCase):
 
     def test_invalid_plan_or_any_invalid_item_retains_its_valid_condition(self):
         invalid_plans = (None, "Rest", {}, False, 4, 1.5, [None], [False], [2], [[]], [{}],
-                         [""], [" \n\t"], ["Rest", None], ["Rest", ""], ["P"] * 4)
+                         ["Rest", None], ["", None], ["", "", "", ""], ["P"] * 4)
         for rank in range(3):
             for plan in invalid_plans:
                 with self.subTest(rank=rank, plan=plan):

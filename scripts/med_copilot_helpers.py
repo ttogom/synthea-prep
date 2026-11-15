@@ -592,7 +592,7 @@ def parse_condition_plan(response):
     Malformed JSON, duplicate keys, and nonfinite numbers invalidate the reply.
     Each pair accepts only condition and plan keys; otherwise both fields in
     that rank are null. Valid fields survive an invalid partner unchanged.
-    Plans accept zero to three nonblank strings. No list is truncated.
+    Plans accept zero to three strings, preserving blank strings. No list is truncated.
     """
     missing = {"predictions": None}
     if not isinstance(response, str):
@@ -618,7 +618,7 @@ def parse_condition_plan(response):
         parsed.append({
             "condition": condition if isinstance(condition, str) and condition.strip() else None,
             "plan": plan if isinstance(plan, list) and len(plan) <= 3 and all(
-                isinstance(item, str) and item.strip() for item in plan
+                isinstance(item, str) for item in plan
             ) else None,
         })
     return {"predictions": parsed}

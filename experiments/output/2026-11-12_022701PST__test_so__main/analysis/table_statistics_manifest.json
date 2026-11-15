@@ -1,10 +1,10 @@
 {
-  "created_at_utc": "2026-11-15T11:01:00.580375+00:00",
+  "created_at_utc": "2026-11-15T20:32:12.176752+00:00",
   "source_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv",
-  "source_csv_sha256": "18396fea81286c225eef927b02b862615114c4bf80c7bbad613336d9f2dc57de",
+  "source_csv_sha256": "52e27663fe4235c9fe94fef22d15bfacf229fd94b4a60cca1a6dbf18c14bba1c",
   "source_results_newer_than_csv": false,
   "run_metadata_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/run.json",
-  "run_metadata_sha256": "50b9ec414260fa51a4e1aba686697fc3c85d2e904b4b266c7e62ba4b48a9cc32",
+  "run_metadata_sha256": "f436a93c3b3efab11e8a2c8ee03e33e0f993a50fcd5f246a17d776491df296ea",
   "unvalidated_plan_scores_excluded": false,
   "rank": 1,
   "case_weighting": "Equal weight per condition example",
@@ -109,15 +109,15 @@
   "outputs": [
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/main_results.csv",
-      "sha256": "c5419f25ae214abcfc2c297c5bca1e4e154062cef85171f585cdfe1cbf452493"
+      "sha256": "fa4e1de4653b2b2d6eef5c1800bb09afbf7bef04d60709abee74ac7adae70e06"
     },
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/generator_retrieval_gains.csv",
-      "sha256": "637faa0e3e9577c57113f6d64e63f3c5999d10b693a9989141104dce6ba8e219"
+      "sha256": "1575cf52202530d714673ea3a810c1b4c9087810cc4e63606c9f3ed62312dce9"
     },
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
-      "sha256": "89dd1d12da4e1214d20edc8aba3f244fb033f62adf661c514720e8b461482091"
+      "sha256": "314cabafa287a271651b0763b579936e4210a64e2c7812e034619360ab5e303e"
     }
   ]
 }
