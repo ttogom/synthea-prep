@@ -1,10 +1,10 @@
 {
-  "created_at_utc": "2026-11-15T20:32:12.176752+00:00",
+  "created_at_utc": "2026-11-15T21:06:43.542917+00:00",
   "source_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv",
-  "source_csv_sha256": "52e27663fe4235c9fe94fef22d15bfacf229fd94b4a60cca1a6dbf18c14bba1c",
+  "source_csv_sha256": "3c76f693d81284dc13af2f770bc8664a5cf3089dcca8792c30d486b3c0afa17c",
   "source_results_newer_than_csv": false,
   "run_metadata_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/run.json",
-  "run_metadata_sha256": "f436a93c3b3efab11e8a2c8ee03e33e0f993a50fcd5f246a17d776491df296ea",
+  "run_metadata_sha256": "d4b3211b7e123e6340e6f3ad791ab982f6c076ba073f7c74be090b05131dfae0",
   "unvalidated_plan_scores_excluded": false,
   "rank": 1,
   "case_weighting": "Equal weight per condition example",
