@@ -1,0 +1,68 @@
+{
+  "created_at_utc": "2026-11-15T07:37:54.166964+00:00",
+  "source_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv",
+  "source_csv_sha256": "65eef0eaf7d2aa32c58a1f7eeddcce8d681b751ac2ac1d2ae27ac6947871a649",
+  "source_results_newer_than_csv": true,
+  "run_metadata_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/run.json",
+  "run_metadata_sha256": "91a7ddba16fd824123ed629b3acb8a58edda900f6664e688217e03a9340a70aa",
+  "unvalidated_plan_scores_excluded": false,
+  "rank": 1,
+  "case_weighting": "Equal weight per condition example",
+  "rows": 38048,
+  "condition_examples": 2378,
+  "unique_patients": 2047,
+  "versions": {
+    "numpy": "1.26.4",
+    "pandas": "3.0.6",
+    "scipy": "1.17.1"
+  },
+  "test_policy": {
+    "null": "mean(retrieval - no retrieval) <= 0",
+    "alternative": "greater",
+    "test": "Paired CR1 patient-clustered t test",
+    "degrees_of_freedom": "patient clusters minus 1",
+    "thresholds": {
+      "*": "adjusted p < 0.05",
+      "**": "adjusted p < 0.01"
+    },
+    "missing_tests": "No stars; retain their place in the planned Holm family"
+  },
+  "main_results": {
+    "holm_family": "Three retrieval configurations within each generator/outcome",
+    "mean_intervals": "Pointwise 95% patient-cluster percentile bootstrap",
+    "bootstrap_samples": 1000,
+    "seed": 20261114
+  },
+  "generator_retrieval_gains": {
+    "holm_family": "Two single-source configurations across all generators and their average, per outcome",
+    "average": "Average paired scores equally across the fixed generators within each case before patient clustering",
+    "family_sizes": {
+      "diagnosis": 10,
+      "plan": 10
+    }
+  },
+  "group_retrieval_gains": {
+    "holm_family": "Nine tests: three retrieval configurations by three groups, within each generator/outcome",
+    "scope": "Within-group improvement; not a test comparing gains between groups",
+    "plan_history_scope": "Hypertension only; COPD reference Plans are unavailable"
+  },
+  "coverage_policy": "Keep individual means only for fully scored eligible arms; suppress differences and inference if any eligible pair is missing. Unavailable Plan references are excluded.",
+  "implementation_sha256": {
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/summarize_experiment_results.py": "d3e371557d29cec12d6e492a5273ec270644fc252f1ae9d55e7573d9b86a038f",
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_statistics.py": "cc38bc3f2fef2de54886a854f6931b8af6da8ca59c0ed30c4dbc4bbf4815f4d6"
+  },
+  "outputs": [
+    {
+      "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/main_results.csv",
+      "sha256": "771a9a02d54c52ad91609c81cb3263f74327034bc3a6a05aa274cd42fb432288"
+    },
+    {
+      "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/generator_retrieval_gains.csv",
+      "sha256": "355116e8c5e37355e7d279fa54e042c7ad9afd1e9a9c7477ff37ca95b00cdc7f"
+    },
+    {
+      "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
+      "sha256": "31647273874f71e81a01842cf57295ca4e6ee7aa1ef1840f96392622f84c183e"
+    }
+  ]
+}

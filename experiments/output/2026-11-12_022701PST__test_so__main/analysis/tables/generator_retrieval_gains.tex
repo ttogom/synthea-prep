@@ -1,0 +1,41 @@
+% Generated from baseline-significance CSVs; regenerate rather than editing numerical cells.
+% Use table* instead of table to span both columns; panel widths follow \linewidth.
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}
+\toprule
+\multicolumn{3}{@{}l}{\textbf{(a) Similar-patient retrieval}} \\[2pt]
+ & \multicolumn{2}{c@{}}{$\Delta$ vs. No retrieval} \\
+\cmidrule(l){2-3}
+Generator & Diagnosis & Treatment plan \\
+\midrule
+GPT-4o mini & $+0.05^{**}$ & -- \\
+Gemma 3 4B & $-0.14$ & -- \\
+Llama 3.2 3B & $+0.01$ & -- \\
+Ministral 3 3B & $+0.03^{**}$ & -- \\
+\addlinespace[3pt]
+Average across generators & $-0.01$ & -- \\
+\bottomrule
+\end{tabular*}
+\par\vspace{6pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}
+\toprule
+\multicolumn{3}{@{}l}{\textbf{(b) Guideline retrieval}} \\[2pt]
+ & \multicolumn{2}{c@{}}{$\Delta$ vs. No retrieval} \\
+\cmidrule(l){2-3}
+Generator & Diagnosis & Treatment plan \\
+\midrule
+GPT-4o mini & $-0.01$ & -- \\
+Gemma 3 4B & $+0.05^{**}$ & -- \\
+Llama 3.2 3B & $+0.17^{**}$ & -- \\
+Ministral 3 3B & $+0.07^{**}$ & -- \\
+\addlinespace[3pt]
+Average across generators & $+0.07^{**}$ & -- \\
+\bottomrule
+\end{tabular*}
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\caption{Mean changes in diagnosis and treatment-plan scores relative to "No retrieval." $^{*}p<0.05$, $^{**}p<0.01$: significant improvement in one-sided paired tests.}
+\label{tab:retrieval-gains}
+\end{table}

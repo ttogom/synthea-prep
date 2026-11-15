@@ -1,27 +1,62 @@
-from pathlib import Path
+"""Generate saved statistics for the three tables used in the report.
 
+The older diagnosis-only summary helper APIs below are retained from the
+committed version. The CLI generates only the three selected report tables.
+"""
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+
+import numpy as np
 import pandas as pd
+from scipy import __version__ as scipy_version
+
+# Direct script execution must resolve project modules before importing them.
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0,str(ROOT))
+
+from scripts.analysis.render_tables import generate_tables
+from scripts.analysis.table_statistics import (
+    summarize_main_results,
+    summarize_generator_retrieval_gains,
+    summarize_group_retrieval_gains,
+)
 
 
 RESULTS = "experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv"
-ROOT = Path(__file__).resolve().parents[2]
+
+
 DECIMAL_PLACES = 4
+
+
 MODEL_LABELS = {
     "gpt_4o_mini": "GPT-4o mini",
     "ollama_gemma3_4b": "Gemma 3 4B",
     "ollama_llama3_2_3b": "Llama 3.2 3B",
     "ollama_ministral_3_3b": "Ministral 3 3B",
 }
+
+
 VARIANT_LABELS = {
     "llm_only": "Baselines",
     "guidelines": "Baselines + Guideline RAG",
     "patient_retrieval": "Baselines + Sim. Patient Retrieval",
     "patient_retrieval_guidelines": "Baselines + Guideline RAG + Sim. Patient Retrieval",
 }
+
+
 SCORES = {
     "biolord_score_diagnosis1": "biolord",
     "bertf1_diagnosis1": "bertf1",
 }
+
+
 CONDITION_GROUPS = {
     "history": {
         "chronic obstructive pulmonary disease": "Chronic obstructive pulmonary disease",
@@ -37,6 +72,8 @@ CONDITION_GROUPS = {
         "chronic congestive heart failure": "Chronic congestive heart failure",
     },
 }
+
+
 CONDITION_VARIANT_LABELS = {
     "llm_only": "Baseline",
     "guidelines": "Guideline retrieval",
@@ -235,32 +272,158 @@ def render_condition_table(summary):
     return "\n".join(lines) + "\n"
 
 
-def main():
-    results_path = ROOT / RESULTS
-    summary = summarize_results(results_path)
-    table = render_diagnosis_table(summary)
-    all_condition_summary = summarize_conditions(results_path)
-    condition_summary = select_best_variants(all_condition_summary)
-    condition_table = render_condition_table(condition_summary)
-    output_dir = results_path.parent / "analysis"
-    tables_dir = output_dir / "tables"
-    tables_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = output_dir / "diagnosis_summary.csv"
-    table_path = tables_dir / "diagnosis_by_model_variant.tex"
-    condition_summary_path = output_dir / "diagnosis_by_condition_summary.csv"
-    all_condition_summary_path = output_dir / "diagnosis_by_condition_all_variants.csv"
-    condition_table_path = tables_dir / "diagnosis_by_condition.tex"
-    summary.to_csv(summary_path, na_rep="")
-    table_path.write_text(table, encoding="utf-8")
-    condition_summary.to_csv(condition_summary_path, na_rep="")
-    all_condition_summary.to_csv(all_condition_summary_path, na_rep="")
-    condition_table_path.write_text(condition_table, encoding="utf-8")
-    print(f"Saved diagnosis summary to {summary_path}")
-    print(f"Saved LaTeX table to {table_path}")
-    print(f"Saved condition summary to {condition_summary_path}")
-    print(f"Saved all-variant condition/group summary to {all_condition_summary_path}")
-    print(f"Saved condition table to {condition_table_path}")
+_UUID_SUFFIX = re.compile(r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$")
 
 
-if __name__ == "__main__":
+_RECORD_ARTIFACT = re.compile(r"\(\s*record\s+artifact\s*\)", re.IGNORECASE)
+
+
+REQUIRED_SCORE_COLUMNS = (
+    "id", "model", "variant", "bin", "condition_label", "plan_label",
+    "biolord_score_diagnosis1", "plan1_score", "plan1_status", "plan1_reason",
+)
+
+
+def load_scored_results(results_path):
+    """Load raw rank-1 outcomes; a missing judgement is never a zero score."""
+    results = pd.read_csv(results_path)
+    missing = set(REQUIRED_SCORE_COLUMNS) - set(results)
+    if missing:
+        raise ValueError(f"Missing table result columns: {sorted(missing)}")
+    if results.empty:
+        raise ValueError("The table results CSV is empty.")
+    keys = ["id", "model", "variant"]
+    if results[[*keys, "bin", "condition_label"]].isna().any().any():
+        raise ValueError("Case identity and condition/group labels must be populated.")
+    if results.duplicated(keys).any():
+        raise ValueError("table results require unique case/model/variant keys.")
+    if set(results["model"]) - set(MODEL_LABELS) or set(results["variant"]) - set(VARIANT_LABELS):
+        raise ValueError("table results contain unknown models or variants.")
+    condition_groups = {
+        condition: group for group, conditions in CONDITION_GROUPS.items() for condition in conditions
+    }
+    if not results["condition_label"].map(condition_groups).eq(results["bin"]).all():
+        raise ValueError("Condition labels do not match their expected groups.")
+    results["plan_label"] = results["plan_label"].fillna("").astype(str)
+    if results.groupby("id")[["bin", "condition_label", "plan_label"]].nunique().gt(1).any().any():
+        raise ValueError("Each case must have consistent condition, group, and reference labels.")
+    results["patient_uuid"] = results["id"].astype(str).map(
+        lambda value: match.group(1).lower() if (match := _UUID_SUFFIX.search(value)) else value
+    )
+    results["diagnosis"] = pd.to_numeric(results["biolord_score_diagnosis1"], errors="raise")
+    plan_score = pd.to_numeric(results["plan1_score"], errors="raise")
+    results["plan"] = plan_score.where(results["plan1_status"].eq("scored"))
+    # Reference availability is a case property, independent of generation/judge failures.
+    reference = results["plan_label"].str.strip()
+    results["plan_eligible"] = (
+        reference.ne("") & ~reference.str.casefold().isin(["none recorded", '["none recorded"]'])
+        & ~reference.str.contains(_RECORD_ARTIFACT)
+    )
+    results.loc[~results["plan_eligible"], "plan"] = np.nan
+    for metric in ("diagnosis", "plan"):
+        values = results[metric].dropna()
+        if not np.isfinite(values).all() or not values.between(0, 1).all():
+            raise ValueError(f"{metric} scores must be finite and within [0, 1], or missing.")
+    return results
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1000, seed=20261114):
+    """Generate only the CSVs required by the three report tables.
+
+    Read source and run metadata without changing them. Snapshot fingerprints
+    connect the saved statistics to the experiment; abort if the CSV changes
+    while calculations are running. Never publish incomplete eligible cohorts.
+    """
+    results_path = Path(results_path).expanduser().resolve()
+    output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else results_path.parent / 'analysis'
+    source_hash = _sha256(results_path)
+    results = load_scored_results(results_path)
+    run_path = results_path.with_name('run.json')
+    run_bytes = run_path.read_bytes() if run_path.exists() else None
+    run = json.loads(run_bytes) if run_bytes is not None else {}
+    judge = run.get('plan_evaluation', {}).get('judge_settings', {})
+    unvalidated = any(judge.get(field) == 'experimental_unvalidated'
+                      for field in ('validation_status', 'reporting'))
+    if unvalidated:
+        results['plan'] = np.nan
+    summaries = {
+        'main_results': summarize_main_results(results, bootstrap_samples, seed),
+        'generator_retrieval_gains': summarize_generator_retrieval_gains(results, include_model_average=True),
+        'group_retrieval_gains': summarize_group_retrieval_gains(results),
+    }
+    if source_hash != _sha256(results_path):
+        raise RuntimeError('The source CSV changed during analysis; rerun from a stable export.')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for name, frame in summaries.items():
+        path = output_dir / f'{name}.csv'
+        frame.to_csv(path, index=False, na_rep='')
+        outputs.append({'path': str(path), 'sha256': _sha256(path)})
+    source_jsonl = results_path.with_name('results.jsonl')
+    manifest = {
+        'created_at_utc': datetime.now(timezone.utc).isoformat(),
+        'source_csv': str(results_path), 'source_csv_sha256': source_hash,
+        'source_results_newer_than_csv': source_jsonl.exists() and source_jsonl.stat().st_mtime > results_path.stat().st_mtime,
+        'run_metadata_path': str(run_path) if run_bytes is not None else None,
+        'run_metadata_sha256': hashlib.sha256(run_bytes).hexdigest() if run_bytes is not None else None,
+        'unvalidated_plan_scores_excluded': unvalidated,
+        'rank': 1, 'case_weighting': 'Equal weight per condition example',
+        'rows': len(results), 'condition_examples': results['id'].nunique(),
+        'unique_patients': results['patient_uuid'].nunique(),
+        'versions': {'numpy': np.__version__, 'pandas': pd.__version__, 'scipy': scipy_version},
+        'test_policy': {
+            'null': 'mean(retrieval - no retrieval) <= 0', 'alternative': 'greater',
+            'test': 'Paired CR1 patient-clustered t test', 'degrees_of_freedom': 'patient clusters minus 1',
+            'thresholds': {'*': 'adjusted p < 0.05', '**': 'adjusted p < 0.01'},
+            'missing_tests': 'No stars; retain their place in the planned Holm family',
+        },
+        'main_results': {
+            'holm_family': 'Three retrieval configurations within each generator/outcome',
+            'mean_intervals': 'Pointwise 95% patient-cluster percentile bootstrap',
+            'bootstrap_samples': bootstrap_samples, 'seed': seed,
+        },
+        'generator_retrieval_gains': {
+            'holm_family': 'Two single-source configurations across all generators and their average, per outcome',
+            'average': 'Average paired scores equally across the fixed generators within each case before patient clustering',
+            'family_sizes': summaries['generator_retrieval_gains'].groupby('metric')['family_size'].first().to_dict(),
+        },
+        'group_retrieval_gains': {
+            'holm_family': 'Nine tests: three retrieval configurations by three groups, within each generator/outcome',
+            'scope': 'Within-group improvement; not a test comparing gains between groups',
+            'plan_history_scope': 'Hypertension only; COPD reference Plans are unavailable',
+        },
+        'coverage_policy': 'Keep individual means only for fully scored eligible arms; suppress differences and inference if any eligible pair is missing. Unavailable Plan references are excluded.',
+        'implementation_sha256': {
+            str(path.resolve()): _sha256(path)
+            for path in (Path(__file__), Path(__file__).with_name('table_statistics.py'))
+        },
+        'outputs': outputs,
+    }
+    (output_dir / 'table_statistics_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    return manifest
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--results-csv', type=Path, default=ROOT / RESULTS)
+    parser.add_argument('--csv-only', action='store_true', help='Regenerate the three statistics CSVs without rendering TeX.')
+    args = parser.parse_args(argv)
+    manifest = generate_table_statistics(args.results_csv)
+    analysis_dir = args.results_csv.expanduser().resolve().parent / 'analysis'
+    print(f'Saved statistics and provenance to {analysis_dir}')
+    if not args.csv_only:
+        # All imports remain at module scope; this renderer only consumes the saved CSVs.
+        generate_tables(analysis_dir)
+    return manifest
+
+
+if __name__ == '__main__':
     main()

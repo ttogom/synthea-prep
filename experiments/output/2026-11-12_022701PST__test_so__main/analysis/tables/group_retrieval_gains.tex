@@ -1,0 +1,33 @@
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}l@{\hspace{2pt}}l@{\hspace{6pt}}l@{\hspace{8pt}}llll@{\hspace{8pt}}lll@{}}
+\toprule
+ & & \multicolumn{4}{c}{Diagnoses} & \multicolumn{4}{c}{Treatment Plans} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+ & & & \multicolumn{3}{c}{\footnotesize $\Delta$ vs. No retrieval} & & \multicolumn{3}{c}{\footnotesize $\Delta$ vs. No retrieval} \\
+\cmidrule(lr){4-6}\cmidrule(lr){8-10}
+\shortstack[l]{Generator\\Model} & Group & {\footnotesize\shortstack[l]{No retrieval\\(score)}} & {\footnotesize\shortstack[l]{Sim. patient\\retrieval}} & {\footnotesize\shortstack[l]{Guideline\\retrieval}} & {\footnotesize Both} & {\footnotesize\shortstack[l]{No retrieval\\(score)}} & {\footnotesize\shortstack[l]{Sim. patient\\retrieval}} & {\footnotesize\shortstack[l]{Guideline\\retrieval}} & {\footnotesize Both} \\
+\midrule
+GPT-4o mini & History & {\footnotesize $0.63$} & {\footnotesize $\mathbf{+0.06}^{**}$} & {\footnotesize $-0.02$} & {\footnotesize $+0.04^{**}$} & {\footnotesize $0.42$} & {\footnotesize $\mathbf{+0.00}$} & {\footnotesize $-0.15$} & {\footnotesize $-0.08$} \\
+ & Acute & {\footnotesize $0.78$} & {\footnotesize $\mathbf{+0.06}^{**}$} & {\footnotesize $-0.01$} & {\footnotesize $+0.03^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+ & Control & {\footnotesize $\mathbf{0.84}$} & {\footnotesize $-0.05$} & {\footnotesize $-0.01$} & {\footnotesize $-0.01$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+\midrule
+Gemma 3 4B & History & {\footnotesize $0.47$} & {\footnotesize $-0.10$} & {\footnotesize $\mathbf{+0.11}^{**}$} & {\footnotesize $+0.06^{**}$} & {\footnotesize $\mathbf{0.20}$} & {\footnotesize $-0.05$} & {\footnotesize $-0.09$} & {\footnotesize $-0.05$} \\
+ & Acute & {\footnotesize $0.67$} & {\footnotesize $-0.16$} & {\footnotesize $\mathbf{+0.04}^{**}$} & {\footnotesize $+0.04^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+ & Control & {\footnotesize $0.80$} & {\footnotesize $-0.04$} & {\footnotesize $\mathbf{+0.03}^{**}$} & {\footnotesize $+0.02^{*}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+\midrule
+Llama 3.2 3B & History & {\footnotesize $0.34$} & {\footnotesize $-0.02$} & {\footnotesize $\mathbf{+0.14}^{**}$} & {\footnotesize $+0.06^{**}$} & {\footnotesize $0.06$} & {\footnotesize $+0.01$} & {\footnotesize $\mathbf{+0.04}^{**}$} & {\footnotesize $+0.04^{*}$} \\
+ & Acute & {\footnotesize $0.51$} & {\footnotesize $+0.04^{**}$} & {\footnotesize $\mathbf{+0.18}^{**}$} & {\footnotesize $+0.12^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+ & Control & {\footnotesize $0.74$} & {\footnotesize $-0.20$} & {\footnotesize $\mathbf{+0.05}$} & {\footnotesize $-0.06$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+\midrule
+Ministral 3 3B & History & {\footnotesize $0.41$} & {\footnotesize $-0.01$} & {\footnotesize $+0.10^{**}$} & {\footnotesize $\mathbf{+0.12}^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+ & Acute & {\footnotesize $0.56$} & {\footnotesize $+0.04^{**}$} & {\footnotesize $\mathbf{+0.06}^{**}$} & {\footnotesize $+0.05^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+ & Control & {\footnotesize $0.63$} & {\footnotesize $+0.00$} & {\footnotesize $+0.05^{**}$} & {\footnotesize $\mathbf{+0.07}^{**}$} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} & {\footnotesize --} \\
+\bottomrule
+\end{tabular*}
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\caption{Diagnosis and treatment-plan results by condition group. $^{*}p<0.05$, $^{**}p<0.01$: significant improvement over "No retrieval" in one-sided paired tests. Bold marks the best configuration within each group; raw scores range from 0 to 1.}
+\label{tab:group-retrieval-gains}
+\end{table*}
