@@ -33,6 +33,88 @@ def fixture():
     return pd.DataFrame(rows)
 
 
+class ExploratoryTwoSidedTests(unittest.TestCase):
+    def test_main_checks_match_scipy_for_both_directions_and_outcomes(self):
+        frame = fixture()
+        frame["plan"] = 1 - frame.diagnosis
+        output = summarize_main_results(frame, bootstrap_samples=32)
+        for metric in ("diagnosis", "plan"):
+            pivot = frame.pivot(index="id", columns="variant", values=metric)
+            expected = []
+            for variant in VARIANTS[1:]:
+                reference = ttest_rel(pivot[variant], pivot.llm_only, alternative="two-sided")
+                primary = ttest_rel(pivot[variant], pivot.llm_only, alternative="greater")
+                row = output.loc[output.metric.eq(metric) & output.variant.eq(variant)].iloc[0]
+                np.testing.assert_allclose(row.p_value_two_sided, reference.pvalue, rtol=1e-10, atol=0)
+                np.testing.assert_allclose(row.p_value, primary.pvalue, rtol=1e-10, atol=0)
+                expected.append(reference.pvalue)
+                if row.baseline_delta < 0:
+                    self.assertEqual(row.stars, "")
+                    self.assertGreater(row.p_value, 0.5)
+            selected = output.loc[output.metric.eq(metric) & output.variant.ne("llm_only")]
+            np.testing.assert_allclose(selected.p_value_two_sided_holm,
+                                       multipletests(expected, method="holm")[1])
+            negative = selected.loc[selected.baseline_delta.lt(-0.01)].iloc[0]
+            self.assertTrue(negative.significant_two_sided_holm_0_01)
+            self.assertTrue(negative.significant_two_sided_holm_0_05)
+        baseline = output.loc[output.variant.eq("llm_only")]
+        self.assertTrue(baseline.p_value_two_sided.isna().all())
+        self.assertTrue(baseline.significant_two_sided_holm_0_05.isna().all())
+
+    def test_generator_checks_match_clustered_reference_and_include_average_family(self):
+        frame = fixture()
+        frame["patient_uuid"] = frame.id.astype(int).floordiv(2).astype(str)
+        other = frame.assign(model="ollama_gemma3_4b", diagnosis=frame.diagnosis * 0.9 + 0.02,
+                             plan=frame.plan * 0.9 + 0.02)
+        frame = pd.concat([frame, other], ignore_index=True)
+        output = summarize_generator_retrieval_gains(frame, include_model_average=True)
+        for metric in ("diagnosis", "plan"):
+            block = output.loc[output.metric.eq(metric)]
+            self.assertTrue(block.family_size.eq(6).all())
+            expected = []
+            for row in block.itertuples():
+                subset = frame if row.model == MODEL_AVERAGE else frame.loc[frame.model.eq(row.model)]
+                pivot = subset.groupby(["id", "variant"])[metric].mean().unstack()
+                patients = subset.drop_duplicates("id").set_index("id").loc[pivot.index, "patient_uuid"]
+                delta = pivot[row.variant] - pivot.llm_only
+                reference = sm.OLS(delta, np.ones((len(delta), 1))).fit(
+                    cov_type="cluster", cov_kwds={"groups": patients, "use_correction": True}, use_t=True)
+                np.testing.assert_allclose(row.p_value_two_sided, reference.pvalues.iloc[0], rtol=1e-10, atol=0)
+                self.assertEqual(row.test_df, patients.nunique() - 1)
+                expected.append(reference.pvalues.iloc[0])
+            np.testing.assert_allclose(block.p_value_two_sided_holm,
+                                       multipletests(expected, method="holm")[1], rtol=1e-9)
+
+    def test_missing_checks_stay_unavailable_and_keep_their_holm_family_place(self):
+        frame = fixture()
+        frame.loc[frame.id.eq("0") & frame.variant.eq("patient_retrieval"), "plan"] = np.nan
+        outputs = (
+            (summarize_main_results(frame, bootstrap_samples=32).query("variant != 'llm_only'"), ("model",)),
+            (summarize_generator_retrieval_gains(frame, include_model_average=True), ("metric",)),
+        )
+        for output, family_columns in outputs:
+            plan = output.loc[output.metric.eq("plan")]
+            missing = plan.variant.eq("patient_retrieval")
+            self.assertTrue(plan.loc[missing, "p_value_two_sided"].isna().all())
+            self.assertTrue(plan.loc[missing, "significant_two_sided_holm_0_05"].isna().all())
+            for _, family in plan.groupby(list(family_columns), sort=False):
+                expected = multipletests(family.p_value_two_sided.fillna(1), method="holm")[1]
+                available = family.p_value_two_sided.notna().to_numpy()
+                np.testing.assert_allclose(family.loc[available, "p_value_two_sided_holm"], expected[available])
+            self.assertTrue(output.loc[output.metric.eq("diagnosis"), "p_value_two_sided"].notna().all())
+
+    def test_single_cluster_and_zero_variance_do_not_invent_secondary_significance(self):
+        frame = fixture()
+        for variant, score in zip(VARIANTS, (0.4, 0.5, 0.3, 0.6)):
+            frame.loc[frame.variant.eq(variant), ["diagnosis", "plan"]] = score
+        for data in (frame, fixture().assign(patient_uuid="one-patient")):
+            for output in (summarize_main_results(data, bootstrap_samples=32),
+                           summarize_generator_retrieval_gains(data, include_model_average=True)):
+                self.assertTrue(output.p_value_two_sided.isna().all())
+                self.assertTrue(output.p_value_two_sided_holm.isna().all())
+                self.assertTrue(output.significant_two_sided_holm_0_05.isna().all())
+
+
 class MainAndGroupStatisticsTests(unittest.TestCase):
     def test_group_tests_match_clustered_reference_and_adjust_within_outcome(self):
         frame = fixture()

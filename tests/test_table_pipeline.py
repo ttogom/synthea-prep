@@ -108,6 +108,26 @@ class TablePipelineTests(unittest.TestCase):
             self.assertEqual(record['table_sha256'],record['report_sha256'])
             self.assertEqual(record['input_csv_sha256'],hashlib.sha256((self.analysis/f'{name}.csv').read_bytes()).hexdigest())
 
+    def test_exploratory_checks_are_separate_reproducible_and_ready_for_treatment(self):
+        manifest = self.summarize(plan_ready=False)
+        policy = manifest['exploratory_two_sided']
+        self.assertEqual(policy['alternative'], 'two-sided')
+        self.assertEqual(policy['outcomes'], ['diagnosis', 'plan'])
+        self.assertIn('Post-hoc', policy['status'])
+        self.assertEqual(manifest['test_policy']['alternative'], 'greater')
+        for name in policy['tables']:
+            saved = pd.read_csv(self.analysis / f'{name}.csv')
+            self.assertTrue(saved.loc[saved.metric.eq('plan'), 'p_value_two_sided'].isna().all())
+        self.summarize(plan_ready=True)
+        for name in policy['tables']:
+            saved = pd.read_csv(self.analysis / f'{name}.csv')
+            comparisons = saved.loc[saved.variant.ne('llm_only')]
+            self.assertTrue(comparisons.p_value_two_sided.notna().all())
+            self.assertTrue(comparisons.p_value_two_sided_holm.notna().all())
+            extra = [column for column in saved if 'two_sided' in column]
+            self.assertEqual(exporter.TABLES[name](saved), exporter.TABLES[name](saved.drop(columns=extra)))
+        self.assertNotIn('p_value_two_sided', pd.read_csv(self.analysis / 'group_retrieval_gains.csv'))
+
     def test_completed_plan_export_populates_all_three_tables(self):
         self.summarize(plan_ready=False)
         exporter.generate_tables(self.analysis,report_dir=self.report)
@@ -153,6 +173,8 @@ class TablePipelineTests(unittest.TestCase):
             frame=pd.read_csv(self.analysis/f'{name}.csv')
             plan=frame.loc[frame.metric.eq('plan')]
             self.assertTrue(plan.p_value_holm.isna().all())
+            if name in ('main_results', 'generator_retrieval_gains'):
+                self.assertTrue(plan.p_value_two_sided_holm.isna().all())
         rows=self.rows()
         for row in rows:
             if row['bin']=='history':

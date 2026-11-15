@@ -78,7 +78,7 @@ def render_main_results_table(scores):
         ("patient_retrieval_guidelines", "Both"),
     )
     lines = [
-        r"\begin{table*}[t]", r"\centering", r"\small",
+        r"\begin{table*}[!b]", r"\centering", r"\small",
         r"\setlength{\tabcolsep}{2pt}",
         r"\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllclc@{}}",
         r"\toprule",
@@ -242,7 +242,7 @@ def render_group_retrieval_gains_table(scores):
                          r"{\footnotesize\shortstack[l]{Guideline\\retrieval}} & {\footnotesize Both}")
     baseline_header = r"{\footnotesize\shortstack[l]{No retrieval\\(score)}}"
     lines = [
-        r"\begin{table*}[t]", r"\centering", r"\small", r"\setlength{\tabcolsep}{2pt}",
+        r"\begin{table*}[!b]", r"\centering", r"\small", r"\setlength{\tabcolsep}{2pt}",
         r"\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}l@{\hspace{2pt}}l@{\hspace{6pt}}l@{\hspace{8pt}}llll@{\hspace{8pt}}lll@{}}", r"\toprule",
         r" & & \multicolumn{4}{c}{Diagnoses} & \multicolumn{4}{c}{Treatment Plans} \\",
         r"\cmidrule(lr){3-6}\cmidrule(lr){7-10}",

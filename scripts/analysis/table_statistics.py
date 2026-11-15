@@ -53,6 +53,32 @@ def _paired_cluster_test(differences, patients, alternative="greater"):
     return statistic, count - 1, float(pvalue), "tested"
 
 
+def _with_exploratory_two_sided_checks(summary, family_columns, effect_column):
+    """Add separate post-hoc checks; never replace primary p-values or stars.
+
+    Reuse the saved paired CR1 t statistics and degrees of freedom. Retain every
+    comparison in each original Holm family, including unavailable tests, rather
+    than selecting only the observed decreases. Baseline rows are not tests.
+    """
+    output = summary.copy()
+    for column in ("p_value_two_sided", "p_value_two_sided_holm"):
+        output[column] = np.nan
+    comparisons = output.variant.ne("llm_only")
+    tested = comparisons & output.test_status.eq("tested")
+    output.loc[tested, "p_value_two_sided"] = 2 * student_t.sf(
+        np.abs(output.loc[tested, "test_statistic"].to_numpy(dtype=float)),
+        output.loc[tested, "test_df"].to_numpy(dtype=float),
+    )
+    for _, family in output.loc[comparisons].groupby(list(family_columns), sort=False):
+        output.loc[family.index, "p_value_two_sided_holm"] = _holm_adjust(family.p_value_two_sided)
+    for adjustment, column in (("raw", "p_value_two_sided"), ("holm", "p_value_two_sided_holm")):
+        for alpha in SIGNIFICANCE_LEVELS:
+            flag = f"significant_two_sided_{adjustment}_{str(alpha).replace('.', '_')}"
+            significant = output[effect_column].ne(0) & output[column].lt(alpha)
+            output[flag] = significant.where(output[column].notna(), pd.NA).astype("boolean")
+    return output
+
+
 def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
     """Return main-results means, pointwise 95% CIs, raw/adjusted p-values, and stars.
 
@@ -60,6 +86,8 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
     unvalidated Plan judge scores already masked. Missing eligible scores are
     never dropped to obtain a selectively complete cohort. The null is
     mean(retrieval - baseline) <= 0; the alternative is a positive difference.
+    Separate exploratory two-sided columns reuse the same three-comparison
+    family per model/outcome and do not determine the reported stars.
     """
     if isinstance(bootstrap_samples, bool) or not isinstance(bootstrap_samples, int) or bootstrap_samples < 2:
         raise ValueError("bootstrap_samples must be an integer of at least two.")
@@ -128,7 +156,9 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
                 if record["baseline_delta"] > 0 and np.isfinite(adjusted):
                     record["stars"] = "**" if adjusted < 0.01 else "*" if adjusted < 0.05 else ""
             rows.extend(family)
-    return pd.DataFrame(rows)
+    return _with_exploratory_two_sided_checks(
+        pd.DataFrame(rows), ("model", "metric"), "baseline_delta",
+    )
 
 
 def summarize_generator_retrieval_gains(results, metrics=("diagnosis", "plan"),
@@ -150,13 +180,15 @@ def summarize_generator_retrieval_gains(results, metrics=("diagnosis", "plan"),
     clustering by patient; do not treat generators as independent replicates.
     A missing score from any generator makes that averaged case unavailable.
     Both average tests join the Holm family (ten tests for four generators).
+    Separate exploratory two-sided columns retain this entire family per outcome.
     """
     if not isinstance(include_model_average, bool):
         raise ValueError("include_model_average must be a boolean.")
     comparisons = tuple((variant, "llm_only") for variant in BASELINE_TEST_VARIANTS)
-    return _summarize_paired_significance(
+    summary = _summarize_paired_significance(
         results, metrics, comparisons, "greater", include_model_average=include_model_average,
     )
+    return _with_exploratory_two_sided_checks(summary, ("metric",), "mean_difference")
 
 
 def _summarize_paired_significance(results, metrics, comparisons, alternative,

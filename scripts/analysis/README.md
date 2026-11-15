@@ -75,6 +75,21 @@ Holm families are separate for each outcome:
   within each generator. These test improvement within groups, not differences
   between group gains.
 
+`main_results.csv` and `generator_retrieval_gains.csv` also save **exploratory
+two-sided checks** for diagnosis and treatment scores. These were added after
+observing decreases and test equality with No retrieval against a difference
+in either direction. They reuse the same paired CR1 statistics and degrees of
+freedom, with `p_value_two_sided = 2 * Student-t.sf(abs(t), df)`. Holm correction
+retains each table's full family listed above, including positive and negative
+effects and the generator-average comparisons; it is not restricted to the two
+declines that motivated the checks. Unavailable tests retain their family place.
+
+The supplementary columns are `p_value_two_sided`, `p_value_two_sided_holm`, and
+`significant_two_sided_{raw,holm}_{0_01,0_05}`. Primary `p_value`, `p_value_holm`,
+and `stars` remain one-sided improvement results. The exploratory checks do not
+alter any table markers. The normal CSV-only regeneration command updates both
+sets of tests, including treatment checks when eligible scores are complete.
+
 The main-results 95% intervals describe absolute means and use a seeded patient
 cluster bootstrap. Incomplete eligible arms or comparisons remain unreported;
 missing judgments are never zero scores. Unavailable Plan references are excluded.

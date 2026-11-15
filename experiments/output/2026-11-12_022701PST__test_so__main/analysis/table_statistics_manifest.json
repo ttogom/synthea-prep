@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-15T07:37:54.166964+00:00",
+  "created_at_utc": "2026-11-15T08:26:07.633236+00:00",
   "source_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv",
   "source_csv_sha256": "65eef0eaf7d2aa32c58a1f7eeddcce8d681b751ac2ac1d2ae27ac6947871a649",
   "source_results_newer_than_csv": true,
@@ -17,6 +17,7 @@
     "scipy": "1.17.1"
   },
   "test_policy": {
+    "scope": "Primary improvement p-values and table stars",
     "null": "mean(retrieval - no retrieval) <= 0",
     "alternative": "greater",
     "test": "Paired CR1 patient-clustered t test",
@@ -26,6 +27,33 @@
       "**": "adjusted p < 0.01"
     },
     "missing_tests": "No stars; retain their place in the planned Holm family"
+  },
+  "exploratory_two_sided": {
+    "status": "Post-hoc checks motivated by observed decreases; separate from primary improvement tests",
+    "tables": [
+      "main_results",
+      "generator_retrieval_gains"
+    ],
+    "outcomes": [
+      "diagnosis",
+      "plan"
+    ],
+    "null": "mean(retrieval - no retrieval) = 0",
+    "alternative": "two-sided",
+    "test": "Same paired CR1 patient-clustered t statistic and df; p = 2 * Student-t sf(abs(t), df)",
+    "multiplicity": "Holm separately from primary tests, retaining each table full original comparison family",
+    "main_results_family": "Three retrieval comparisons per generator/outcome; baseline excluded",
+    "generator_retrieval_gains_family": "Both single sources across all generators and their average, per outcome",
+    "missing_tests": "Unavailable checks remain missing and retain their Holm-family place",
+    "p_value_columns": [
+      "p_value_two_sided",
+      "p_value_two_sided_holm"
+    ],
+    "significance_thresholds": [
+      0.01,
+      0.05
+    ],
+    "table_stars": "Unchanged: determined only by primary one-sided improvement tests"
   },
   "main_results": {
     "holm_family": "Three retrieval configurations within each generator/outcome",
@@ -48,17 +76,17 @@
   },
   "coverage_policy": "Keep individual means only for fully scored eligible arms; suppress differences and inference if any eligible pair is missing. Unavailable Plan references are excluded.",
   "implementation_sha256": {
-    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/summarize_experiment_results.py": "d3e371557d29cec12d6e492a5273ec270644fc252f1ae9d55e7573d9b86a038f",
-    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_statistics.py": "cc38bc3f2fef2de54886a854f6931b8af6da8ca59c0ed30c4dbc4bbf4815f4d6"
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/summarize_experiment_results.py": "af9db47bfc5b0ff8f06e8b804fae0d1575cdbab6435e206946960a0c52a0e724",
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_statistics.py": "3c8023e35a9648480c1efc3e8988b92c1ae14043db730343b919a9e8a71bfeb9"
   },
   "outputs": [
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/main_results.csv",
-      "sha256": "771a9a02d54c52ad91609c81cb3263f74327034bc3a6a05aa274cd42fb432288"
+      "sha256": "e8118ac53a91296374a825da764e77738dc6e345da50c9e23aaf5c082da58359"
     },
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/generator_retrieval_gains.csv",
-      "sha256": "355116e8c5e37355e7d279fa54e042c7ad9afd1e9a9c7477ff37ca95b00cdc7f"
+      "sha256": "f8a96a3c82871fe6f4f5a0dd20cc415ba017ee29253bf3722ec3ddcb37b8d8e2"
     },
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
