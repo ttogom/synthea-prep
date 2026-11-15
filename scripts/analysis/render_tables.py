@@ -1,6 +1,6 @@
-"""Render the three report tables from saved statistics CSVs.
+"""Render the four report tables from three saved statistics CSVs.
 
-Run after summarize_experiment_results.py --csv-only. By default all three
+Run after summarize_experiment_results.py --csv-only. By default all four
 experiment artifacts and report copies are updated. Use --table to select one,
 or --analysis-only to leave the report untouched. No statistical tests or judging are run.
 """
@@ -24,6 +24,7 @@ from scripts.analysis.table_rendering import (
     render_main_results_table,
     render_generator_retrieval_gains_table,
     render_group_retrieval_gains_table,
+    render_history_gains_over_others_table,
 )
 
 
@@ -33,7 +34,12 @@ TABLES = {
     'main_results': render_main_results_table,
     'generator_retrieval_gains': render_generator_retrieval_gains_table,
     'group_retrieval_gains': render_group_retrieval_gains_table,
+    'history_gains_over_others': render_history_gains_over_others_table,
 }
+
+# Multiple layouts can share one statistics CSV; never duplicate computed results.
+TABLE_INPUTS = {name: name for name in TABLES}
+TABLE_INPUTS['history_gains_over_others'] = 'group_retrieval_gains'
 
 
 def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=None):
@@ -49,7 +55,7 @@ def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=
         raise ValueError('Select distinct table names from: ' + ', '.join(TABLES))
     prepared = {}
     for name in names:
-        source = analysis_dir / f'{name}.csv'
+        source = analysis_dir / f'{TABLE_INPUTS[name]}.csv'
         snapshot = source.read_bytes()
         scores = pd.read_csv(StringIO(snapshot.decode('utf-8-sig')))
         prepared[name] = (source, snapshot, TABLES[name](scores).encode('utf-8'))

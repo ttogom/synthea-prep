@@ -1,4 +1,4 @@
-"""Validate the three retained report-table layouts and score availability."""
+"""Validate report-table layouts and score availability."""
 
 from pathlib import Path
 import sys
@@ -82,6 +82,85 @@ class RetrievalGainRenderingTests(unittest.TestCase):
             with self.subTest(columns=list(scores.columns), rows=len(scores)):
                 with self.assertRaises(ValueError):
                     rendering.render_generator_retrieval_gains_table(scores)
+
+
+class HistoryGainRenderingTests(unittest.TestCase):
+    def setUp(self):
+        self.scores = pd.DataFrame([
+            {"model": model, "metric": metric, "group": group, "variant": "patient_retrieval",
+             "history_contrast_reference_group": "history", "history_contrast_family_size": 4,
+             "history_contrast_estimate": effect if metric == "diagnosis" else np.nan,
+             "history_contrast_p_value_holm": pvalue if metric == "diagnosis" else np.nan,
+             "history_contrast_coverage_complete": metric == "diagnosis",
+             "history_contrast_test_status": "tested" if metric == "diagnosis" else "incomplete",
+             "p_value_holm": 0.000001}  # Within-group stars must not leak into direct contrasts.
+            for model, group, effect, pvalue in (
+                ("gpt_4o_mini", "acute", -0.002574, 1.0),
+                ("gpt_4o_mini", "control", 0.104419, 0.000001),
+                ("ollama_gemma3_4b", "acute", 0.056952, 0.001035),
+                ("ollama_gemma3_4b", "control", -0.066041, 1.0))
+            for metric in rendering.METRICS
+        ])
+
+    def test_approved_panels_three_decimals_and_direct_stars(self):
+        text = rendering.render_history_gains_over_others_table(self.scores)
+        self.assertIn(r"\begin{table}[!hbp]", text)
+        self.assertEqual(text.count(r"\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}"), 2)
+        self.assertIn("(a) History $-$ Acute", text)
+        self.assertIn("(b) History $-$ Control", text)
+        self.assertIn(r"GPT-4o mini & $-0.003$ & --", text)
+        self.assertIn(r"GPT-4o mini & $+0.104^{**}$ & --", text)
+        self.assertIn(r"Gemma 3 4B & $+0.057^{**}$ & --", text)
+        self.assertIn(r"Gemma 3 4B & $-0.066$ & --", text)
+        self.assertEqual(text.count(r"Generator & Diagnosis & Treatment plan"), 2)
+        self.assertEqual(text.count(r"\caption{"), 1)
+        self.assertIn(r"\label{tab:history-gains-over-others}", text)
+        self.assertIn("Holm-adjusted across both comparisons and all generators", text)
+        self.assertNotIn("Average", text)
+        self.assertNotIn(r"\mathbf", text)
+        without_plan = rendering.render_history_gains_over_others_table(self.scores.query("metric == 'diagnosis'"))
+        self.assertEqual(text, without_plan)
+
+    def test_completed_treatment_uses_unrounded_effect_and_adjusted_thresholds(self):
+        plans = self.scores.metric.eq("plan")
+        self.scores.loc[plans, "history_contrast_coverage_complete"] = True
+        self.scores.loc[plans, "history_contrast_test_status"] = "tested"
+        self.scores.loc[plans, "history_contrast_estimate"] = 0.123456
+        self.scores.loc[plans, "history_contrast_p_value_holm"] = 0.01
+        text = rendering.render_history_gains_over_others_table(self.scores)
+        self.assertEqual(text.count(r"& $+0.123^{*}$"), 4)
+        self.scores.loc[plans, "history_contrast_p_value_holm"] = 0.05
+        self.assertEqual(rendering.render_history_gains_over_others_table(self.scores).count(r"& $+0.123$"), 4)
+        self.scores.loc[plans, "history_contrast_estimate"] = -0.0004
+        self.scores.loc[plans, "history_contrast_p_value_holm"] = 0.001
+        text = rendering.render_history_gains_over_others_table(self.scores)
+        self.assertNotIn("-0.000", text)
+        self.assertEqual(text.count(r"& $+0.000$"), 4)
+        self.scores.loc[plans, "history_contrast_estimate"] = 0.0004
+        self.assertEqual(rendering.render_history_gains_over_others_table(self.scores).count(r"& $+0.000^{**}$"), 4)
+
+    def test_incomplete_stale_effects_are_masked_and_unavailable_tests_have_no_stars(self):
+        plans = self.scores.metric.eq("plan")
+        self.scores.loc[plans, "history_contrast_estimate"] = 0.999
+        self.assertNotIn("0.999", rendering.render_history_gains_over_others_table(self.scores))
+        self.scores.loc[plans, "history_contrast_coverage_complete"] = True
+        self.scores.loc[plans, "history_contrast_test_status"] = "zero_variance"
+        self.assertEqual(rendering.render_history_gains_over_others_table(self.scores).count(r"& $+0.999$"), 4)
+
+    def test_bad_schema_identity_coverage_pvalues_or_family_is_rejected(self):
+        for data in (
+            self.scores.drop(columns="history_contrast_estimate"), self.scores.iloc[1:],
+            pd.concat([self.scores, self.scores.iloc[[0]]]),
+            self.scores.assign(history_contrast_family_size=2),
+            self.scores.assign(history_contrast_reference_group="acute"),
+            self.scores.assign(variant="guidelines"),
+            self.scores.assign(history_contrast_estimate=np.inf),
+            self.scores.assign(history_contrast_p_value_holm=-0.1),
+            self.scores.assign(history_contrast_test_status="tested"),
+            self.scores.assign(history_contrast_test_status="unknown"),
+        ):
+            with self.subTest(columns=list(data.columns), rows=len(data)), self.assertRaises(ValueError):
+                rendering.render_history_gains_over_others_table(data)
 
 
 class TableRenderingTests(unittest.TestCase):

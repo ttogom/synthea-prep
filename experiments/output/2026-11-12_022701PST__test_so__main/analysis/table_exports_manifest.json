@@ -7,12 +7,10 @@
       "table_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/tables/main_results.tex",
       "table_sha256": "1799dbc93508949288bdaabf63c579b1077904c2e324165512add7f211c2563a",
       "implementation_sha256": {
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "f4891f8e257e96cbae0f0658307e5c3be959bb9e829f82484801047fd87f389d",
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "d4dfa09cd2359f315123e0e7cd80da0719bca1fb2177bf07aea04577e0efd400"
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "7444317cf4cb6e08321e5874a0a4f05da6b2d92824ba4533dd2695f9e4eda18d",
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "535e93831fc0e2e10e517fc06c4ccf661bab05a9f0314e47ebb042574a76f49e"
       },
-      "created_at_utc": "2026-11-15T08:26:07.735945+00:00",
-      "report_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/CSCI-566-Midterm-Report/figures/main_results.tex",
-      "report_sha256": "1799dbc93508949288bdaabf63c579b1077904c2e324165512add7f211c2563a"
+      "created_at_utc": "2026-11-15T09:37:30.382584+00:00"
     },
     "generator_retrieval_gains": {
       "input_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/generator_retrieval_gains.csv",
@@ -20,25 +18,34 @@
       "table_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/tables/generator_retrieval_gains.tex",
       "table_sha256": "badd4e665e1d3a1452cfa4dcc0f5688a9c7c1c83b1e166887eecb6fccce3dde6",
       "implementation_sha256": {
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "f4891f8e257e96cbae0f0658307e5c3be959bb9e829f82484801047fd87f389d",
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "d4dfa09cd2359f315123e0e7cd80da0719bca1fb2177bf07aea04577e0efd400"
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "7444317cf4cb6e08321e5874a0a4f05da6b2d92824ba4533dd2695f9e4eda18d",
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "535e93831fc0e2e10e517fc06c4ccf661bab05a9f0314e47ebb042574a76f49e"
       },
-      "created_at_utc": "2026-11-15T08:26:07.737873+00:00",
-      "report_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/CSCI-566-Midterm-Report/figures/generator_retrieval_gains.tex",
-      "report_sha256": "badd4e665e1d3a1452cfa4dcc0f5688a9c7c1c83b1e166887eecb6fccce3dde6"
+      "created_at_utc": "2026-11-15T09:37:30.383081+00:00"
     },
     "group_retrieval_gains": {
       "input_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
-      "input_csv_sha256": "31647273874f71e81a01842cf57295ca4e6ee7aa1ef1840f96392622f84c183e",
+      "input_csv_sha256": "18d06998497b45236dfaa514a5d5c4b8dc042af81fe83cf36d3e3e16890e9340",
       "table_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/tables/group_retrieval_gains.tex",
       "table_sha256": "ae452fc3499c973470fb2863f09387cbec74b2988d2522c54dc6a94f9b219273",
       "implementation_sha256": {
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "f4891f8e257e96cbae0f0658307e5c3be959bb9e829f82484801047fd87f389d",
-        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "bff2bd0a12418cf48ae0bff34d1e3800c70965adb0276a3f040d3a3f7bafd74f"
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "7444317cf4cb6e08321e5874a0a4f05da6b2d92824ba4533dd2695f9e4eda18d",
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "535e93831fc0e2e10e517fc06c4ccf661bab05a9f0314e47ebb042574a76f49e"
       },
-      "created_at_utc": "2026-11-15T08:48:17.707148+00:00",
-      "report_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/CSCI-566-Midterm-Report/figures/group_retrieval_gains.tex",
-      "report_sha256": "ae452fc3499c973470fb2863f09387cbec74b2988d2522c54dc6a94f9b219273"
+      "created_at_utc": "2026-11-15T09:37:30.383699+00:00"
+    },
+    "history_gains_over_others": {
+      "input_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
+      "input_csv_sha256": "18d06998497b45236dfaa514a5d5c4b8dc042af81fe83cf36d3e3e16890e9340",
+      "table_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/tables/history_gains_over_others.tex",
+      "table_sha256": "d239585f49d6ccb2f6ee45d5603a7b0b829ae1bfa5e29eb87d02cf017be2b713",
+      "implementation_sha256": {
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/render_tables.py": "7444317cf4cb6e08321e5874a0a4f05da6b2d92824ba4533dd2695f9e4eda18d",
+        "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_rendering.py": "cbdf8998be38f42090a403ce2953d785bdd7226ba8245e03911b716694032842"
+      },
+      "created_at_utc": "2026-11-15T09:44:14.296368+00:00",
+      "report_path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/CSCI-566-Midterm-Report/figures/history_gains_over_others.tex",
+      "report_sha256": "d239585f49d6ccb2f6ee45d5603a7b0b829ae1bfa5e29eb87d02cf017be2b713"
     }
   }
 }

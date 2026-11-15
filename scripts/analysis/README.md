@@ -9,7 +9,7 @@ python scripts/analysis/build_analysis_dataset.py
 # Compute the three downstream statistics CSVs.
 python scripts/analysis/summarize_experiment_results.py --csv-only
 
-# Render all three tables and update their copies in the report's figures folder.
+# Render all four tables and update their copies in the report's figures folder.
 python scripts/analysis/render_tables.py
 ```
 
@@ -17,15 +17,17 @@ The default run is `experiments/output/2026-11-12_022701PST__test_so__main`.
 The export step reads saved results; none of these commands runs model inference
 or judging. `results.jsonl` and `run.json` are read only.
 
-Each table has a matching statistics CSV under `analysis/`, a generated `.tex`
-under `analysis/tables/`, and a report copy under
-`CSCI-566-Midterm-Report/figures/`:
+The three statistics CSVs under `analysis/` supply four tables. Each table has a
+generated `.tex` under `analysis/tables/` and a report copy under
+`CSCI-566-Midterm-Report/figures/`. The History contrast table shares the group
+statistics CSV instead of duplicating its data:
 
 | Name | Contents |
 | --- | --- |
 | `main_results` | Four configuration means, mean confidence intervals, and baseline-improvement stars for each generator. |
 | `generator_retrieval_gains` | Similar-patient and guideline gains over no retrieval, including equal-generator averages. |
 | `group_retrieval_gains` | Raw no-retrieval means and retrieval deltas for History, Acute, and Control. |
+| `history_gains_over_others` | Two single-column panels of History-minus-Acute/Control gain differences, with direct-test stars; reads `group_retrieval_gains.csv`. |
 
 For a formatting-only change, rerun the render command. To regenerate one table:
 
@@ -33,6 +35,7 @@ For a formatting-only change, rerun the render command. To regenerate one table:
 python scripts/analysis/render_tables.py --table main_results
 python scripts/analysis/render_tables.py --table generator_retrieval_gains
 python scripts/analysis/render_tables.py --table group_retrieval_gains
+python scripts/analysis/render_tables.py --table history_gains_over_others
 ```
 
 Rendering consumes the saved CSVs; it does not recompute statistical tests.
@@ -54,7 +57,7 @@ artifacts; report synchronization remains an explicit render command.
   helper APIs remain available, but the CLI generates only the selected tables.
 - `table_statistics.py`: means, patient-cluster confidence intervals, paired tests,
   and multiplicity correction.
-- `table_rendering.py`: all three LaTeX layouts, captions, rounding, bolding, and stars.
+- `table_rendering.py`: all four LaTeX layouts, captions, rounding, bolding, and stars.
 - `render_tables.py`: CSV-to-TeX export, report synchronization, and export provenance.
 
 ## Statistical and provenance details
@@ -74,6 +77,33 @@ Holm families are separate for each outcome:
 - Group gains: nine comparisons (three retrieval configurations × three groups)
   within each generator. These test improvement within groups, not differences
   between group gains.
+
+The same `group_retrieval_gains.csv` also saves **direct History-versus-Acute and
+History-versus-Control gain tests** in `history_contrast_*` columns, populated
+on the Similar-patient retrieval rows for Acute and Control. The estimate is
+History's mean (Similar-patient retrieval minus No retrieval) gain minus the
+row group's mean gain. The one-sided alternative is a larger History gain.
+Two-group OLS contrasts use CR1 errors clustered by patient jointly across both
+groups, including patients present in both groups, and G−1 Student-t degrees of
+freedom. The small-sample correction is G/(G−1) × (N−1)/(N−2).
+
+`history_contrast_p_value` and `history_contrast_p_value_holm` save raw and
+Holm-adjusted p-values. This separate family contains both group comparisons
+across all generators per outcome (eight tests with four generators).
+`history_contrast_significant_{raw,holm}_{0_01,0_05}` records the threshold
+decisions. Saved effects, standard errors, pointwise 95% intervals, coverage,
+and test status make the comparisons inspectable. Missing eligible pairs or
+insufficient patient replication suppress inference; missing tests retain
+their Holm-family places. The existing table stars still test within groups.
+The separate `history_gains_over_others.tex` table uses these direct-test
+p-values for its own stars, prints three decimals in left-aligned columns,
+and reserves a Treatment plan column even while those comparisons are missing.
+Its label is `tab:history-gains-over-others`. Default rendering and report
+synchronization include it; `--table history_gains_over_others` selects it alone.
+Refresh `experiment_results.csv` and rerun the same `--csv-only` command above
+to populate treatment comparisons automatically once eligible scores are
+complete. Treatment History remains hypertension-only while COPD references
+are unavailable. No separate analysis script or output CSV is required.
 
 `main_results.csv` and `generator_retrieval_gains.csv` also save **exploratory
 two-sided checks** for diagnosis and treatment scores. These were added after

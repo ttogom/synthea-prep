@@ -1,7 +1,7 @@
-"""Generate saved statistics for the three tables used in the report.
+"""Generate three saved statistics CSVs for the report tables.
 
 The older diagnosis-only summary helper APIs below are retained from the
-committed version. The CLI generates only the three selected report tables.
+committed version. The CLI generates statistics and renders the selected report tables.
 """
 
 import argparse
@@ -415,6 +415,27 @@ def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1
             'holm_family': 'Nine tests: three retrieval configurations by three groups, within each generator/outcome',
             'scope': 'Within-group improvement; not a test comparing gains between groups',
             'plan_history_scope': 'Hypertension only; COPD reference Plans are unavailable',
+        },
+        'history_gain_contrasts': {
+            'output_csv': str(output_dir / 'group_retrieval_gains.csv'),
+            'column_prefix': 'history_contrast_',
+            'rows': 'Similar-patient retrieval rows for Acute and Control',
+            'outcomes': ['diagnosis', 'plan'],
+            'gain': 'Paired case score: similar-patient retrieval minus No retrieval',
+            'estimate': 'Mean History gain minus mean comparison-group gain',
+            'null': 'History mean gain <= comparison-group mean gain',
+            'alternative': 'greater',
+            'test': 'Two-group OLS mean contrast with CR1 patient-clustered standard errors',
+            'correction': 'G/(G-1) * (N-1)/(N-2); G is unique patients across both groups',
+            'degrees_of_freedom': 'Unique patients across both groups minus 1',
+            'holm_family': 'History vs Acute and History vs Control across all generators, separately per outcome',
+            'family_size': 2 * results['model'].nunique(),
+            'significance_thresholds': [0.01, 0.05],
+            'intervals': 'Pointwise, unadjusted two-sided 95% Student-t intervals',
+            'coverage': 'Require every eligible pair and at least two patients in each group; otherwise retain an unavailable test',
+            'plan_history_scope': 'Hypertension only while COPD reference Plans are unavailable',
+            'table_stars': 'Unchanged; existing stars test within-group improvement only',
+            'reference': 'https://www.statsmodels.org/stable/generated/statsmodels.stats.sandwich_covariance.cov_cluster.html',
         },
         'coverage_policy': 'Keep individual means only for fully scored eligible arms; suppress differences and inference if any eligible pair is missing. Unavailable Plan references are excluded.',
         'implementation_sha256': {

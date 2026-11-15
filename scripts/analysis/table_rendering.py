@@ -213,6 +213,88 @@ def render_generator_retrieval_gains_table(summary):
     return "\n".join(lines) + "\n"
 
 
+def render_history_gains_over_others_table(scores):
+    """Render the saved direct group-gain contrasts in two one-column panels.
+
+    Read history_contrast_* columns from group_retrieval_gains.csv. Each effect
+    is History's similar-patient-minus-baseline gain minus the row group's gain.
+    Preserve three decimals, left alignment, and the two outcome columns.
+    Missing eligible coverage stays --; stars use unrounded one-sided Holm p.
+    """
+    prefix = "history_contrast_"
+    required = {"model", "metric", "group", "variant", *(
+        prefix + field for field in ("reference_group", "estimate", "p_value_holm",
+                                    "coverage_complete", "family_size", "test_status"))}
+    if required - set(scores):
+        raise ValueError(f"Missing History contrast columns: {sorted(required - set(scores))}")
+    data = scores.loc[scores[prefix + "reference_group"].notna()].copy()
+    keys = ["model", "metric", "group"]
+    if data.empty or data[keys].isna().any().any() or data.duplicated(keys).any():
+        raise ValueError("History contrast identities must be populated and unique.")
+    if (not data[prefix + "reference_group"].eq("history").all()
+            or not data.variant.eq("patient_retrieval").all()
+            or not set(data.metric).issubset(METRICS)
+            or not set(data.group).issubset(("acute", "control"))):
+        raise ValueError("Require History-minus-Acute/Control similar-patient gain contrasts.")
+    models = _models(data)
+    for metric in data.metric.unique():
+        actual = set(map(tuple, data.loc[data.metric.eq(metric), ["model", "group"]].to_numpy()))
+        if actual != {(model, group) for model in models for group in ("acute", "control")}:
+            raise ValueError("Each outcome requires both group comparisons for every generator.")
+    numeric = [prefix + field for field in ("estimate", "p_value_holm", "family_size")]
+    data[numeric] = data[numeric].apply(pd.to_numeric, errors="raise")
+    data[prefix + "coverage_complete"] = data[prefix + "coverage_complete"].map(_truth)
+    effects = data.loc[data[prefix + "coverage_complete"], prefix + "estimate"]
+    if not np.isfinite(effects).all() or not effects.between(-2, 2).all():
+        raise ValueError("Complete gain contrasts must be finite differences in [-2, 2].")
+    if not data[prefix + "p_value_holm"].dropna().between(0, 1).all():
+        raise ValueError("History contrast p-values must lie in [0, 1].")
+    if not data[prefix + "family_size"].eq(2 * len(models)).all():
+        raise ValueError("History Holm family must include both comparisons across all generators.")
+    statuses = {"tested", "incomplete", "unavailable", "insufficient_patients", "zero_variance"}
+    if not data[prefix + "test_status"].isin(statuses).all():
+        raise ValueError("Unknown History contrast test status.")
+    tested = data[prefix + "test_status"].eq("tested")
+    if (tested != data[prefix + "p_value_holm"].notna()).any() or (
+            tested & ~data[prefix + "coverage_complete"]).any():
+        raise ValueError("Tested History contrasts require complete coverage and adjusted p-values.")
+    lines = [
+        "% Generated from group_retrieval_gains.csv; regenerate rather than editing numerical cells.",
+        r"\begin{table}[!hbp]", r"\centering", r"\small", r"\setlength{\tabcolsep}{2pt}",
+    ]
+    for panel, group in zip(("a", "b"), ("acute", "control")):
+        if panel == "b":
+            lines.append(r"\par\vspace{6pt}")
+        lines += [
+            r"\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}", r"\toprule",
+            rf"\multicolumn{{3}}{{@{{}}l}}{{\textbf{{({panel}) History $-$ {group.title()}}}}} \\[2pt]",
+            r"Generator & Diagnosis & Treatment plan \\", r"\midrule",
+        ]
+        for model in models:
+            cells = [_tex(MODEL_LABELS.get(model, model))]
+            for metric in METRICS:
+                selected = data.loc[data.model.eq(model) & data.group.eq(group) & data.metric.eq(metric)]
+                if selected.empty or not selected.iloc[0][prefix + "coverage_complete"]:
+                    cells.append("--")
+                    continue
+                row = selected.iloc[0]
+                effect, pvalue = row[prefix + "estimate"], row[prefix + "p_value_holm"]
+                stars = ("**" if pvalue < 0.01 else "*" if pvalue < 0.05 else "") if effect > 0 else ""
+                number = f"{0.0 if abs(effect) < 0.0005 else effect:+.3f}"
+                suffix = "^{" + stars + "}" if stars else ""
+                cells.append(f"${number}{suffix}$")
+            lines.append(" & ".join(cells) + r" \\")
+        lines += [r"\bottomrule", r"\end{tabular*}"]
+    caption = ("Differences in gains from similar-patient retrieval over No retrieval: "
+               "History minus Acute (a) or Control (b). Positive values favor History, "
+               "including a smaller decline. $^{*}p<0.05$, $^{**}p<0.01$: one-sided "
+               "patient-clustered tests, Holm-adjusted across both comparisons and all "
+               "generators per score type. Dashes indicate unavailable comparisons.")
+    lines += [r"\captionsetup{justification=raggedright,singlelinecheck=false}",
+              rf"\caption{{{caption}}}", r"\label{tab:history-gains-over-others}", r"\end{table}"]
+    return "\n".join(lines) + "\n"
+
+
 def render_group_retrieval_gains_table(scores):
     """Render group raw baseline scores and starred retrieval-minus-baseline deltas."""
     variants = ("patient_retrieval", "guidelines", "patient_retrieval_guidelines")

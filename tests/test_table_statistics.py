@@ -115,6 +115,105 @@ class ExploratoryTwoSidedTests(unittest.TestCase):
                 self.assertTrue(output.significant_two_sided_holm_0_05.isna().all())
 
 
+class BetweenGroupGainTests(unittest.TestCase):
+    def frame(self):
+        data = fixture()
+        data["bin"] = data.id.astype(int).map(
+            lambda index: "history" if index < 8 else "acute" if index < 19 else "control")
+        # Repeated patients cross group boundaries; sizes are deliberately unequal.
+        data["patient_uuid"] = data.id.astype(int).mod(6).astype(str)
+        data["plan"] = 1 - data.diagnosis
+        return pd.concat([data, data.assign(model="second", diagnosis=data.diagnosis * 0.9)],
+                         ignore_index=True)
+
+    def contrasts(self, frame):
+        output = summarize_group_retrieval_gains(frame)
+        return output.loc[output.history_contrast_reference_group.notna()]
+
+    def test_direct_gain_contrasts_match_independent_clustered_ols_and_holm(self):
+        frame = self.frame()
+        output = self.contrasts(frame)
+        self.assertEqual(len(output), 8)
+        self.assertTrue(output.history_contrast_family_size.eq(4).all())
+        for metric in ("diagnosis", "plan"):
+            rows = output.loc[output.metric.eq(metric)]
+            expected = []
+            for row in rows.itertuples():
+                subset = frame.loc[frame.model.eq(row.model) & frame.bin.isin(("history", row.group))]
+                pivot = subset.pivot(index="id", columns="variant", values=metric)
+                metadata = subset.drop_duplicates("id").set_index("id").loc[pivot.index]
+                history = metadata.bin.eq("history").to_numpy()
+                delta = pivot.patient_retrieval - pivot.llm_only
+                design = np.column_stack([history, ~history]).astype(float)
+                regression = sm.OLS(delta, design).fit(
+                    cov_type="cluster", cov_kwds={"groups": metadata.patient_uuid, "use_correction": True}, use_t=True)
+                reference = regression.t_test([1, -1])
+                statistic = reference.tvalue.item()
+                pvalue = student_t.sf(statistic, metadata.patient_uuid.nunique() - 1)
+                np.testing.assert_allclose(row.history_contrast_estimate, reference.effect.item(), rtol=1e-10, atol=1e-15)
+                np.testing.assert_allclose(row.history_contrast_standard_error, reference.sd.item(), rtol=1e-10)
+                np.testing.assert_allclose(row.history_contrast_test_statistic, statistic, rtol=1e-10)
+                np.testing.assert_allclose(row.history_contrast_p_value, pvalue, rtol=1e-10)
+                np.testing.assert_allclose([row.history_contrast_ci_low, row.history_contrast_ci_high],
+                                           reference.conf_int()[0], rtol=1e-10, atol=1e-15)
+                self.assertEqual(row.history_contrast_test_df, metadata.patient_uuid.nunique() - 1)
+                self.assertEqual(row.history_contrast_history_n_eligible, int(history.sum()))
+                self.assertEqual(row.history_contrast_comparison_n_eligible, int((~history).sum()))
+                expected.append(pvalue)
+            adjusted = multipletests(expected, method="holm")[1]
+            np.testing.assert_allclose(rows.history_contrast_p_value_holm, adjusted, rtol=1e-10)
+            for adjustment, pvalues in (("raw", np.array(expected)), ("holm", adjusted)):
+                for alpha in (0.01, 0.05):
+                    flag = f"history_contrast_significant_{adjustment}_{str(alpha).replace('.', '_')}"
+                    np.testing.assert_array_equal(rows[flag].to_numpy(dtype=bool),
+                                                  (rows.history_contrast_estimate > 0) & (pvalues < alpha))
+        shuffled = self.contrasts(frame.sample(frac=1, random_state=9))
+        pd.testing.assert_frame_equal(output.reset_index(drop=True), shuffled.reset_index(drop=True))
+
+    def test_missing_pairs_suppress_only_affected_contrasts_and_keep_family_places(self):
+        frame = self.frame()
+        frame.loc[frame.model.eq("second") & frame.id.eq("8") & frame.variant.eq("patient_retrieval"), "plan"] = np.nan
+        output = self.contrasts(frame)
+        plan = output.loc[output.metric.eq("plan")]
+        missing = plan.loc[plan.model.eq("second") & plan.group.eq("acute")].iloc[0]
+        self.assertEqual(missing.history_contrast_test_status, "incomplete")
+        self.assertEqual(missing.history_contrast_comparison_n_pairs, 10)
+        self.assertTrue(pd.isna(missing.history_contrast_estimate))
+        self.assertTrue(pd.isna(missing.history_contrast_significant_holm_0_05))
+        expected = multipletests(plan.history_contrast_p_value.fillna(1), method="holm")[1]
+        available = plan.history_contrast_p_value.notna().to_numpy()
+        np.testing.assert_allclose(plan.loc[available, "history_contrast_p_value_holm"], expected[available])
+        self.assertTrue(output.loc[output.metric.eq("diagnosis"), "history_contrast_p_value"].notna().all())
+        # A missing History baseline invalidates both comparisons for that generator.
+        frame.loc[frame.model.eq("second") & frame.id.eq("0") & frame.variant.eq("llm_only"), "plan"] = np.nan
+        second = self.contrasts(frame).query("model == 'second' and metric == 'plan'")
+        self.assertTrue(second.history_contrast_p_value.isna().all())
+
+    def test_ineligible_references_and_absent_groups_are_explicit(self):
+        frame = self.frame()
+        frame.loc[frame.id.eq("0"), "plan_eligible"] = False
+        frame.loc[frame.id.eq("0"), "plan"] = np.nan
+        plan = self.contrasts(frame).query("metric == 'plan'")
+        self.assertTrue(plan.history_contrast_history_n_eligible.eq(7).all())
+        self.assertTrue(plan.history_contrast_p_value.notna().all())
+        frame.loc[frame.bin.eq("history"), "plan_eligible"] = False
+        plan = self.contrasts(frame).query("metric == 'plan'")
+        self.assertTrue(plan.history_contrast_test_status.eq("unavailable").all())
+        self.assertTrue(plan.history_contrast_p_value.isna().all())
+        empty = self.contrasts(self.frame().assign(bin="history"))
+        self.assertTrue(empty.history_contrast_test_status.eq("unavailable").all())
+
+    def test_insufficient_patients_and_zero_contrast_variance_are_not_significant(self):
+        frame = self.frame()
+        insufficient = self.contrasts(frame.assign(patient_uuid="only-patient"))
+        self.assertTrue(insufficient.history_contrast_test_status.eq("insufficient_patients").all())
+        self.assertTrue(insufficient.history_contrast_p_value.isna().all())
+        frame[["diagnosis", "plan"]] = 0.5
+        degenerate = self.contrasts(frame)
+        self.assertTrue(degenerate.history_contrast_test_status.eq("zero_variance").all())
+        self.assertTrue(degenerate.history_contrast_significant_holm_0_05.isna().all())
+
+
 class MainAndGroupStatisticsTests(unittest.TestCase):
     def test_group_tests_match_clustered_reference_and_adjust_within_outcome(self):
         frame = fixture()

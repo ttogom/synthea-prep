@@ -1,0 +1,32 @@
+% Generated from group_retrieval_gains.csv; regenerate rather than editing numerical cells.
+\begin{table}[!hbp]
+\centering
+\small
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}
+\toprule
+\multicolumn{3}{@{}l}{\textbf{(a) History $-$ Acute}} \\[2pt]
+Generator & Diagnosis & Treatment plan \\
+\midrule
+GPT-4o mini & $-0.003$ & -- \\
+Gemma 3 4B & $+0.057^{**}$ & -- \\
+Llama 3.2 3B & $-0.053$ & -- \\
+Ministral 3 3B & $-0.047$ & -- \\
+\bottomrule
+\end{tabular*}
+\par\vspace{6pt}
+\begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lll@{}}
+\toprule
+\multicolumn{3}{@{}l}{\textbf{(b) History $-$ Control}} \\[2pt]
+Generator & Diagnosis & Treatment plan \\
+\midrule
+GPT-4o mini & $+0.104^{**}$ & -- \\
+Gemma 3 4B & $-0.066$ & -- \\
+Llama 3.2 3B & $+0.189^{**}$ & -- \\
+Ministral 3 3B & $-0.001$ & -- \\
+\bottomrule
+\end{tabular*}
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\caption{Differences in gains from similar-patient retrieval over No retrieval: History minus Acute (a) or Control (b). Positive values favor History, including a smaller decline. $^{*}p<0.05$, $^{**}p<0.01$: one-sided patient-clustered tests, Holm-adjusted across both comparisons and all generators per score type. Dashes indicate unavailable comparisons.}
+\label{tab:history-gains-over-others}
+\end{table}

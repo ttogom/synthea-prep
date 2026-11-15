@@ -1,4 +1,4 @@
-"""Integration tests: experiment export -> statistics CSVs -> the three report tables."""
+"""Integration tests: experiment export -> statistics CSVs -> report tables."""
 
 from contextlib import redirect_stdout
 import hashlib
@@ -78,7 +78,7 @@ class TablePipelineTests(unittest.TestCase):
         protected={name:(self.root/name).read_bytes() for name in ('run.json','results.jsonl')}
         manifest=self.summarize()
         self.assertEqual({Path(item['path']).name for item in manifest['outputs']},
-                         {f'{name}.csv' for name in exporter.TABLES})
+                         {f'{name}.csv' for name in exporter.TABLE_INPUTS.values()})
         self.assertEqual(manifest['source_csv_sha256'],hashlib.sha256(self.csv.read_bytes()).hexdigest())
         for item in manifest['outputs']:
             self.assertEqual(hashlib.sha256(Path(item['path']).read_bytes()).hexdigest(),item['sha256'])
@@ -101,12 +101,14 @@ class TablePipelineTests(unittest.TestCase):
             self.assertEqual(paths['table'].read_bytes(),paths['report'].read_bytes())
         self.assertIn(r'\label{tab:main-results}',outputs['main_results']['table'].read_text())
         self.assertIn(r'\label{tab:group-retrieval-gains}',outputs['group_retrieval_gains']['table'].read_text())
+        self.assertIn(r'\label{tab:history-gains-over-others}',outputs['history_gains_over_others']['table'].read_text())
+        self.assertFalse((self.analysis/'history_gains_over_others.csv').exists())
         self.assertIn('Average across generators',outputs['generator_retrieval_gains']['table'].read_text())
         self.assertEqual((self.report.parent/'main.tex').read_text(),'existing report source')
         manifest=json.loads((self.analysis/'table_exports_manifest.json').read_text())
         for name,record in manifest['tables'].items():
             self.assertEqual(record['table_sha256'],record['report_sha256'])
-            self.assertEqual(record['input_csv_sha256'],hashlib.sha256((self.analysis/f'{name}.csv').read_bytes()).hexdigest())
+            self.assertEqual(record['input_csv_sha256'],hashlib.sha256((self.analysis/f'{exporter.TABLE_INPUTS[name]}.csv').read_bytes()).hexdigest())
 
     def test_exploratory_checks_are_separate_reproducible_and_ready_for_treatment(self):
         manifest = self.summarize(plan_ready=False)
@@ -145,6 +147,50 @@ class TablePipelineTests(unittest.TestCase):
         self.assertIn('**',(self.report/'generator_retrieval_gains.tex').read_text())
         self.assertIn(r'\scriptsize',(self.report/'main_results.tex').read_text())
 
+    def test_history_gain_tests_refresh_from_pending_to_complete_plan_csv(self):
+        rows = self.rows(plan_ready=False)
+        for row in rows:
+            if row['variant'] == 'patient_retrieval':
+                patient_index = int(row['id'][-12:])
+                change = {'history': 0.004, 'acute': -0.003, 'control': 0.001}[row['bin']] * (patient_index + 1)
+                row['biolord_score_diagnosis1'] += change
+                row['plan1_score'] += change
+        pd.DataFrame(rows).to_csv(self.csv, index=False)
+        manifest = analysis.generate_table_statistics(self.csv, bootstrap_samples=32)
+        self.assertEqual(manifest['history_gain_contrasts']['family_size'], 4)
+        self.assertEqual(manifest['history_gain_contrasts']['alternative'], 'greater')
+        before = pd.read_csv(self.analysis / 'group_retrieval_gains.csv')
+        contrasts = before.loc[before.history_contrast_reference_group.notna()]
+        self.assertTrue(contrasts.loc[contrasts.metric.eq('plan'), 'history_contrast_p_value'].isna().all())
+        self.assertTrue(contrasts.loc[contrasts.metric.eq('diagnosis'), 'history_contrast_p_value'].notna().all())
+        for row in rows:
+            row['plan1_status'] = 'scored'
+        pd.DataFrame(rows).to_csv(self.csv, index=False)
+        manifest = analysis.generate_table_statistics(self.csv, bootstrap_samples=32)
+        after = pd.read_csv(self.analysis / 'group_retrieval_gains.csv')
+        contrasts = after.loc[after.history_contrast_reference_group.notna()]
+        self.assertTrue(contrasts.history_contrast_p_value.notna().all())
+        self.assertTrue(contrasts.history_contrast_p_value_holm.notna().all())
+        # CSV inference changes integer columns to floats while Plan cells are blank.
+        pd.testing.assert_frame_equal(before.query("metric == 'diagnosis'").reset_index(drop=True),
+                                      after.query("metric == 'diagnosis'").reset_index(drop=True),
+                                      check_dtype=False, check_exact=True)
+        without = after.drop(columns=[column for column in after if column.startswith('history_contrast_')])
+        self.assertEqual(exporter.TABLES['group_retrieval_gains'](after),
+                         exporter.TABLES['group_retrieval_gains'](without))
+        pending_tex = exporter.TABLES['history_gains_over_others'](before)
+        complete_tex = exporter.TABLES['history_gains_over_others'](after)
+        self.assertIn('--', pending_tex)
+        self.assertNotIn('--', complete_tex)
+        self.assertIn('^{**}', complete_tex)
+        # Selecting this table consumes the existing group CSV and copies it verbatim.
+        selected = exporter.generate_tables(self.analysis, ['history_gains_over_others'], self.report)
+        paths = selected['history_gains_over_others']
+        self.assertEqual(paths['table'].read_text(), complete_tex)
+        self.assertEqual(paths['table'].read_bytes(), paths['report'].read_bytes())
+        record = next(item for item in manifest['outputs'] if Path(item['path']).name == 'group_retrieval_gains.csv')
+        self.assertEqual(record['sha256'], hashlib.sha256(Path(record['path']).read_bytes()).hexdigest())
+
     def test_single_table_refresh_keeps_other_tables_and_manifest_entries(self):
         self.summarize()
         exporter.generate_tables(self.analysis)
@@ -170,9 +216,11 @@ class TablePipelineTests(unittest.TestCase):
         manifest=self.summarize()
         self.assertTrue(manifest['unvalidated_plan_scores_excluded'])
         for name in exporter.TABLES:
-            frame=pd.read_csv(self.analysis/f'{name}.csv')
+            frame=pd.read_csv(self.analysis/f'{exporter.TABLE_INPUTS[name]}.csv')
             plan=frame.loc[frame.metric.eq('plan')]
             self.assertTrue(plan.p_value_holm.isna().all())
+            if name == 'group_retrieval_gains':
+                self.assertTrue(plan.history_contrast_p_value.isna().all())
             if name in ('main_results', 'generator_retrieval_gains'):
                 self.assertTrue(plan.p_value_two_sided_holm.isna().all())
         rows=self.rows()

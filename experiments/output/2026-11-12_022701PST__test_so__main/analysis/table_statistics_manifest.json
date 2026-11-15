@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-11-15T08:26:07.633236+00:00",
+  "created_at_utc": "2026-11-15T09:37:30.315135+00:00",
   "source_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv",
   "source_csv_sha256": "65eef0eaf7d2aa32c58a1f7eeddcce8d681b751ac2ac1d2ae27ac6947871a649",
   "source_results_newer_than_csv": true,
@@ -74,10 +74,37 @@
     "scope": "Within-group improvement; not a test comparing gains between groups",
     "plan_history_scope": "Hypertension only; COPD reference Plans are unavailable"
   },
+  "history_gain_contrasts": {
+    "output_csv": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
+    "column_prefix": "history_contrast_",
+    "rows": "Similar-patient retrieval rows for Acute and Control",
+    "outcomes": [
+      "diagnosis",
+      "plan"
+    ],
+    "gain": "Paired case score: similar-patient retrieval minus No retrieval",
+    "estimate": "Mean History gain minus mean comparison-group gain",
+    "null": "History mean gain <= comparison-group mean gain",
+    "alternative": "greater",
+    "test": "Two-group OLS mean contrast with CR1 patient-clustered standard errors",
+    "correction": "G/(G-1) * (N-1)/(N-2); G is unique patients across both groups",
+    "degrees_of_freedom": "Unique patients across both groups minus 1",
+    "holm_family": "History vs Acute and History vs Control across all generators, separately per outcome",
+    "family_size": 8,
+    "significance_thresholds": [
+      0.01,
+      0.05
+    ],
+    "intervals": "Pointwise, unadjusted two-sided 95% Student-t intervals",
+    "coverage": "Require every eligible pair and at least two patients in each group; otherwise retain an unavailable test",
+    "plan_history_scope": "Hypertension only while COPD reference Plans are unavailable",
+    "table_stars": "Unchanged; existing stars test within-group improvement only",
+    "reference": "https://www.statsmodels.org/stable/generated/statsmodels.stats.sandwich_covariance.cov_cluster.html"
+  },
   "coverage_policy": "Keep individual means only for fully scored eligible arms; suppress differences and inference if any eligible pair is missing. Unavailable Plan references are excluded.",
   "implementation_sha256": {
-    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/summarize_experiment_results.py": "af9db47bfc5b0ff8f06e8b804fae0d1575cdbab6435e206946960a0c52a0e724",
-    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_statistics.py": "3c8023e35a9648480c1efc3e8988b92c1ae14043db730343b919a9e8a71bfeb9"
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/summarize_experiment_results.py": "95d768feabb8f2bae5f236b1be39c65ebce84fbb530b05c8292082fc1c4a56ab",
+    "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/scripts/analysis/table_statistics.py": "b249121a0a270132fa0d1b599e5fbcee1655dc503b4da6ba1375aa28e0e15de0"
   },
   "outputs": [
     {
@@ -90,7 +117,7 @@
     },
     {
       "path": "/Users/rasikaramanan/Documents/usc/by_semester/f26/csci566/project/synthea-prep/experiments/output/2026-11-12_022701PST__test_so__main/analysis/group_retrieval_gains.csv",
-      "sha256": "31647273874f71e81a01842cf57295ca4e6ee7aa1ef1840f96392622f84c183e"
+      "sha256": "18d06998497b45236dfaa514a5d5c4b8dc042af81fe83cf36d3e3e16890e9340"
     }
   ]
 }

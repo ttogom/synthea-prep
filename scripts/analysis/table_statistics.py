@@ -292,7 +292,9 @@ def summarize_group_retrieval_gains(results):
 
     Three retrieval configurations times three condition groups form a nine-test
     Holm family per model/outcome. Unavailable tests retain their place. These
-    test within-group improvements, not differences between group gains.
+    test within-group improvements. Separate history_contrast_* columns test
+    History-minus-Acute/Control differences in similar-patient retrieval gains;
+    their Holm family spans both comparisons across generators per outcome.
     """
     required = {"id", "bin", "diagnosis", "plan"}
     if required - set(results):
@@ -353,4 +355,94 @@ def summarize_group_retrieval_gains(results):
                 if record["mean_difference"] > 0:
                     record["stars"] = "**" if adjusted < 0.01 else "*" if adjusted < 0.05 else ""
             rows.extend(family)
-    return pd.DataFrame(rows)
+    return _with_history_gain_contrasts(pd.DataFrame(rows), results)
+
+
+def _with_history_gain_contrasts(summary, results):
+    """Append direct between-group tests without changing table rows or stars.
+
+    For each generator/outcome, regress the paired case gain on two group
+    indicators and contrast their means (History minus Acute or Control).
+    The CR1 sandwich clusters by patient jointly across both groups, with
+    G/(G-1) * (N-1)/(N-2) correction and G-1 Student-t degrees of freedom.
+    The one-sided alternative is that the History mean gain is larger.
+    A separate Holm family contains two contrasts per generator per outcome.
+    Missing eligible pairs suppress inference, retaining their family places.
+    Input validation is performed by summarize_group_retrieval_gains.
+    """
+    metadata = results.drop_duplicates("id").set_index("id").sort_index()
+    models = sorted(results["model"].unique())
+    rows = []
+    for model in models:
+        for metric in ("diagnosis", "plan"):
+            eligible = metadata if metric == "diagnosis" else metadata.loc[metadata.plan_eligible]
+            pivot = results.loc[results.model.eq(model)].pivot(
+                index="id", columns="variant", values=metric,
+            ).reindex(index=eligible.index, columns=("llm_only", "patient_retrieval"))
+            gains = pivot.patient_retrieval - pivot.llm_only
+            for group in ("acute", "control"):
+                cohort = eligible.loc[eligible.bin.isin(("history", group))]
+                history = cohort.bin.eq("history").to_numpy()
+                values = gains.reindex(cohort.index).to_numpy(dtype=float)
+                n_history, n_group = int(history.sum()), int((~history).sum())
+                history_pairs = int(np.isfinite(values[history]).sum())
+                group_pairs = int(np.isfinite(values[~history]).sum())
+                complete = bool(n_history and n_group and
+                                history_pairs == n_history and group_pairs == n_group)
+                codes, patients = pd.factorize(cohort.patient_uuid, sort=True)
+                n_patients = len(patients)
+                record = {
+                    "model": model, "metric": metric, "group": group,
+                    "variant": "patient_retrieval", "reference_group": "history",
+                    "history_n_eligible": n_history, "history_n_pairs": history_pairs,
+                    "comparison_n_eligible": n_group, "comparison_n_pairs": group_pairs,
+                    "n_patients": n_patients, "coverage_complete": complete,
+                    "history_gain": float(values[history].mean()) if n_history and history_pairs == n_history else np.nan,
+                    "comparison_gain": float(values[~history].mean()) if n_group and group_pairs == n_group else np.nan,
+                    "estimate": np.nan, "standard_error": np.nan,
+                    "ci_low": np.nan, "ci_high": np.nan,
+                    "test_statistic": np.nan, "test_df": np.nan,
+                    "p_value": np.nan, "p_value_holm": np.nan,
+                    "family_size": 2 * len(models),
+                    "test_status": "unavailable" if not n_history or not n_group else "incomplete",
+                }
+                if complete:
+                    estimate = record["history_gain"] - record["comparison_gain"]
+                    record["estimate"] = estimate
+                    # Each group needs patient replication of its own.
+                    if (cohort.loc[history, "patient_uuid"].nunique() < 2 or
+                            cohort.loc[~history, "patient_uuid"].nunique() < 2):
+                        record["test_status"] = "insufficient_patients"
+                    else:
+                        residuals = values - np.where(history, record["history_gain"], record["comparison_gain"])
+                        influence = residuals * np.where(history, 1 / n_history, -1 / n_group)
+                        cluster_sums = np.bincount(codes, weights=influence, minlength=n_patients)
+                        n_cases = len(cohort)
+                        correction = n_patients / (n_patients - 1) * (n_cases - 1) / (n_cases - 2)
+                        variance = correction * np.dot(cluster_sums, cluster_sums)
+                        df = n_patients - 1
+                        record["test_df"] = df
+                        if variance <= np.finfo(float).eps ** 2:
+                            record["test_status"] = "zero_variance"
+                        else:
+                            error = float(np.sqrt(variance))
+                            statistic = float(estimate / error)
+                            radius = student_t.ppf(0.975, df) * error
+                            record.update(standard_error=error, test_statistic=statistic,
+                                          p_value=float(student_t.sf(statistic, df)),
+                                          ci_low=float(estimate - radius), ci_high=float(estimate + radius),
+                                          test_status="tested")
+                rows.append(record)
+    contrasts = pd.DataFrame(rows)
+    for _, family in contrasts.groupby("metric", sort=False):
+        contrasts.loc[family.index, "p_value_holm"] = _holm_adjust(family.p_value)
+    for adjustment, column in (("raw", "p_value"), ("holm", "p_value_holm")):
+        for alpha in SIGNIFICANCE_LEVELS:
+            flag = f"significant_{adjustment}_{str(alpha).replace('.', '_')}"
+            flags = contrasts.estimate.gt(0) & contrasts[column].lt(alpha)
+            contrasts[flag] = flags.where(contrasts[column].notna(), pd.NA).astype("boolean")
+    keys = ["model", "metric", "group", "variant"]
+    contrasts = contrasts.rename(columns={
+        column: f"history_contrast_{column}" for column in contrasts if column not in keys
+    })
+    return summary.merge(contrasts, on=keys, how="left", sort=False, validate="one_to_one")
