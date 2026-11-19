@@ -15,13 +15,16 @@ import pandas as pd
 from openai import OpenAI
 
 from med_copilot.prompts.diagnosis_plan import KEY_QUESTIONS_TEMPLATE, VARIANT_TEMPLATES
+from scripts.med_copilot_agent import run_retrieval_agent, PATIENT_TOOL, GUIDELINE_TOOL
 from scripts.med_copilot_config import ExperimentConfig
 from scripts.med_copilot_helpers import (
     JSONKeywordExtractor, capture_component, component_needed, graphrag_context_json,
     new_patient_result, prepare_guideline_query, prepare_variant_messages, redact_secrets,
-    reference_data_metadata, selected_reference_patient, validate_guideline_tables,
+    reference_data_metadata, reference_patient_identity, selected_reference_patient,
+    validate_guideline_tables,
 )
 from scripts.med_copilot_observability import capture_graphrag_responses
+from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
 from scripts.med_copilot_run_file import checkpoint, error_scope, pipeline_stage
 from scripts.med_copilot_variants import COMPONENTS
 
@@ -176,10 +179,13 @@ class EvidencePreparer:
             )
             self.reranker = reranker_factory(model_name=experiment.patient_reranker_model)
 
+        needs_agent = any(experiment.needs(component) for component in
+                          ("agent_patients", "agent_guidelines", "agent_both"))
         if experiment.needs_guidelines:
             if guideline_search is None:
                 raise ValueError("Guidelines require a local-search callable")
             validate_guideline_tables(self.guideline_output)
+        if experiment.needs_guidelines or needs_agent:
             self.client = client_factory(api_key=os.environ["OPENAI_API_KEY"])
 
     @property
@@ -293,3 +299,81 @@ class EvidencePreparer:
                 capture["guideline_evidence"] = key_info
                 capture["graphrag_context"] = graphrag_context_json(context)
                 component["outputs"]["Key_info"] = format(key_info)
+
+        # Agentic variants select evidence through the same registered components
+        # and resource bootstrap as the fixed variants. Only their query strategy differs.
+        for component_id, use_patients, use_guidelines in (
+                ("agent_patients", True, False), ("agent_guidelines", False, True),
+                ("agent_both", True, True)):
+            if not experiment.needs(component_id):
+                continue
+            for instance, settings in experiment.component_instances(component_id):
+                component = result["components"][instance]
+                if component["status"] != "not_processed" or not component_needed(experiment, instance, result):
+                    continue
+                with pipeline_stage("agentic_retrieval"), capture_component(
+                        component, error_metadata=self._error_metadata,
+                        corpus_records=self.corpus_records, retriever=self.retriever,
+                        reranker=self.reranker, credential_names=experiment.required_credentials) as capture:
+                    seen_patients, patient_identities, seen_guidelines, screened = {}, {}, {}, []
+
+                    def search_patients(query):
+                        if self.retriever is None:
+                            raise RuntimeError("agent patient search needs the patient retriever, which was not initialized")
+                        with chdir(experiment.patient_retrieval_artifacts_dir):
+                            self.retriever.alpha = settings["alpha"]
+                            candidates = self.retriever.search(query, topk=settings["top_k"])
+                            found = (self.reranker.rerank(
+                                query, candidates, topk=settings["results_per_search"], format_top_k=1)
+                                if candidates else [])
+                        lines = []
+                        ranked = sorted(candidates, key=lambda candidate: candidate.get("rerank_score", 0),
+                                        reverse=True)[:len(found)]
+                        for text, candidate in zip(found, ranked):
+                            ref = f"P{len(seen_patients) + 1}"
+                            seen_patients[ref] = str(text)
+                            patient_identities[ref] = reference_patient_identity(
+                                self.corpus_records, candidate["idx"])
+                            lines.append(f"[{ref}] {text}")
+                        return "\n\n".join(lines) or "No similar patients found."
+
+                    def search_guidelines(question):
+                        if not settings["allow_diagnosis_terms"]:
+                            found = find_diagnosis_terms(question, s_o)
+                            if found:
+                                screened.append({"question": question, "terms": found})
+                                question = remove_diagnosis_terms(question, found)
+                                if not str(question).strip():
+                                    return "Question removed by the diagnosis-term screen; ask about symptoms or findings."
+                        with chdir(self.guideline_output), capture_graphrag_responses(capture["model_responses"]):
+                            key_info, _context = self.guideline_search(
+                                config_filepath=experiment.guidelines / "settings.yaml",
+                                data_dir=self.guideline_output, root_dir=experiment.guidelines,
+                                community_level=settings["community_level"],
+                                response_type=settings["response_type"], streaming=False,
+                                query=question, verbose=settings["verbose"],
+                            )
+                        ref = f"G{len(seen_guidelines) + 1}"
+                        seen_guidelines[ref] = format(key_info)
+                        return f"[{ref}] {key_info}"
+
+                    outcome = run_retrieval_agent(
+                        self.client, s_o,
+                        {PATIENT_TOOL: search_patients, GUIDELINE_TOOL: search_guidelines},
+                        model=settings["agent_model"], max_searches=settings["max_searches"],
+                        temperature=settings["temperature"], use_patients=use_patients,
+                        use_guidelines=use_guidelines,
+                        allow_diagnosis_terms=settings["allow_diagnosis_terms"],
+                    )
+                    capture["agent"] = {**outcome, "patient_results": seen_patients,
+                                         "patient_reference_ids": patient_identities,
+                                         "guideline_results": seen_guidelines,
+                                         "screened_questions": screened}
+                    if use_patients:
+                        component["outputs"]["example"] = seen_patients.get(
+                            outcome["patient_ref"], "No reference patient available.")
+                        capture["selected_reference_patient"] = patient_identities.get(outcome["patient_ref"])
+                    if use_guidelines:
+                        kept = [seen_guidelines[ref] for ref in outcome["guideline_refs"]
+                                if ref in seen_guidelines]
+                        component["outputs"]["Key_info"] = "\n\n".join(kept) or "No guideline evidence selected."
