@@ -5669,10 +5669,13 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
                 self.assertEqual(self.fixture.calls, [])
                 self.assertEqual(self.fixture.scoring_calls, [])
 
-    def test_shipped_config_runs_four_models_by_four_variants_and_records_every_effective_setting(self):
+    def test_shipped_models_run_four_fixed_variants_and_record_every_effective_setting(self):
         fixture = self.fixture
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
+        # This legacy serial runner covers fixed retrieval; agentic execution
+        # belongs to run_experiments.py and its evidence-worker tests.
+        self.experiment["selected_variants"] = list(HELPER_NAMESPACE["VARIANT_SOURCES"])
         fixture.write_patients([dict(id="eligible", subjective="S", objective="O")])
         fixture.write_labels([self.label("eligible")])
         self.write_config()
@@ -5696,6 +5699,7 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         del self.config["models"]["ollama_qwen2_5_14b"]
         self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
+        self.experiment["selected_variants"] = list(HELPER_NAMESPACE["VARIANT_SOURCES"])
         fixture.write_patients([dict(id="eligible", subjective="S", objective="O")])
         fixture.write_labels([self.label("eligible")])
         self.write_config()
@@ -5709,10 +5713,11 @@ class VariantIntegrationTests(FailedRunAssertions, unittest.TestCase):
                          ("pending", "deferred"))
         self.assertEqual(entry["diagnosis_correctness"]["status"], "scored")
 
-    def test_shipped_selection_scores_diagnoses_and_defers_plans_without_loading_judge(self):
+    def test_shipped_models_score_fixed_variants_and_defer_plans_without_loading_judge(self):
         fixture = self.fixture
         self.config = yaml.safe_load(MODEL_CONFIG.read_text())
         self.experiment = yaml.safe_load(EXPERIMENT_CONFIG.read_text())
+        self.experiment["selected_variants"] = list(HELPER_NAMESPACE["VARIANT_SOURCES"])
         fixture.write_patients([dict(id="eligible", subjective="S", objective="O")])
         fixture.write_labels([self.label("eligible")])
         self.write_config()

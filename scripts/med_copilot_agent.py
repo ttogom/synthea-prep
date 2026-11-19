@@ -16,8 +16,16 @@ PATIENT_TOOL = "search_similar_patients"
 GUIDELINE_TOOL = "search_guidelines"
 FINISH_TOOL = "finish"
 _ARG_NAME = {PATIENT_TOOL: "query", GUIDELINE_TOOL: "question"}
-_TOOL_OUTPUT_LIMIT = 3500       # characters shown back to the agent per tool call
+_TOOL_OUTPUT_LIMIT = 3500       # guideline-answer characters shown per tool call
 _TRACE_OUTPUT_LIMIT = 1500      # characters kept in the saved trace per tool call
+
+
+class RetrievalAgentError(RuntimeError):
+    """An unfinished agent run, including its partial trace for the saved capture."""
+
+    def __init__(self, message, outcome):
+        super().__init__(message)
+        self.outcome = outcome
 
 
 def _tool_specs(use_patients, use_guidelines):
@@ -59,7 +67,8 @@ def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagno
     if not allow_diagnosis_terms:
         parts.append("Describe symptoms, findings and risk factors in your searches; do not name specific diagnoses.")
     parts.append(f"You may make at most {max_searches} searches in total. When you have enough, call finish "
-                 "with the references worth keeping. Choose only evidence that is relevant to this patient.")
+                 "with the references worth keeping. You must call finish to complete the task; a text "
+                 "reply does not finish it. Choose only evidence that is relevant to this patient.")
     return " ".join(parts)
 
 
@@ -80,16 +89,34 @@ def _assistant_dict(msg):
     return d
 
 
+def _finish_arguments(args, use_patients, use_guidelines):
+    allowed = ({"patient_ref"} if use_patients else set()) | (
+        {"guideline_refs"} if use_guidelines else set())
+    if args is None or set(args) - allowed:
+        raise ValueError("Finish accepts only reference fields for the enabled tools.")
+    ref = args.get("patient_ref")
+    refs = args.get("guideline_refs", [])
+    if "patient_ref" in args and (not isinstance(ref, str) or not ref.strip()):
+        raise ValueError("patient_ref must be a nonempty reference ID, or omitted.")
+    if (not isinstance(refs, list) or any(not isinstance(r, str) or not r.strip() for r in refs)
+            or len(set(refs)) != len(refs)):
+        raise ValueError("guideline_refs must be a list of distinct, nonempty reference IDs.")
+    return ref, refs
+
+
 def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperature=0.0,
                         use_patients=True, use_guidelines=True, allow_diagnosis_terms=False):
     """Run the agent loop.
 
     tools: {"search_similar_patients": f(query)->str, "search_guidelines": f(question)->str}; each
            returns the text shown to the agent and registers its own reference ids ([P1], [G1], ...).
-    Returns {"patient_ref", "guideline_refs", "searches", "finished", "stop_reason", "trace", "usage"}.
+    Returns {"patient_ref", "guideline_refs", "searches", "finished", "stop_reason", "trace", "usage"}
+    only after a valid finish call. Exhausting the turn limit raises RetrievalAgentError.
     """
     if not (use_patients or use_guidelines):
         raise ValueError("agent needs at least one search tool")
+    if type(max_searches) is not int or max_searches < 1:
+        raise ValueError("max_searches must be a positive integer")
     enabled = {n for n, on in ((PATIENT_TOOL, use_patients), (GUIDELINE_TOOL, use_guidelines)) if on}
     missing = enabled - set(tools)
     if missing:
@@ -100,9 +127,10 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                 {"role": "user", "content": s_o}]
     out = {"patient_ref": None, "guideline_refs": [], "searches": 0, "finished": False,
            "stop_reason": None, "trace": [], "usage": []}
+    finish_requested = False
     for _ in range(2 * max_searches + 3):               # hard cap on turns
-        force_finish = out["searches"] >= max_searches
-        choice = {"type": "function", "function": {"name": FINISH_TOOL}} if force_finish else "auto"
+        force_finish = finish_requested or out["searches"] >= max_searches
+        choice = {"type": "function", "function": {"name": FINISH_TOOL}} if force_finish else "required"
         resp = client.chat.completions.create(model=model, messages=messages, tools=specs,
                                               tool_choice=choice, temperature=temperature)
         out["usage"].append(_usage(resp))
@@ -110,8 +138,10 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
         messages.append(_assistant_dict(msg))
         calls = msg.tool_calls or []
         if not calls:
-            out["stop_reason"] = "no_tool_call"
-            break
+            finish_requested = True
+            messages.append({"role": "user", "content": "Call finish with the references you selected. "
+                             "A text reply does not complete evidence selection."})
+            continue
         for call in calls:
             name = call.function.name
             try:
@@ -121,13 +151,13 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
             except ValueError:
                 args = None
             if name == FINISH_TOOL:
-                if args is None:
-                    reply = "Invalid arguments for finish."
+                finish_requested = True
+                try:
+                    ref, refs = _finish_arguments(args, use_patients, use_guidelines)
+                except ValueError as exc:
+                    reply = str(exc)
                 else:
-                    ref = args.get("patient_ref")
-                    refs = args.get("guideline_refs") or []
-                    out["patient_ref"] = ref if isinstance(ref, str) else None
-                    out["guideline_refs"] = [r for r in refs if isinstance(r, str)]
+                    out["patient_ref"], out["guideline_refs"] = ref, refs
                     out["finished"], out["stop_reason"], reply = True, "finish", "ok"
             elif name not in enabled:
                 reply = f"Unknown or disabled tool: {name}"
@@ -138,7 +168,11 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
             else:
                 out["searches"] += 1
                 text = args[_ARG_NAME[name]].strip()
-                reply = str(tools[name](text))[:_TOOL_OUTPUT_LIMIT]   # tool errors propagate
+                # The agent selects the full evidence used in the final prompt.
+                # Truncation would hide candidates or part of a guideline answer.
+                reply = str(tools[name](text))   # tool errors propagate
+                if name == GUIDELINE_TOOL:
+                    reply = reply[:_TOOL_OUTPUT_LIMIT]
                 out["trace"].append({"search": out["searches"], "tool": name, "input": text,
                                      "output": reply[:_TRACE_OUTPUT_LIMIT]})
             messages.append({"role": "tool", "tool_call_id": call.id, "content": reply})
@@ -148,4 +182,5 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
             break
     else:
         out["stop_reason"] = "turn_cap"
+        raise RetrievalAgentError("Retrieval agent did not call a valid finish before the turn limit", out)
     return out

@@ -15,7 +15,7 @@ import pandas as pd
 from openai import OpenAI
 
 from med_copilot.prompts.diagnosis_plan import KEY_QUESTIONS_TEMPLATE, VARIANT_TEMPLATES
-from scripts.med_copilot_agent import run_retrieval_agent, PATIENT_TOOL, GUIDELINE_TOOL
+from scripts.med_copilot_agent import run_retrieval_agent, RetrievalAgentError, PATIENT_TOOL, GUIDELINE_TOOL
 from scripts.med_copilot_config import ExperimentConfig
 from scripts.med_copilot_helpers import (
     JSONKeywordExtractor, capture_component, component_needed, graphrag_context_json,
@@ -317,6 +317,7 @@ class EvidencePreparer:
                         reranker=self.reranker, credential_names=experiment.required_credentials) as capture:
                     seen_patients, patient_identities, seen_guidelines, screened = {}, {}, {}, []
 
+
                     def search_patients(query):
                         if self.retriever is None:
                             raise RuntimeError("agent patient search needs the patient retriever, which was not initialized")
@@ -324,7 +325,8 @@ class EvidencePreparer:
                             self.retriever.alpha = settings["alpha"]
                             candidates = self.retriever.search(query, topk=settings["top_k"])
                             found = (self.reranker.rerank(
-                                query, candidates, topk=settings["results_per_search"], format_top_k=1)
+                                query, candidates, topk=settings["results_per_search"],
+                                format_top_k=settings["results_per_search"])
                                 if candidates else [])
                         lines = []
                         ranked = sorted(candidates, key=lambda candidate: candidate.get("rerank_score", 0),
@@ -357,18 +359,31 @@ class EvidencePreparer:
                         seen_guidelines[ref] = format(key_info)
                         return f"[{ref}] {key_info}"
 
-                    outcome = run_retrieval_agent(
-                        self.client, s_o,
-                        {PATIENT_TOOL: search_patients, GUIDELINE_TOOL: search_guidelines},
-                        model=settings["agent_model"], max_searches=settings["max_searches"],
-                        temperature=settings["temperature"], use_patients=use_patients,
-                        use_guidelines=use_guidelines,
-                        allow_diagnosis_terms=settings["allow_diagnosis_terms"],
-                    )
-                    capture["agent"] = {**outcome, "patient_results": seen_patients,
-                                         "patient_reference_ids": patient_identities,
-                                         "guideline_results": seen_guidelines,
-                                         "screened_questions": screened}
+                    outcome = None
+                    try:
+                        outcome = run_retrieval_agent(
+                            self.client, s_o,
+                            {PATIENT_TOOL: search_patients, GUIDELINE_TOOL: search_guidelines},
+                            model=settings["agent_model"], max_searches=settings["max_searches"],
+                            temperature=settings["temperature"], use_patients=use_patients,
+                            use_guidelines=use_guidelines,
+                            allow_diagnosis_terms=settings["allow_diagnosis_terms"],
+                        )
+                    except RetrievalAgentError as exc:
+                        outcome = exc.outcome
+                        raise
+                    finally:
+                        if outcome is not None:
+                            capture["agent"] = {**outcome, "patient_results": seen_patients,
+                                                 "patient_reference_ids": patient_identities,
+                                                 "guideline_results": seen_guidelines,
+                                                 "screened_questions": screened}
+                    if not outcome["finished"] or outcome["stop_reason"] != "finish":
+                        raise ValueError("Retrieval agent did not finish evidence selection")
+                    if outcome["patient_ref"] is not None and outcome["patient_ref"] not in seen_patients:
+                        raise ValueError("Retrieval agent selected an unknown patient reference")
+                    if any(ref not in seen_guidelines for ref in outcome["guideline_refs"]):
+                        raise ValueError("Retrieval agent selected an unknown guideline reference")
                     if use_patients:
                         component["outputs"]["example"] = seen_patients.get(
                             outcome["patient_ref"], "No reference patient available.")

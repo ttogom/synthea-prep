@@ -110,12 +110,17 @@ prompt template. Select any desired mix by setting `selected_variants`. Agent de
 are a four-search budget, `gpt-4o-mini`, and temperature 0; `variant_settings` can
 override the agent model, search budget, temperature, diagnosis-term screen, and the
 retrieval/guideline settings declared by that variant.
+Each patient search shows the agent all `results_per_search` reranked cases
+(three by default), and its selected case alone enters the final prompt.
+Retrieval completes only through an explicit `finish` call. Unfinished runs or
+unknown selected reference IDs fail the component and block its final generation;
+an explicit finish with no selected references remains a valid choice.
 The component and variant definitions live in `scripts/med_copilot_variants.py`. Required components are prepared once per patient and reused across consuming variants/models. Variant definitions select existing prompt templates and bind component outputs to template fields. Registered settings belong in `variant_settings`; they do not create arbitrary runner overrides. See [Adding a new variant](../../med_copilot/docs/adding_a_new_variant.md) for the always/conditional edit workflow.
 Only evidence sections differ in final prompts; the combined project prompt and
 shared diagnosis/Plan instructions remain unchanged. Source failures block their
 dependent variants while independent variants continue.
 
-The shipped config selects all four variants and these final models:
+The shipped config selects the three agentic variants and these final models:
 
 | Alias | Model tag |
 | --- | --- |

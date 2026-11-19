@@ -63,14 +63,14 @@ class ExperimentConfigTests(unittest.TestCase):
                 self.assertIn(field, metadata)
                 if field != "variant_settings":
                     self.assertEqual(metadata[field], value)
+        agent = {"agent_model": "gpt-4o-mini", "max_searches": 4, "temperature": 0.0,
+                 "allow_diagnosis_terms": False}
+        patient_search = {"alpha": 0.5, "top_k": 20, "results_per_search": 3}
+        guideline_search = {"community_level": 2, "response_type": "Multiple Paragraphs", "verbose": False}
         self.assertEqual(metadata["variant_settings"], {
-            "patient_retrieval": {"patient_retrieval": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5}},
-            "guidelines": {"guidelines": {"question_model": "gpt-4o-mini", "community_level": 2,
-                                           "response_type": "Multiple Paragraphs", "verbose": False}},
-            "patient_retrieval_guidelines": {
-                "patient_retrieval": {"alpha": 0.5, "top_k": 20, "rerank_top_k": 5},
-                "guidelines": {"question_model": "gpt-4o-mini", "community_level": 2,
-                               "response_type": "Multiple Paragraphs", "verbose": False}},
+            "agentic_patient_retrieval": {"agent_patients": {**agent, **patient_search}},
+            "agentic_guidelines": {"agent_guidelines": {**agent, **guideline_search}},
+            "agentic_both": {"agent_both": {**agent, **patient_search, **guideline_search}},
         })
         registry, _ = read_yaml_config(config.model_config)
         self.assertEqual(set(registry), {"models"})
@@ -105,7 +105,7 @@ class ExperimentConfigTests(unittest.TestCase):
         config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
         self.assertIsNone(config.max_patients)
         self.assertEqual(config.selected_variants, [
-            "llm_only", "patient_retrieval", "guidelines", "patient_retrieval_guidelines"])
+            "agentic_patient_retrieval", "agentic_guidelines", "agentic_both"])
         expected = {"preparation_workers": 4, "cpu_threads": 2, "encoder_device": "cpu",
                     "local_concurrency": 4, "hosted_concurrency": 4,
                     "ollama_parallel_slots": 4, "ollama_context_length": 16384,
@@ -124,7 +124,7 @@ class ExperimentConfigTests(unittest.TestCase):
                     and labels[patient["id"]]["plan"] != ["none recorded"]]
         self.assertEqual(len(patients), 4959)
         self.assertEqual(len(eligible), 2378)
-        self.assertEqual(len(eligible) * len(config.selected_variants) * len(config.selected_models), 38048)
+        self.assertEqual(len(eligible) * len(config.selected_variants) * len(config.selected_models), 28536)
 
     def test_shipped_ollama_entries_match_downloaded_tags_and_need_no_provider_keys(self):
         config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")

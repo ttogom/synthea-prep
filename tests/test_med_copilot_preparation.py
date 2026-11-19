@@ -29,6 +29,7 @@ from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result
 from scripts.experiment_runtime.preparation import EvidencePreparer, validate_preparation_result
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.experiment_runtime.worker_stream import RedactingStream
+from test_med_copilot_retrieval import load_retrieval_module
 
 
 class FakeClient:
@@ -94,6 +95,28 @@ class FakeReranker:
         if getattr(self, "on_ranking", None):
             self.on_ranking(candidates)
         return ["Reference SOAP example"]
+
+
+def agent_message(*calls, content=None):
+    return SimpleNamespace(content=content, tool_calls=[
+        SimpleNamespace(id=f"call-{index}", function=SimpleNamespace(
+            name=name, arguments=json.dumps(arguments)))
+        for index, (name, arguments) in enumerate(calls)
+    ])
+
+
+class ScriptedAgentClient(FakeClient):
+    def __init__(self, replies):
+        super().__init__()
+        self.replies = iter(replies)
+
+    def create(self, **kwargs):
+        if not kwargs.get("tools"):
+            return super().create(**kwargs)
+        self.requests.append(deepcopy(kwargs))
+        return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=next(self.replies))])
+
+
 
 
 CLIENT = None
@@ -234,6 +257,116 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(all(component["capture"]["agent"]["finished"]
                             for component in result["components"].values()))
         self.assertEqual(len([request for request in self.client.requests if request.get("tools")]), len(variants))
+
+    def test_agent_sees_three_full_reranked_cases_and_selects_the_third_for_both_patient_variants(self):
+        records = [{"id": f"reference-{i}", "subjective": f"Case {i}: " + str(i) * 4000,
+                    "objective": "cough", "condition": f"Condition {i}", "plan": [f"Plan {i}"]}
+                   for i in range(3)]
+        self.corpus.write_text(json.dumps(records))
+        self.data["selected_variants"] = ["agentic_patient_retrieval", "agentic_both"]
+        self.client = ScriptedAgentClient([
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("finish", {"patient_ref": "P3"})),
+            agent_message(("search_similar_patients", {"query": "cough"}),
+                          ("search_guidelines", {"question": "What findings?"})),
+            agent_message(("finish", {"patient_ref": "P3", "guideline_refs": ["G1"]})),
+        ])
+        adapter = load_retrieval_module()
+
+        def retriever_factory(*args, **kwargs):
+            retriever = FakeRetriever(*args, **kwargs)
+
+            def search(query, topk):
+                candidates = [dict(record, idx=i, dominant_terms=[]) for i, record in enumerate(records)]
+                if getattr(retriever, "on_ranking", None):
+                    retriever.on_ranking(candidates)
+                return candidates
+
+            retriever.search = search
+            return retriever
+
+        def reranker_factory(model_name):
+            reranker = adapter.CrossEncoderReranker()
+            reranker.model.predict = lambda pairs: [0.1, 0.9, 0.5]
+            return reranker
+
+        preparer = self.preparer(retriever_factory=retriever_factory, reranker_factory=reranker_factory)
+        result = preparer.prepare(self.patient, self.result(preparer))
+        for name in ("agent_patients", "agent_both"):
+            component = result["components"][name]
+            self.assertEqual(component["status"], "completed", component["error"])
+            self.assertEqual(component["capture"]["selected_reference_patient"], {"id": "reference-0"})
+            self.assertEqual(list(component["capture"]["agent"]["patient_results"]), ["P1", "P2", "P3"])
+            self.assertIn(records[0]["subjective"], component["outputs"]["example"])
+            self.assertNotIn(records[1]["subjective"], component["outputs"]["example"])
+        for request in (self.client.requests[1], self.client.requests[3]):
+            reply = next(message["content"] for message in request["messages"]
+                         if message["role"] == "tool" and "[P1]" in message["content"])
+            for i in range(1, 4):
+                self.assertIn(f"[P{i}]", reply)
+            for record in records:
+                self.assertIn(record["subjective"], reply)
+                self.assertIn(record["condition"], reply)
+                self.assertIn(record["plan"][0], reply)
+        for output in result["variants"].values():
+            self.assertIn(records[0]["subjective"], output["assessment_plan_prompts"]["user"])
+            self.assertNotIn(records[1]["subjective"], output["assessment_plan_prompts"]["user"])
+
+    def test_unfinished_agent_blocks_final_prompts_and_retains_partial_capture(self):
+        self.data["selected_variants"] = ["llm_only", "agentic_patient_retrieval"]
+        self.client = ScriptedAgentClient([
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            *[agent_message(content="done") for _ in range(10)],
+        ])
+        preparer = self.preparer()
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_patients"]
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertEqual(component["error"]["type"], "RetrievalAgentError")
+        self.assertEqual(component["outputs"], {})
+        agent = component["capture"]["agent"]
+        self.assertFalse(agent["finished"])
+        self.assertEqual(agent["stop_reason"], "turn_cap")
+        self.assertEqual(agent["searches"], 1)
+        self.assertEqual(len(agent["trace"]), 1)
+        self.assertEqual(agent["patient_results"], {"P1": "Reference SOAP example"})
+        self.assertIsNone(result["variants"]["agentic_patient_retrieval"]["assessment_plan_prompts"])
+        self.assertEqual(result["variants"]["agentic_patient_retrieval"]["error"]["type"], "EvidenceUnavailable")
+        self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+        self.assertTrue(self.errors)
+        self.assertEqual(self.snapshots[-1], result)
+
+
+    def test_finish_rejects_unknown_reference_ids_instead_of_silently_substituting_empty_evidence(self):
+        for variant, component_id, selection in [
+                ("agentic_patient_retrieval", "agent_patients", {"patient_ref": "P99"}),
+                ("agentic_guidelines", "agent_guidelines", {"guideline_refs": ["G99"]}),
+                ("agentic_both", "agent_both", {"patient_ref": "P99", "guideline_refs": ["G99"]})]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = [variant]
+                self.client = ScriptedAgentClient([agent_message(("finish", selection))])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][component_id]
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertIn("unknown", component["error"]["message"])
+                self.assertEqual(component["outputs"], {})
+                self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
+
+    def test_explicit_finish_may_choose_no_evidence(self):
+        self.data["selected_variants"] = ["agentic_both"]
+        self.client = ScriptedAgentClient([agent_message(("finish", {}))])
+        preparer = self.preparer()
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_both"]
+        self.assertEqual(component["status"], "completed")
+        self.assertTrue(component["capture"]["agent"]["finished"])
+        self.assertEqual(component["outputs"], {"example": "No reference patient available.",
+                                               "Key_info": "No guideline evidence selected."})
+        self.assertIsNotNone(result["variants"]["agentic_both"]["assessment_plan_prompts"])
+
+
+
 
     def test_completed_preparation_and_exact_prompts_are_reused(self):
         preparer = self.preparer()
