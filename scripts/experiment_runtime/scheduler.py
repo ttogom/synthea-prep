@@ -612,8 +612,22 @@ class ExperimentScheduler:
 
     def export(self):
         with self._lock:
-            for record in self.records.values():
-                for output in record["variants"].values():
+            for patient_id, record in self.records.items():
+                # Received-response checkpoints can precede a worker's final
+                # result or a generation future's return. Publish their usage
+                # even on interruption, without replacing predictions or scores.
+                prepared = self.store.load(("preparation", patient_id, None, None))
+                if prepared is not None:
+                    for name, component in record["components"].items():
+                        if component["status"] != "completed":
+                            component["capture"]["model_responses"] = deepcopy(
+                                prepared["components"][name]["capture"]["model_responses"])
+                for variant, output in record["variants"].items():
+                    for model_id, slot in output["assessment_plans"].items():
+                        if slot["status"] != "completed":
+                            saved = self.store.load(("generation", patient_id, variant, model_id))
+                            if saved is not None:
+                                slot["model_responses"] = deepcopy(saved["model_responses"])
                     if _messages(output) is not None:
                         output["status"] = ("completed" if all(slot["status"] == "completed"
                             for slot in output["assessment_plans"].values()) else "failed_incomplete")

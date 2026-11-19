@@ -19,13 +19,13 @@ from scripts.med_copilot_agent import run_retrieval_agent, RetrievalAgentError, 
 from scripts.med_copilot_config import ExperimentConfig
 from scripts.med_copilot_helpers import (
     JSONKeywordExtractor, capture_component, component_needed, graphrag_context_json,
-    new_patient_result, prepare_guideline_query, prepare_variant_messages, redact_secrets,
+    model_response_metadata, new_patient_result, prepare_guideline_query, prepare_variant_messages, redact_secrets,
     reference_data_metadata, reference_patient_identity, selected_reference_patient,
     validate_guideline_tables,
 )
 from scripts.med_copilot_observability import capture_graphrag_responses
 from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
-from scripts.med_copilot_run_file import checkpoint, error_scope, pipeline_stage
+from scripts.med_copilot_run_file import RunMetadataError, checkpoint, error_scope, pipeline_stage
 from scripts.med_copilot_variants import COMPONENTS
 
 
@@ -317,6 +317,15 @@ class EvidencePreparer:
                         reranker=self.reranker, credential_names=experiment.required_credentials) as capture:
                     seen_patients, patient_identities, seen_guidelines, screened = {}, {}, {}, []
 
+                    def save_agent_response(response):
+                        capture["model_responses"].setdefault("agent_control", []).append(
+                            model_response_metadata(response))
+                        try:
+                            checkpoint()
+                        except RunMetadataError:
+                            raise
+                        except Exception as exc:
+                            raise RunMetadataError("Could not save agent response usage") from exc
 
                     def search_patients(query):
                         if self.retriever is None:
@@ -368,6 +377,7 @@ class EvidencePreparer:
                             temperature=settings["temperature"], use_patients=use_patients,
                             use_guidelines=use_guidelines,
                             allow_diagnosis_terms=settings["allow_diagnosis_terms"],
+                            on_response=save_agent_response,
                         )
                     except RetrievalAgentError as exc:
                         outcome = exc.outcome

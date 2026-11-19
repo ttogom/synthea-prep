@@ -160,10 +160,50 @@ def test_tool_errors_propagate():
     raise AssertionError("tool exception was swallowed")
 
 
+def test_response_callback_runs_before_tools_and_includes_the_finish_response():
+    events = []
+    c = FakeClient([msg(("search_similar_patients", {"query": "a"})), msg(("finish", {}))])
+    t = tools()
+    t["search_similar_patients"] = lambda query: events.append("tool") or "[P1] note"
+    run_retrieval_agent(c, "x", t, model="m", use_guidelines=False,
+                        on_response=lambda response: events.append("response"))
+    assert events == ["response", "tool", "response"]
 
 
+def test_response_callback_saves_malformed_replies_before_parsing():
+    c = FakeClient([_Msg()])
+    received = []
+    original = c.create
+
+    def create(**kwargs):
+        response = original(**kwargs)
+        response.choices = []
+        return response
+
+    c.chat.completions.create = create
+    try:
+        run_retrieval_agent(c, "x", tools(), model="m", on_response=received.append)
+    except IndexError:
+        assert len(received) == len(c.requests) == 1
+    else:
+        raise AssertionError("malformed response was accepted")
 
 
+def test_usage_persistence_failure_prevents_further_paid_work():
+    c = FakeClient([msg(("search_similar_patients", {"query": "a"}))])
+    executed = []
+    t = tools()
+    t["search_similar_patients"] = executed.append
+
+    def save(response):
+        raise OSError("disk full")
+
+    try:
+        run_retrieval_agent(c, "x", t, model="m", on_response=save)
+    except OSError:
+        assert executed == [] and len(c.requests) == 1
+    else:
+        raise AssertionError("usage persistence failure was ignored")
 
 if __name__ == "__main__":
     for name, fn in list(globals().items()):

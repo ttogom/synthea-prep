@@ -104,13 +104,15 @@ def _finish_arguments(args, use_patients, use_guidelines):
 
 
 def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperature=0.0,
-                        use_patients=True, use_guidelines=True, allow_diagnosis_terms=False):
+                        use_patients=True, use_guidelines=True, allow_diagnosis_terms=False,
+                        on_response=None):
     """Run the agent loop.
 
     tools: {"search_similar_patients": f(query)->str, "search_guidelines": f(question)->str}; each
            returns the text shown to the agent and registers its own reference ids ([P1], [G1], ...).
     Returns {"patient_ref", "guideline_refs", "searches", "finished", "stop_reason", "trace", "usage"}
     only after a valid finish call. Exhausting the turn limit raises RetrievalAgentError.
+    on_response persists each provider response before any parsing or tool execution.
     """
     if not (use_patients or use_guidelines):
         raise ValueError("agent needs at least one search tool")
@@ -132,6 +134,8 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
         choice = {"type": "function", "function": {"name": FINISH_TOOL}} if force_finish else "required"
         resp = client.chat.completions.create(model=model, messages=messages, tools=specs,
                                               tool_choice=choice, temperature=temperature)
+        if on_response is not None:
+            on_response(resp)
         out["usage"].append(_usage(resp))
         msg = resp.choices[0].message
         messages.append(_assistant_dict(msg))

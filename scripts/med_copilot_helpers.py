@@ -335,7 +335,7 @@ def new_patient_result(patient_id, status=None, model_ids=None, variant_ids=None
 
 
 def model_response_metadata(response):
-    """Copy only provider-reported model, response ID, and token counts."""
+    """Copy provider identities and actual token counts; never infer missing usage."""
     def value(source, key):
         return source.get(key) if isinstance(source, dict) else getattr(source, key, None)
 
@@ -345,10 +345,27 @@ def model_response_metadata(response):
         counts = {}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             count = value(usage, key)
-            counts[key] = count if isinstance(count, int) and not isinstance(count, bool) else None
-    return {"reported_model": model if isinstance(model, str) else None,
+            counts[key] = count if type(count) is int and count >= 0 else None
+        details = value(usage, "prompt_tokens_details")
+        if details is not None:
+            cached = value(details, "cached_tokens")
+            counts["cached_tokens"] = cached if type(cached) is int and cached >= 0 else None
+    metadata = {"reported_model": model if isinstance(model, str) else None,
             "response_id": response_id if isinstance(response_id, str) else None,
             "token_usage": counts}
+    request_id = value(response, "_request_id")
+    if isinstance(request_id, str) and request_id.strip():
+        metadata["request_id"] = request_id
+    return metadata
+
+
+def _checkpoint_response_usage():
+    try:
+        checkpoint()
+    except RunMetadataError:
+        raise
+    except Exception as exc:
+        raise RunMetadataError("Could not save received response usage") from exc
 
 
 def reference_patient_identity(corpus_records, row):
@@ -522,6 +539,7 @@ def _guideline_question_reply(client, settings, messages, capture):
         "refusal": refusal if isinstance(refusal, str) else None,
         "finish_reason": finish if isinstance(finish, str) else None,
     })
+    _checkpoint_response_usage()
     if choice is None or message is None:
         raise ValueError("Guideline question generation returned no message")
     if refusal:
@@ -1095,6 +1113,7 @@ Text:
             content = getattr(getattr(choices[0], "message", None), "content", None) if choices else None
             if isinstance(content, str):
                 capture["keyword_extraction_raw"] = content
+            _checkpoint_response_usage()
         if not getattr(response, "choices", None):
             raise ValueError("Keyword extraction returned no choices")
         choice = response.choices[0]

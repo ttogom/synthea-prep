@@ -483,6 +483,31 @@ class SchedulerPipelineTests(unittest.TestCase):
                             for record in fixture.records() for body in record["variants"].values()
                             for slot in body["assessment_plans"].values() for evaluation in slot["evaluation"]))
 
+    def test_export_retains_usage_committed_before_worker_or_generation_future_returned(self):
+        fixture = self.fixture
+        patient_id = fixture.patients[0]["id"]
+        original = deepcopy(self.scheduler.records[patient_id])
+        prepared = deepcopy(original)
+        usage = {"reported_model": "gpt-4o-mini", "response_id": "paid-before-worker-exit",
+                 "token_usage": {"prompt_tokens": 123, "completion_tokens": 7, "total_tokens": 130}}
+        prepared["components"]["evidence"]["capture"]["model_responses"]["agent_control"] = [usage]
+        self.scheduler.store.save(("preparation", patient_id, None, None), prepared)
+        generated = deepcopy(original["variants"]["llm_only"]["assessment_plans"]["hosted"])
+        generated["model_responses"] = [{**usage, "response_id": "paid-before-future-return"}]
+        self.scheduler.store.save(("generation", patient_id, "llm_only", "hosted"), generated)
+        self.scheduler.export()
+        exported = fixture.records()[0]
+        self.assertEqual(exported["components"]["evidence"]["capture"]["model_responses"]["agent_control"], [usage])
+        slot = exported["variants"]["llm_only"]["assessment_plans"]["hosted"]
+        self.assertEqual(slot["model_responses"][0]["response_id"], "paid-before-future-return")
+        self.assertEqual(slot["predictions"], original["variants"]["llm_only"]["assessment_plans"]["hosted"]["predictions"])
+        self.assertEqual(slot["evaluation"], original["variants"]["llm_only"]["assessment_plans"]["hosted"]["evaluation"])
+        fixture.run_file.update(status="failed_incomplete")
+        reports = provenance_module.write_provenance(fixture.run_dir, metadata=fixture.run_file.metadata)
+        report = json.loads(reports["usage"].read_text())
+        self.assertEqual(report["measured_usage"]["by_stage"]["agent_control"]["reported_tokens"]["prompt_tokens"], 123)
+        self.assertEqual(report["measured_usage"]["by_stage"]["final"]["reported_tokens"]["prompt_tokens"], 123)
+
     def test_failed_received_reply_checkpoint_prevents_parse_and_remaining_work(self):
         fixture = self.fixture
         original = self.scheduler.store.save
@@ -1322,7 +1347,7 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(metadata["results_summary"]["status"], "completed")
         provenance_files = directory / "provenance"
         self.assertEqual({path.name for path in provenance_files.iterdir()},
-                         {"reported-usage-cost.json", "recovery-incidents.json"})
+                         {"reported-usage-cost.json", "recovery-incidents.json", "api-usage.jsonl"})
         usage = json.loads((provenance_files / "reported-usage-cost.json").read_text())
         self.assertEqual(usage["prepared_patient_count"], 3)
         self.assertEqual(usage["completed_hosted_output_count"], 12)
@@ -1357,6 +1382,42 @@ class RunnerEntryTests(unittest.TestCase):
         self.assertEqual(self.fixture.calls, [])
         self.assertEqual(self.fixture.prepared, [])
         self.assertFalse((self.root / "output").exists())
+
+    def test_entry_exports_durable_agent_usage_and_resume_does_not_count_it_again(self):
+        fixture = self.fixture
+        original = fixture.preparer_factory()
+
+        class Worker(original):
+            def prepare(self, item):
+                patient, result = item
+                component = next(iter(result["components"].values()))
+                responses = component["capture"]["model_responses"].setdefault("agent_control", [])
+                if not responses:
+                    responses.append({"reported_model": "gpt-4o-mini-2024-07-18",
+                        "response_id": "agent-" + patient["id"],
+                        "token_usage": {"prompt_tokens": 111, "completion_tokens": 7,
+                                        "total_tokens": 118, "cached_tokens": 32}})
+                    self.store.save(("preparation", patient["id"], None, None), result)
+                return super().prepare(item)
+
+        fixture.preparer_factory = lambda: Worker
+        self.assertEqual(self.invoke(), 0)
+        directory, _, records = self.saved()
+        summary = json.loads((directory / "provenance/reported-usage-cost.json").read_text())
+        actual = summary["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(actual["responses"], 3)
+        self.assertEqual(actual["reported_tokens"], {"prompt_tokens": 333, "completion_tokens": 21,
+                                                   "total_tokens": 354, "cached_tokens": 96})
+        ledger_file = directory / summary["api_usage_file"]
+        ledger_before = ledger_file.read_bytes()
+        ledger = [json.loads(line) for line in ledger_before.splitlines()]
+        agent_rows = [row for row in ledger if row["response_id"].startswith("agent-")]
+        self.assertEqual({row["contexts"][0]["patient_id"] for row in agent_rows},
+                         {row["id"] for row in records})
+        calls_before = len(fixture.calls)
+        self.assertEqual(self.invoke(["--resume", str(directory)]), 0)
+        self.assertEqual(len(fixture.calls), calls_before)
+        self.assertEqual(ledger_file.read_bytes(), ledger_before)
 
     def test_root_entry_and_provenance_resolve_from_an_unrelated_working_directory(self):
         caller = self.root / "unrelated-caller"

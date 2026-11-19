@@ -3,6 +3,7 @@
 import ast
 import asyncio
 from contextlib import contextmanager
+from copy import deepcopy
 import logging
 from pathlib import Path
 import sys
@@ -11,7 +12,7 @@ import time
 from threading import Thread
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 # Direct test execution puts tests/ on sys.path; project imports need the root.
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from scripts.med_copilot_helpers import new_patient_result
 from scripts.med_copilot_observability import capture_graphrag_responses
+from scripts.med_copilot_run_file import RunMetadataError, error_scope
 
 
 
@@ -252,7 +254,8 @@ class GraphRAGCaptureTests(unittest.TestCase):
             self.assertTrue(second.cache_hit)
             self.assertEqual(self.harness.embedding_create.await_count, 1)
             self.assertEqual(len(self.metadata["guideline_query_embedding"]), 1)
-            self.assertEqual(other["guideline_query_embedding"], self.metadata["guideline_query_embedding"])
+            self.assertEqual(other["guideline_query_embedding"], [
+                {**self.metadata["guideline_query_embedding"][0], "cache_hit": True}])
 
     def test_successful_nonstreaming_fnllm_response_is_recorded_once(self):
         self.harness.text_response.choices = [SimpleNamespace(message=SimpleNamespace(content="answer"))]
@@ -278,6 +281,40 @@ class GraphRAGCaptureTests(unittest.TestCase):
         self.assertEqual(self.metadata["guideline_evidence"][0]["token_usage"],
                          {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6})
         self.assertEqual(len(self.metadata["guideline_evidence"]), 1)
+
+    def test_provider_usage_is_checkpointed_as_it_arrives_including_cached_tokens(self):
+        snapshots = []
+        self.harness.chunks = [self.harness.chunk("answer"), self.harness.chunk(None, SimpleNamespace(
+            prompt_tokens=80, completion_tokens=5, total_tokens=85,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=32)))]
+        owner = SimpleNamespace(checkpoint=lambda: snapshots.append(deepcopy(self.metadata)))
+        with error_scope(owner), capture_graphrag_responses(self.metadata):
+            asyncio.run(self.harness.query())
+        self.assertTrue(any(snapshot["guideline_query_embedding"] for snapshot in snapshots))
+        self.assertEqual(snapshots[-1]["guideline_evidence"][0]["token_usage"], {
+            "prompt_tokens": 80, "completion_tokens": 5, "total_tokens": 85, "cached_tokens": 32})
+
+    def test_usage_write_failure_cannot_be_swallowed_by_the_retrieval_caller(self):
+        original = OpenAIEmbeddingsLLMImpl._execute_llm
+        with patch("scripts.med_copilot_observability.checkpoint", side_effect=OSError("disk full")), \
+                self.assertRaises(RunMetadataError):
+            with capture_graphrag_responses(self.metadata):
+                try:
+                    asyncio.run(self.harness.query())
+                except Exception:
+                    pass  # Mirrors GraphRAG turning a provider exception into empty evidence.
+        self.assertIs(OpenAIEmbeddingsLLMImpl._execute_llm, original)
+        self.assertEqual(self.harness.chat_create.await_count, 0)
+        self.assertEqual(self.metadata["guideline_query_embedding"][0]["token_usage"]["prompt_tokens"], 11)
+
+    def test_usage_write_failure_remains_fatal_when_upstream_replaces_the_exception(self):
+        with patch("scripts.med_copilot_observability.checkpoint", side_effect=OSError("disk full")), \
+                self.assertRaises(RunMetadataError):
+            with capture_graphrag_responses(self.metadata):
+                try:
+                    asyncio.run(self.harness.query())
+                except Exception:
+                    raise ValueError("Upstream changed the error type")
 
     def test_partial_usage_survives_fnllm_rejecting_missing_counts(self):
         self.harness.chunks = [self.harness.chunk("answer"), self.harness.chunk(

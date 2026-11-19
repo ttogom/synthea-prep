@@ -62,13 +62,13 @@ class ProvenanceTests(unittest.TestCase):
         paths = provenance.write_provenance(self.run)
         return {key: json.loads(path.read_text()) for key, path in paths.items()}
 
-    def test_final_report_schema_math_and_only_two_files_without_mutating_sources(self):
+    def test_final_report_schema_math_and_usage_ledger_without_mutating_sources(self):
         before = {name: (self.run / name).read_bytes() for name in ("run.json", "results.jsonl")}
         reports = self.write()
         cost = reports["usage"]
         self.assertEqual(set(cost), {"observed_at_pst", "prepared_patient_count", "completed_hosted_output_count",
             "usage", "missing_or_malformed_usage", "captured_usage_estimated_usd", "usd_per_million_tokens",
-            "price_sources", "limitations", "deduplication"})
+            "price_sources", "limitations", "deduplication", "measured_usage", "api_usage_file"})
         self.assertEqual(cost["observed_at_pst"], STAMP.isoformat())
         self.assertEqual(cost["prepared_patient_count"], 1)
         self.assertEqual(cost["completed_hosted_output_count"], 1)
@@ -81,7 +81,7 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(cost["missing_or_malformed_usage"], 0)
         self.assertEqual(reports["recovery"], {"run_restarts": 0, "events": []})
         self.assertEqual({p.name for p in (self.run / "provenance").iterdir()},
-                         {"reported-usage-cost.json", "recovery-incidents.json"})
+                         {"reported-usage-cost.json", "recovery-incidents.json", "api-usage.jsonl"})
         self.assertFalse(list(self.run.rglob("command.txt")))
         self.assertFalse(list(self.run.rglob("launch.json")))
         self.assertEqual({name: (self.run / name).read_bytes() for name in before}, before)
@@ -117,7 +117,7 @@ class ProvenanceTests(unittest.TestCase):
         self.save_sources()
         cost = self.write()["usage"]
         self.assertEqual(cost["usage"]["preparation_gpt"]["responses"], 2)
-        self.assertFalse(any("unknown" in note for note in cost["limitations"]))
+        self.assertFalse(any("unknown (" in note for note in cost["limitations"]))
 
     def test_bad_usage_is_explicit_and_never_priced_as_zero_token_success(self):
         variants = [None, {}, {"prompt_tokens": True, "completion_tokens": 1},
@@ -173,6 +173,126 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(cost["prepared_patient_count"], 0)
         self.assertEqual(cost["completed_hosted_output_count"], 0)
         self.assertEqual(cost["usage"]["final_gpt"]["responses"], 1)
+
+    def test_agent_calls_and_failed_attempts_have_actual_counts_and_variant_attribution(self):
+        component = self.rows[0]["components"]["evidence"]
+        component.update(status="failed_incomplete", settings={"agent_model": "gpt-4o-mini"})
+        component["capture"]["model_responses"]["agent_control"] = [
+            response("agent-failed", input_tokens=123, output_tokens=7),
+            response("agent-finish", input_tokens=456, output_tokens=9)]
+        calls = component["capture"]["model_responses"]["agent_control"]
+        for call in calls:
+            call["token_usage"]["total_tokens"] = (call["token_usage"]["prompt_tokens"]
+                                                    + call["token_usage"]["completion_tokens"])
+            call["token_usage"]["cached_tokens"] = 64
+        # Legacy convenience copies must not be counted again.
+        component["capture"]["agent"] = {"usage": [call["token_usage"] for call in calls]}
+        self.rows[0]["variants"]["llm_only"]["components"] = {"agent_patients": "evidence"}
+        self.save_sources()
+        report = self.write()["usage"]
+        measured = report["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(measured["responses"], 2)
+        self.assertEqual(measured["reported_tokens"], {"prompt_tokens": 579, "completion_tokens": 16,
+                                                     "total_tokens": 595, "cached_tokens": 128})
+        self.assertEqual(measured["missing_usage_fields"], dict.fromkeys(measured["reported_tokens"], 0))
+        self.assertEqual(report["usage"]["preparation_gpt"]["input_tokens"], 679)
+        ledger = [json.loads(line) for line in (self.run / report["api_usage_file"]).read_text().splitlines()]
+        agents = [row for row in ledger if row["contexts"][0]["stage"] == "agent_control"]
+        self.assertEqual([row["response_id"] for row in agents], ["agent-failed", "agent-finish"])
+        for index, row in enumerate(agents):
+            self.assertEqual(row["contexts"], [{"patient_id": "A", "component": "evidence",
+                "stage": "agent_control", "variants": ["llm_only"], "cache_hit": False, "capture_index": index}])
+
+    def test_old_agent_count_captures_are_included_when_per_response_metadata_is_absent(self):
+        component = self.rows[0]["components"]["evidence"]
+        component["settings"] = {"agent_model": "gpt-4o-mini"}
+        component["capture"]["agent"] = {"usage": [{"prompt_tokens": 17, "completion_tokens": 3}]}
+        self.save_sources()
+        report = self.write()["usage"]
+        self.assertEqual(report["usage"]["preparation_gpt"]["input_tokens"], 117)
+        actual = report["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(actual["reported_tokens"]["prompt_tokens"], 17)
+        self.assertEqual(actual["missing_usage_fields"]["total_tokens"], 1)
+        self.assertEqual(actual["reported_tokens"]["total_tokens"], 0)
+        ledger = [json.loads(line) for line in (self.run / report["api_usage_file"]).read_text().splitlines()]
+        legacy = next(row for row in ledger if row["contexts"][0]["stage"] == "agent_control")
+        self.assertIsNone(legacy["reported_model"])
+        self.assertEqual(legacy["model_source"], "configured")
+
+    def test_request_ids_deduplicate_embeddings_and_local_cache_hits_add_no_new_tokens(self):
+        first = self.rows[0]["components"]["evidence"]["capture"]["model_responses"]
+        embedding = first["guideline_query_embedding"][0]
+        embedding["request_id"] = "embedding-request"
+        first["guideline_query_embedding"].append(deepcopy(embedding))
+        first["guideline_evidence"] = [{**response("cached-answer", input_tokens=9999), "cache_hit": True}]
+        self.save_sources()
+        report = self.write()["usage"]
+        self.assertEqual(report["usage"]["embedding"]["responses"], 1)
+        self.assertEqual(report["measured_usage"]["local_cache_hits"], 1)
+        self.assertEqual(report["measured_usage"]["responses"], 3)
+        self.assertEqual(report["usage"]["preparation_gpt"]["input_tokens"], 100)
+
+    def test_cached_copy_of_a_response_already_used_live_does_not_add_tokens_for_another_variant(self):
+        output = self.rows[0]["variants"]["llm_only"]
+        component = self.rows[0]["components"]["evidence"]
+        component["capture"]["model_responses"]["keyword_extraction"] = []
+        component["capture"]["model_responses"]["agent_control"] = [response("shared")]
+        output["components"] = {"agent_patients": "evidence"}
+        other = deepcopy(component)
+        other["capture"]["model_responses"]["agent_control"][0]["cache_hit"] = True
+        other["capture"]["model_responses"]["guideline_query_embedding"] = []
+        self.rows[0]["components"]["cached_evidence"] = other
+        self.rows[0]["variants"]["cached_variant"] = {"components": {"agent_patients": "cached_evidence"}}
+        self.save_sources()
+        report = self.write()["usage"]
+        self.assertEqual(report["measured_usage"]["local_cache_hits"], 1)
+        self.assertEqual(report["measured_usage"]["by_stage"]["agent_control"]["responses"], 1)
+        self.assertNotIn("cached_variant", report["measured_usage"]["by_variant"])
+
+    def test_partial_duplicate_metadata_merges_cached_counts_but_conflicts_are_rejected(self):
+        entries = self.rows[0]["components"]["evidence"]["capture"]["model_responses"]["keyword_extraction"]
+        extra = deepcopy(entries[0])
+        extra["token_usage"].update(total_tokens=120, cached_tokens=32)
+        entries.append(extra)
+        self.save_sources()
+        report = self.write()["usage"]
+        actual = report["measured_usage"]["by_stage"]["keyword_extraction"]
+        self.assertEqual(actual["responses"], 1)
+        self.assertEqual(actual["reported_tokens"]["cached_tokens"], 32)
+        conflict = deepcopy(extra)
+        conflict["token_usage"]["cached_tokens"] = 64
+        entries.append(conflict)
+        self.save_sources()
+        with self.assertRaisesRegex(ValueError, "Conflicting"):
+            self.write()
+
+    def test_unpriced_models_and_missing_fields_still_have_measured_token_records(self):
+        output = self.rows[0]["variants"]["llm_only"]["assessment_plans"]["hosted"]
+        output["model_responses"] = [response("unpriced", "new-model", 321, 12)]
+        self.save_sources()
+        report = self.write()["usage"]
+        actual = report["measured_usage"]["by_model"]["new-model"]
+        self.assertEqual(actual["reported_tokens"]["prompt_tokens"], 321)
+        self.assertEqual(actual["reported_tokens"]["completion_tokens"], 12)
+        self.assertEqual(actual["missing_usage_fields"]["total_tokens"], 1)
+        self.assertEqual(actual["missing_usage_fields"]["cached_tokens"], 1)
+
+    def test_resume_preserves_prior_failed_agent_usage_and_rebuilds_a_stable_ledger(self):
+        capture = self.rows[0]["components"]["evidence"]["capture"]["model_responses"]
+        capture["agent_control"] = [response("old-agent")]
+        self.save_sources()
+        self.write()
+        self.metadata["resumptions"] = [{"started_at": "later"}]
+        capture["agent_control"].append(response("new-agent", input_tokens=250))
+        self.save_sources()
+        report = self.write()["usage"]
+        ledger_path = self.run / report["api_usage_file"]
+        contents = ledger_path.read_bytes()
+        measured = report["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(measured["responses"], 2)
+        self.assertEqual(measured["reported_tokens"]["prompt_tokens"], 350)
+        self.write()
+        self.assertEqual(ledger_path.read_bytes(), contents)
 
     def test_llm_only_preparation_requires_a_saved_prompt(self):
         self.rows[0]["components"] = {}
@@ -299,7 +419,7 @@ class ProvenanceTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.write()
         self.assertEqual(cost.read_bytes(), before)
 
-    def test_git_status_exposes_only_approved_results_and_two_provenance_reports(self):
+    def test_git_status_exposes_only_approved_results_and_provenance_artifacts(self):
         repository = self.run / "ignore-test"
         repository.mkdir()
         subprocess.run(["git", "init", "--quiet"], cwd=repository, check=True)
@@ -307,7 +427,8 @@ class ProvenanceTests(unittest.TestCase):
         subprocess.run(["git", "add", ".gitignore"], cwd=repository, check=True)
         prefix = "experiments/output/future-run/"
         approved = {prefix + name for name in ("results.jsonl", "run.json", "results_summary.html",
-            "provenance/reported-usage-cost.json", "provenance/recovery-incidents.json")}
+            "provenance/reported-usage-cost.json", "provenance/recovery-incidents.json",
+            "provenance/api-usage.jsonl")}
         operational = {prefix + name for name in ("jobs.sqlite3", "jobs.sqlite3-wal", "jobs.sqlite3-shm",
             ".run.lock", "experiment.log", "supervisor.out", "supervisor.pid", "launcher.sh", "watch_run.py",
             "progress.jsonl", "progress.latest.json", "command.txt", "launch.json", "unexpected.tmp",

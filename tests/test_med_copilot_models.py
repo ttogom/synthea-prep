@@ -146,6 +146,30 @@ class AssessmentPlanModelsTests(unittest.TestCase):
         self.transport.assert_called_once()
         self.assertEqual(output["status"], "completed")
 
+    def test_failed_response_usage_is_saved_before_validation_error_is_handled(self):
+        for finish, refusal, missing_choices in [("length", None, False),
+                ("stop", "refused", False), ("stop", None, True)]:
+            with self.subTest(finish=finish, refusal=refusal, missing_choices=missing_choices):
+                models = self.load_models()
+                reply = response()
+                reply.choices[0].finish_reason = finish
+                reply.choices[0].message.refusal = refusal
+                if missing_choices:
+                    reply.choices = []
+                self.transport.return_value = reply
+                output = new_patient_result("p", model_ids=models.model_ids)["assessment_plans"]["mini"]
+                snapshots = []
+                owner = SimpleNamespace(checkpoint=lambda: snapshots.append(deepcopy(output)))
+
+                def checked_error(error):
+                    self.assertTrue(snapshots, "Usage must be durable before processing the failure")
+                    self.assertEqual(snapshots[0]["model_responses"][0]["token_usage"], {
+                        "prompt_tokens": 0, "completion_tokens": 4, "total_tokens": 4})
+
+                with error_scope(owner), patch("scripts.med_copilot_models.record_error", side_effect=checked_error):
+                    models.generate_one("mini", self.messages, output)
+                self.assertEqual(output["status"], "failed_incomplete")
+
     def test_generate_one_overlaps_same_alias_requests_without_crossing_job_state(self):
         models = self.load_models()
         barrier = Barrier(2)

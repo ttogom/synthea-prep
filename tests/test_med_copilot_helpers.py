@@ -1687,7 +1687,8 @@ class CaptureHelperTests(unittest.TestCase):
         self.assertEqual(normalize(SimpleNamespace(model="reported", id="provider-id", usage=SimpleNamespace(
             prompt_tokens=0, total_tokens=17), _request_id="http-id")), {
                 "reported_model": "reported", "response_id": "provider-id",
-                "token_usage": {"prompt_tokens": 0, "completion_tokens": None, "total_tokens": 17}})
+                "token_usage": {"prompt_tokens": 0, "completion_tokens": None, "total_tokens": 17},
+                "request_id": "http-id"})
         self.assertEqual(normalize({"model": "dict-model", "usage": {"completion_tokens": 3}}), {
             "reported_model": "dict-model", "response_id": None,
             "token_usage": {"prompt_tokens": None, "completion_tokens": 3, "total_tokens": None}})
@@ -1700,6 +1701,19 @@ class CaptureHelperTests(unittest.TestCase):
         self.assertIsNone(normalize({})["token_usage"])
         self.assertEqual(normalize({"usage": {}})["token_usage"],
                          {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None})
+
+    def test_metadata_retains_actual_cached_tokens_and_never_invents_missing_or_negative_counts(self):
+        normalize = H["model_response_metadata"]
+        for details in ({"cached_tokens": 25}, SimpleNamespace(cached_tokens=25)):
+            usage = normalize({"usage": {"prompt_tokens": 100, "completion_tokens": 5,
+                              "total_tokens": 105, "prompt_tokens_details": details}})["token_usage"]
+            self.assertEqual(usage, {"prompt_tokens": 100, "completion_tokens": 5,
+                                    "total_tokens": 105, "cached_tokens": 25})
+        for count in (-1, True, "25", None):
+            usage = normalize({"usage": {"prompt_tokens": -1,
+                "prompt_tokens_details": {"cached_tokens": count}}})["token_usage"]
+            self.assertIsNone(usage["prompt_tokens"])
+            self.assertIsNone(usage["cached_tokens"])
 
     def test_reference_identity_and_rank_snapshots_preserve_rows_order_and_full_scores(self):
         corpus = [{"id": "DUP", "subject_id": "same"}, {"id": "unique"},
@@ -1742,8 +1756,14 @@ class CaptureHelperTests(unittest.TestCase):
                 extractor = H["JSONKeywordExtractor"](client, "requested")
                 record = H["new_patient_result"]("p")
                 extractor.capture_result = record
-                with self.assertRaises((ValueError, AttributeError)):
+                snapshots = []
+                with patch.dict(H["JSONKeywordExtractor"].extract.__wrapped__.__globals__,
+                                checkpoint=lambda: snapshots.append(deepcopy(record))), \
+                        self.assertRaises((ValueError, AttributeError)):
                     extractor.extract("S/O")
+                self.assertEqual(len(snapshots), 1)
+                self.assertEqual(snapshots[0]["model_responses"]["keyword_extraction"][0]["token_usage"],
+                                 {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4})
                 choices = getattr(response, "choices", None)
                 content = getattr(getattr(choices[0], "message", None), "content", None) if choices else None
                 self.assertEqual(record["keyword_extraction_raw"], content if isinstance(content, str) else None)
@@ -2411,7 +2431,7 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
             self.assertEqual(self.prepare(), raw)
             self.assertEqual(self.capture["guideline_query"], raw)
             self.assertEqual(self.capture["guideline_questions"], ["Which tests fit these findings?"])
-            namespace["checkpoint"].assert_called_once_with()
+            self.assertEqual(namespace["checkpoint"].call_count, 2)  # received usage, then reusable query
         self.client.chat.completions.create.assert_called_once_with(
             model="question-model", response_format={"type": "json_object"}, messages=[
                 {"role": "system", "content": "You are a clinical expert."},
@@ -2446,7 +2466,7 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
             before = deepcopy(self.capture)
             self.assertEqual(self.prepare(), expected)
             self.assertEqual(self.capture, before)
-            namespace["checkpoint"].assert_called_once_with()
+            self.assertEqual(namespace["checkpoint"].call_count, 3)  # both replies, then reusable query
         self.assertEqual(self.client.chat.completions.create.call_count, 2)
         self.assertEqual(self.capture["guideline_questions"], ["Stage these findings by these findings?"])
         self.assertEqual(self.capture["guideline_question_screen"]["retry_reply"], retry)
@@ -2519,7 +2539,7 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
                 save.assert_not_called()
                 self.client.chat.completions.create.assert_called_once()
 
-    def test_checkpoint_failure_keeps_exact_obtained_query_and_propagates(self):
+    def test_usage_checkpoint_failure_keeps_obtained_reply_and_stops_before_processing_query(self):
         raw = '{"Key Questions": ["Which tests fit?"]}'
         self.client.chat.completions.create.return_value = self.response(raw)
         failure = H["RunMetadataError"]("disk full")
@@ -2527,7 +2547,9 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
                 self.assertRaises(H["RunMetadataError"]) as caught:
             self.prepare()
         self.assertIs(caught.exception, failure)
-        self.assertEqual(self.capture["guideline_query"], raw)
+        self.assertNotIn("guideline_query", self.capture)
+        self.assertEqual(self.capture["guideline_question_attempts"][0]["content"], raw)
+        self.assertEqual(self.capture["model_responses"]["guideline_questions"][0]["response_id"], "question-1")
 
     def test_retry_failure_keeps_first_response_metadata_without_a_completed_query(self):
         first = '{"Key Questions": ["Treat hypertension?"]}'
@@ -2541,7 +2563,7 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
         self.assertNotIn("guideline_query", self.capture)
         self.assertEqual(self.client.chat.completions.create.call_count, 2)
         self.assertEqual(self.capture["model_responses"]["guideline_questions"][0]["response_id"], "question-1")
-        save.assert_not_called()
+        save.assert_called_once_with()
 
     def test_missing_choices_keeps_obtained_response_metadata_and_propagates(self):
         self.client.chat.completions.create.return_value = SimpleNamespace(
@@ -2553,7 +2575,7 @@ class PrepareGuidelineQueryTests(unittest.TestCase):
         self.assertNotIn("guideline_query", self.capture)
         self.assertEqual(self.capture["model_responses"]["guideline_questions"][0]["response_id"],
                          "invalid-response")
-        save.assert_not_called()
+        save.assert_called_once_with()
 
 
 
@@ -2580,8 +2602,10 @@ class KeywordResumeTests(unittest.TestCase):
         snapshots = []
         with patch.dict(self.namespace, checkpoint=lambda: snapshots.append(deepcopy(self.component))):
             self.assertEqual(self.invoke(), ["cough"])
-        self.assertEqual(snapshots[0]["capture"]["_keyword_query"], "patient findings")
-        self.assertEqual(snapshots[0]["capture"]["retrieval_keywords"], ["cough"])
+        self.assertNotIn("_keyword_query", snapshots[0]["capture"])
+        self.assertEqual(len(snapshots[0]["capture"]["model_responses"]["keyword_extraction"]), 1)
+        self.assertEqual(snapshots[1]["capture"]["_keyword_query"], "patient findings")
+        self.assertEqual(snapshots[1]["capture"]["retrieval_keywords"], ["cough"])
         self.assertEqual(snapshots[0]["status"], "failed_incomplete")
         self.assertEqual(snapshots[-1]["status"], "completed")
 

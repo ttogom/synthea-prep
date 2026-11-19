@@ -17,22 +17,41 @@ from fnllm.openai.llm.openai_streaming_chat_llm import OpenAIStreamingChatLLMImp
 from fnllm.openai.llm.openai_text_chat_llm import OpenAITextChatLLMImpl
 
 from scripts.med_copilot_helpers import model_response_metadata
+from scripts.med_copilot_run_file import RunMetadataError, checkpoint
 
 
 _sink = ContextVar("med_copilot_response_sink", default=None)
 _seen = ContextVar("med_copilot_response_seen", default=None)
+_checkpoint_errors = ContextVar("med_copilot_response_checkpoint_errors", default=None)
 _lock = RLock()
 _users = 0
 _hooks = None
 
 
-def _record(response, sink, stage):
+def _save_usage():
+    try:
+        checkpoint()
+    except Exception as exc:
+        error = exc if isinstance(exc, RunMetadataError) else RunMetadataError("Could not save GraphRAG usage")
+        errors = _checkpoint_errors.get()
+        if errors is not None:
+            errors.append(error)
+        if error is exc:
+            raise
+        raise error from exc
+
+
+def _record(response, sink, stage, *, cache_hit=False):
     seen = _seen.get()
     if seen is not None:
         if any(response is previous for previous in seen):
             return
         seen.append(response)
-    sink[stage].append(model_response_metadata(response))
+    metadata = model_response_metadata(response)
+    if cache_hit:
+        metadata["cache_hit"] = True
+    sink[stage].append(metadata)
+    _save_usage()
 
 
 class _Proxy:
@@ -64,20 +83,27 @@ class _Stream(_Proxy):
     async def __aiter__(self):
         async for chunk in self._target:
             metadata = model_response_metadata(chunk)
+            changed = False
             if self._entry is None:
                 self._entry = metadata
                 self._sink[self._stage].append(self._entry)
+                changed = True
             else:
-                for key in ("reported_model", "response_id"):
-                    if metadata[key] is not None:
+                for key in ("reported_model", "response_id", "request_id"):
+                    if metadata.get(key) is not None and self._entry.get(key) != metadata[key]:
                         self._entry[key] = metadata[key]
+                        changed = True
                 if metadata["token_usage"] is not None:
                     if self._entry["token_usage"] is None:
                         self._entry["token_usage"] = metadata["token_usage"]
+                        changed = True
                     else:
                         for key, count in metadata["token_usage"].items():
-                            if count is not None:
+                            if count is not None and self._entry["token_usage"].get(key) != count:
                                 self._entry["token_usage"][key] = count
+                                changed = True
+            if changed:
+                _save_usage()
             # Pass the original chunk through unchanged, including usage events.
             yield chunk
 
@@ -131,7 +157,7 @@ def _call_hook(original, stage):
             response = await original(self, *args, **kwargs)
             raw = getattr(response.output, "raw_model", None)
             if raw is not None:
-                _record(raw, sink, stage)
+                _record(raw, sink, stage, cache_hit=getattr(response, "cache_hit", False) is True)
             return response
         finally:
             _seen.reset(token)
@@ -165,12 +191,19 @@ def capture_graphrag_responses(model_responses):
                 raise
         _users += 1
     token = _sink.set(model_responses)
+    errors = []
+    errors_token = _checkpoint_errors.set(errors)
     try:
         yield
     finally:
+        _checkpoint_errors.reset(errors_token)
         _sink.reset(token)
         with _lock:
             _users -= 1
             if _users == 0:
                 _hooks.close()
                 _hooks = None
+        # GraphRAG may swallow or replace provider exceptions. A failed durable
+        # usage write must remain fatal after restoring all scoped hooks.
+        if errors:
+            raise errors[0]

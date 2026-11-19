@@ -87,6 +87,7 @@ med_copilot/docs/evaluation_literature_review.md
 /experiments/output/*/provenance/*
 !/experiments/output/*/provenance/reported-usage-cost.json
 !/experiments/output/*/provenance/recovery-incidents.json
+!/experiments/output/*/provenance/api-usage.jsonl
 
 # Runtime coordination outside experiment output directories.
 /med_copilot/data/patient_retrieval_so/.initialization.lock

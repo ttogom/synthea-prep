@@ -260,7 +260,8 @@ planned request count and isolated output directory without starting workers or
 making model calls. Each selection has its own output subtree, and each run has
 a unique suffix so concurrent runs cannot overwrite one another.
 
-The concurrent runner writes the two `provenance/` reports only on exit, after all
+The concurrent runner writes the usage/recovery summaries and
+`provenance/api-usage.jsonl` on exit, after all
 model calls and resource cleanup finish. Resuming recalculates cumulative usage
 from canonical captures, deduplicating response IDs and retaining recorded prices
 and detailed recovery events. Usage with missing/invalid token counts is explicit;
@@ -273,8 +274,17 @@ No `command.txt` or `launch.json` is generated. A hard kill can prevent finaliza
 a successful resume refreshes the reports. Provenance-save failures are surfaced
 without overwriting canonical results or masking an existing pipeline failure.
 
-Git exposes only `run.json`, `results.jsonl`, `results_summary.html`, and these two
-provenance reports for new output directories. Checkpoints, logs, PID files, and
+Each returned agent-control, keyword, guideline, and final-model response saves
+its provider-reported usage before further work. Failed-attempt counts survive
+retries. `measured_usage` groups actual reported counts by model, stage, and
+variant, with missing fields counted explicitly. The JSONL ledger retains each
+unique response's IDs, reported tokens, cached-input tokens when available, and
+case/component/variant attribution. Local GraphRAG cache hits are marked and
+excluded from new API usage. Dollar values remain uncached-rate estimates;
+the measured token counts are never inferred from text or prices.
+
+Git exposes only `run.json`, `results.jsonl`, `results_summary.html`, and these
+provenance artifacts for new output directories. Checkpoints, logs, PID files, and
 other operational files remain ignored. Keep reusable monitoring/graphics tools
 and progress histories outside the repository. Existing tracked historical outputs
 are unaffected by the ignore rules.

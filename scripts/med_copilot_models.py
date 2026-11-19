@@ -158,6 +158,11 @@ class AssessmentPlanModels:
                     messages=deepcopy(messages), stream=False, drop_params=False, **options,
                 )
                 output["model_responses"].append(model_response_metadata(response))
+                # Even refused, capped, or malformed responses can consume tokens.
+                # Save their reported usage before inspecting the returned choice.
+                if not response.choices or getattr(response.choices[0].message, "refusal", None) or (
+                        getattr(response.choices[0], "finish_reason", None) not in (None, "stop")):
+                    self._checkpoint_received()
                 choice = response.choices[0]
                 output["assessment_plan_raw"] = choice.message.content
                 if getattr(choice.message, "refusal", None):

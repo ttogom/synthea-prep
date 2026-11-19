@@ -15,7 +15,8 @@ serial runner with its existing CLI and checkpoint format.
 ## Final usage and recovery provenance
 
 On exit, after model work and resource cleanup stop, the concurrent runner writes
-only `provenance/reported-usage-cost.json` and `provenance/recovery-incidents.json`.
+`provenance/reported-usage-cost.json`, `provenance/recovery-incidents.json`, and
+`provenance/api-usage.jsonl`.
 It does not generate command or launcher manifests. No generation, scoring, or
 Plan judging is invoked by provenance finalization. Validation rejection and user
 cancellation do not create or rewrite provenance. Failed/interrupted invocations
@@ -29,6 +30,8 @@ The cost report has these top-level fields:
 | `prepared_patient_count` | Patients with all selected evidence components and exact prompts prepared. |
 | `completed_hosted_output_count` | Completed hosted variant/model outputs, independent of the number of call attempts or valid parsed fields. |
 | `usage` | `preparation_gpt`, `final_gpt`, and `embedding` response/token totals and estimated USD. |
+| `measured_usage` | Deduplicated new API responses, local cache hits, and actual reported token sums by model, stage, and variant; each group includes missing-field counts. |
+| `api_usage_file` | Path to the deduplicated per-response JSONL ledger. |
 | `missing_or_malformed_usage` | Unique captured responses whose required token counts cannot be processed. |
 | `captured_usage_estimated_usd` | Sum of the three supported workload cost estimates. |
 | `usd_per_million_tokens` | Recorded input/output price assumptions, retained when resuming. |
@@ -49,8 +52,26 @@ Only canonical component and final-model response lists are traversed; nested
 variant copies are ignored. Response IDs are deduplicated, including reused cached
 metadata. A later complete capture may supply missing usage for an earlier copy;
 conflicting valid usage for one ID fails finalization instead of guessing. ID-less
-captures are counted per canonical occurrence. A resume recomputes totals from the
+captures use provider request IDs when available, then stable canonical occurrences.
+A resume recomputes totals from the
 cumulative captures, rather than adding a second copy of prior totals.
+
+Agent-control replies are saved in each component's
+`capture.model_responses.agent_control` before parsing or tool execution. Keyword
+and guideline responses likewise checkpoint usage on receipt, including refusals,
+incomplete replies, and partial streamed usage. The ledger records model and
+response/request IDs, actual `prompt_tokens`, `completion_tokens`, `total_tokens`,
+and provider-reported `cached_tokens` when supplied. Contexts identify the patient,
+component, stage, consuming variants, and final model alias when applicable.
+FNLLM local-cache hits are marked separately and add no new API usage; OpenAI
+prompt-cache tokens remain part of reported input usage. Per-variant views can
+overlap for shared responses and must not be added to obtain the run total.
+
+Unknown token fields remain missing: `reported_tokens` sums only available
+nonnegative integers, and `missing_usage_fields` counts absent/invalid values.
+These counts are measurements, while `estimated_usd` remains a price-based,
+uncached-rate estimate. No client can recover tokens from provider-side retries
+that returned no usage, or from a response lost before its durable checkpoint.
 
 Recovery reports contain `run_restarts` and `events`. Resumptions come from saved
 `run.json.resumptions`; worker recovery events come from `preparation_recovery`.
@@ -812,7 +833,7 @@ DataFrame label or a `subject_id`. Multiple records can belong to one subject.
 ## Provider responses
 
 Each component's `capture.model_responses` contains independent evidence-stage
-lists. Existing stages are `keyword_extraction`, `guideline_questions`,
+lists. Stages include `agent_control`, `keyword_extraction`, `guideline_questions`,
 `guideline_query_embedding` and `guideline_evidence`. Each final-model slot has
 its own `model_responses` list. Every obtained response records:
 
@@ -828,8 +849,10 @@ its own `model_responses` list. Every obtained response records:
 }
 ```
 
-Values come from the provider response, not the configured model or HTTP request
-ID. Final calls use LiteLLM-normalized metadata; shared GraphRAG capture observes
+Values come from the provider response, not the configured model. Provider HTTP
+request IDs are additionally retained as `request_id` when available, and
+`token_usage.cached_tokens` preserves reported prompt-cache tokens when supplied.
+Final calls use LiteLLM-normalized metadata; shared GraphRAG capture observes
 FNLLM's OpenAI/Azure SDK boundaries. Unknown fields/counts are `null`, reported
 zeros remain zero, and no usage counts are estimated. `token_usage` is `null` if
 no usage was provided. Local encoder/cross-encoder work adds no API entries.

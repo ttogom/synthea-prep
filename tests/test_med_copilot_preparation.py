@@ -29,6 +29,8 @@ from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result
 from scripts.experiment_runtime.preparation import EvidencePreparer, validate_preparation_result
 from scripts.med_copilot_run_file import RunMetadataError
 from scripts.experiment_runtime.worker_stream import RedactingStream
+from scripts.experiment_runtime.execution import JobStore
+from scripts.experiment_runtime.provenance import write_provenance
 from test_med_copilot_retrieval import load_retrieval_module
 
 
@@ -117,6 +119,18 @@ class ScriptedAgentClient(FakeClient):
         return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=next(self.replies))])
 
 
+class MeteredAgentClient(ScriptedAgentClient):
+    def __init__(self, replies, prefix="attempt"):
+        super().__init__(replies)
+        self.prefix = prefix
+
+    def create(self, **kwargs):
+        response = super().create(**kwargs)
+        response.model = "gpt-4o-mini-2024-07-18"
+        response.id = f"{self.prefix}-{len(self.requests)}"
+        response.usage = SimpleNamespace(prompt_tokens=101, completion_tokens=7, total_tokens=108,
+                                        prompt_tokens_details=SimpleNamespace(cached_tokens=32))
+        return response
 
 
 CLIENT = None
@@ -381,8 +395,83 @@ class PreparationTests(unittest.TestCase):
                                                "Key_info": "No guideline evidence selected."})
         self.assertIsNotNone(result["variants"]["agentic_both"]["assessment_plan_prompts"])
 
+    def test_agent_usage_is_durable_before_tools_and_survives_store_reopen_and_retry(self):
+        self.data["selected_variants"] = ["agentic_patient_retrieval"]
+        self.client = MeteredAgentClient([agent_message(("search_similar_patients", {"query": "cough"}))])
+        path = self.root / "jobs.sqlite3"
+        store = JobStore(path)
+        self.addCleanup(store.close)
+        key = ("preparation", self.patient["id"], None, None)
+        interrupted = []
 
+        def save(result):
+            store.save(key, result)
+            responses = result["components"]["agent_patients"]["capture"]["model_responses"]
+            if responses.get("agent_control") and not interrupted:
+                interrupted.append(True)
+                raise KeyboardInterrupt()
 
+        preparer = self.preparer(checkpoint=save)
+        with self.assertRaises(KeyboardInterrupt):
+            preparer.prepare(self.patient, self.result(preparer))
+        self.assertEqual(preparer.retriever.requests, [], "No retrieval before the response's usage is saved")
+        store.close()
+        store = JobStore(path)
+        self.addCleanup(store.close)
+        recovered = store.load(key)
+        calls = recovered["components"]["agent_patients"]["capture"]["model_responses"]["agent_control"]
+        self.assertEqual(calls, [{"reported_model": "gpt-4o-mini-2024-07-18", "response_id": "attempt-1",
+            "token_usage": {"prompt_tokens": 101, "completion_tokens": 7, "total_tokens": 108,
+                            "cached_tokens": 32}}])
+        self.client = MeteredAgentClient([agent_message(("finish", {}))], prefix="retry")
+        resumed = self.preparer(checkpoint=lambda result: store.save(key, result))
+        completed = resumed.prepare(self.patient, recovered)
+        calls = completed["components"]["agent_patients"]["capture"]["model_responses"]["agent_control"]
+        self.assertEqual([call["response_id"] for call in calls], ["attempt-1", "retry-1"])
+        self.assertEqual(store.load(key), completed)
+        run_dir = self.root / "run"
+        run_dir.mkdir()
+        paths = write_provenance(run_dir, metadata={"status": "completed_with_errors"}, records=[completed])
+        measured = json.loads(paths["usage"].read_text())["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(measured["responses"], 2)
+        self.assertEqual(measured["reported_tokens"], {"prompt_tokens": 202, "completion_tokens": 14,
+                                                     "total_tokens": 216, "cached_tokens": 64})
+        ledger = [json.loads(line) for line in (run_dir / "provenance/api-usage.jsonl").read_text().splitlines()]
+        self.assertTrue(all(row["contexts"][0]["variants"] == ["agentic_patient_retrieval"] for row in ledger))
+
+    def test_agent_usage_is_kept_when_a_tool_fails_and_a_later_variant_can_continue(self):
+        self.data["selected_variants"] = ["agentic_guidelines", "agentic_patient_retrieval"]
+        self.client = MeteredAgentClient([
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("finish", {"patient_ref": "P1"})),
+            agent_message(("search_guidelines", {"question": "What findings?"})),
+        ])
+
+        def graph_failure(**kwargs):
+            raise RuntimeError("Graph failed after the agent response")
+
+        preparer = self.preparer(guideline_search=graph_failure)
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_guidelines"]
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertEqual(component["capture"]["model_responses"]["agent_control"][0]["response_id"], "attempt-3")
+        self.assertEqual(result["components"]["agent_patients"]["status"], "completed")
+        self.assertTrue(any(snapshot["components"]["agent_guidelines"]["capture"]["model_responses"].get(
+            "agent_control") for snapshot in self.snapshots))
+
+    def test_agent_usage_checkpoint_failure_is_fatal_before_retrieval(self):
+        self.data["selected_variants"] = ["agentic_patient_retrieval"]
+        self.client = MeteredAgentClient([agent_message(("search_similar_patients", {"query": "cough"}))])
+
+        def cannot_save(result):
+            if result["components"]["agent_patients"]["capture"]["model_responses"].get("agent_control"):
+                raise OSError("disk full")
+
+        preparer = self.preparer(checkpoint=cannot_save)
+        with self.assertRaises(RunMetadataError):
+            preparer.prepare(self.patient, self.result(preparer))
+        self.assertEqual(preparer.retriever.requests, [])
+        self.assertEqual(len(self.client.requests), 1)
 
     def test_completed_preparation_and_exact_prompts_are_reused(self):
         preparer = self.preparer()

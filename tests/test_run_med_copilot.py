@@ -3568,7 +3568,8 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
         _, _, [record] = self.read_run()
         self.assertEqual(record["model_responses"]["guideline_questions"], [{
             "reported_model": "reported-not-requested", "response_id": "provider-response",
-            "token_usage": {"prompt_tokens": 8, "completion_tokens": None, "total_tokens": None}}])
+            "token_usage": {"prompt_tokens": 8, "completion_tokens": None, "total_tokens": None},
+            "request_id": "HTTP-REQUEST"}])
         self.assertIsNone(record["guideline_questions"])
         self.assertEqual(fixture.graph_calls, [])
         self.assertEqual(record["model_responses"]["assessment_plan"], [])
@@ -3625,7 +3626,8 @@ class RunMedCopilotTests(FailedRunAssertions, unittest.TestCase):
             self.assertEqual(runner["main"](), "completed_with_errors")
         _, _, [record] = self.read_run()
         self.assertEqual(record["model_responses"]["assessment_plan"], [{
-            "reported_model": "reported-final", "response_id": None, "token_usage": None}])
+            "reported_model": "reported-final", "response_id": None, "token_usage": None,
+            "request_id": "http-id-only"}])
         self.assertIsNotNone(record["assessment_plan_prompts"])
         self.assertIsNone(record["assessment_plan_raw"])
         self.assertEqual(len(fixture.calls), 2)
