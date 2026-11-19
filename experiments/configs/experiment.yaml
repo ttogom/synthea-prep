@@ -5,14 +5,18 @@ patient_input: experiments/input/test_so.jsonl  # Prepared patient S/O records.
 patient_labels: experiments/input/test_labels.jsonl  # Gold labels joined by exact patient ID.
 presenting_evidence_only: true  # Keep patients with presenting evidence in their label.
 exclude_none_recorded_plans: true  # Exclude label plan exactly ["none recorded"].
-max_patients: null  # Run every eligible patient (2,378); a positive N samples with seed 42.
+max_patients: 2  # Run every eligible patient (2,378); a positive N samples with seed 42.
 
 # Evidence variants — every selected final model runs each selected variant.
 selected_variants:
-  - llm_only                      # Patient S/O only.
-  - patient_retrieval             # S/O + similar-patient example.
-  - guidelines                    # S/O + clinical guideline evidence.
-  - patient_retrieval_guidelines  # S/O + both evidence sources.
+  # - llm_only                      # Patient S/O only.
+  # - patient_retrieval             # S/O + similar-patient example.
+  # - guidelines                    # S/O + clinical guideline evidence.
+  # - patient_retrieval_guidelines  # S/O + both evidence sources.
+  - agentic_patient_retrieval     # S/O + agent-selected similar-patient example.
+  # - agentic_guidelines            # S/O + agent-selected clinical guidelines.
+  # - agentic_both                  # S/O + agent-selected patient and guideline evidence.
+
 variant_settings: {}  # Optional variant -> component -> parameter overrides; omitted values use shared defaults.
 
 # Similar-patient retrieval and reranking.
