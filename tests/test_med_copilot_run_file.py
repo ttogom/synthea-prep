@@ -37,6 +37,18 @@ class StandardLibraryTests(unittest.TestCase):
         with patch("builtins.__import__", side_effect=stdlib_only):
             runpy.run_path(str(RUN_FILE_MODULE))
 
+    def test_variant_output_root_is_partitioned_by_selection(self):
+        output = Path("/tmp/medcopilot-output")
+        first = R["variant_output_root"](output, ["agentic_patient_retrieval"])
+        second = R["variant_output_root"](output, ["agentic_guidelines"])
+        combined = R["variant_output_root"](output, ["agentic_patient_retrieval", "agentic_guidelines"])
+        self.assertEqual(first, output / "variants/agentic_patient_retrieval")
+        self.assertEqual(second, output / "variants/agentic_guidelines")
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, combined)
+        with self.assertRaisesRegex(ValueError, "selected_variants"):
+            R["variant_output_root"](output, [])
+
 
 class RunFileTests(unittest.TestCase):
     def setUp(self):

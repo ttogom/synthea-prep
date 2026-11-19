@@ -38,6 +38,24 @@ class FakeClient:
 
     def create(self, **kwargs):
         self.requests.append(deepcopy(kwargs))
+        if kwargs.get("tools"):
+            names = {tool["function"]["name"] for tool in kwargs["tools"]}
+            calls = []
+            for name, argument in (("search_similar_patients", {"query": "cough and oxygen saturation"}),
+                                   ("search_guidelines", {"question": "What findings should be checked?"})):
+                if name in names:
+                    calls.append(SimpleNamespace(id=f"call-{len(calls)}", function=SimpleNamespace(
+                        name=name, arguments=json.dumps(argument))))
+            finish = {}
+            if "search_similar_patients" in names:
+                finish["patient_ref"] = "P1"
+            if "search_guidelines" in names:
+                finish["guideline_refs"] = ["G1"]
+            calls.append(SimpleNamespace(id=f"call-{len(calls)}", function=SimpleNamespace(
+                name="finish", arguments=json.dumps(finish))))
+            return SimpleNamespace(model="fake-agent", id=f"agent-{len(self.requests)}", usage=None,
+                choices=[SimpleNamespace(finish_reason="tool_calls", message=SimpleNamespace(
+                    content=None, refusal=None, tool_calls=calls))])
         content = ('{"symptoms": ["cough"], "diagnoses": [], "medications": []}'
                    if kwargs.get("temperature") == 0 else '{"Key Questions": ["What findings should be checked?"]}')
         return SimpleNamespace(model="fake", id="reply", usage=None, choices=[SimpleNamespace(
@@ -195,6 +213,27 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(preparer.reranker.requests[0][1:], (5, 1))
         self.assertEqual(result["components"]["patient_retrieval"]["capture"]["selected_reference_patient"],
                          {"id": "reference-a"})
+
+    def test_selected_agentic_variants_start_and_prepare_only_the_selected_set_offline(self):
+        variants = ["agentic_patient_retrieval", "agentic_guidelines", "agentic_both"]
+        self.data["selected_variants"] = variants
+        preparer = self.preparer()
+        result = preparer.prepare(self.patient, self.result(preparer))
+        self.assertEqual(list(result["variants"]), variants)
+        self.assertTrue(all(component["status"] == "completed" for component in result["components"].values()),
+                        {name: component["error"] for name, component in result["components"].items()})
+        self.assertTrue(all(result["variants"][name]["status"] == "failed_incomplete" for name in variants),
+                        {name: result["variants"][name]["status"] for name in variants})
+        self.assertTrue(all(result["variants"][name]["assessment_plan_prompts"] is not None
+                            for name in variants))
+        self.assertEqual(set(result["components"]), {"agent_patients", "agent_guidelines", "agent_both"})
+        self.assertEqual(result["components"]["agent_patients"]["outputs"]["example"], "Reference SOAP example")
+        self.assertEqual(result["components"]["agent_guidelines"]["outputs"]["Key_info"], "Guideline evidence")
+        self.assertEqual(result["components"]["agent_both"]["outputs"], {
+            "example": "Reference SOAP example", "Key_info": "Guideline evidence"})
+        self.assertTrue(all(component["capture"]["agent"]["finished"]
+                            for component in result["components"].values()))
+        self.assertEqual(len([request for request in self.client.requests if request.get("tools")]), len(variants))
 
     def test_completed_preparation_and_exact_prompts_are_reused(self):
         preparer = self.preparer()

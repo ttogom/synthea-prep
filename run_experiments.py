@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 from time import perf_counter
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent
 UPSTREAM = ROOT / "med_copilot/upstream"
@@ -34,7 +35,7 @@ from scripts.med_copilot_judges import CorrectnessJudges
 from scripts.med_copilot_models import AssessmentPlanModels
 from scripts.experiment_runtime.ollama import ManagedOllama
 from scripts.experiment_runtime.provenance import finalize_provenance
-from scripts.med_copilot_run_file import RunFile, make_run_name, pacific_now
+from scripts.med_copilot_run_file import RunFile, make_run_name, pacific_now, variant_output_root
 from scripts.med_copilot_run_lock import exclusive_run_lock
 from scripts.experiment_runtime.scheduler import ExperimentScheduler
 from scripts.med_copilot_scoring import PatientScorer
@@ -119,6 +120,8 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=ROOT / "experiments/configs/experiment.yaml")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--yes", action="store_true", help="Run without an interactive confirmation")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate configuration and print the selected variant plan without starting a run")
     args = parser.parse_args(argv)
     experiment = ExperimentConfig(args.config)
     patients = load_patient_records(experiment.patient_input)
@@ -129,6 +132,19 @@ def main(argv=None):
                                  temperature=experiment.temperature, max_retries=experiment.max_retries,
                                  required_shared_keys=experiment.required_credentials)
     _validate_managed_endpoints(experiment, models)
+    if args.dry_run:
+        cohort = scorer.metadata(ROOT)
+        print("DRY RUN: no output directory, API request, or managed model server will be started.")
+        print("Selected variants:")
+        for variant in experiment.selected_variants:
+            component_instances = experiment.variant_components[variant]
+            components = [f"{name} ({instance})" for name, instance in component_instances.items()]
+            print(f"  {variant}: {', '.join(components) if components else 'no evidence component'}")
+        print(f"Selected patients: {cohort['selected_patient_count']}")
+        print(f"Selected final models: {', '.join(models.model_ids)}")
+        print(f"Planned final requests: {cohort['selected_patient_count'] * len(experiment.selected_variants) * len(models.model_ids)}")
+        print(f"Variant output root: {variant_output_root(experiment.experiment_output, experiment.selected_variants)}")
+        return 0
     if not args.yes and not confirm_experiment(experiment, models.metadata(ROOT), ROOT, scorer.metadata(ROOT)):
         return 0
     started = perf_counter()
@@ -137,8 +153,10 @@ def main(argv=None):
     if args.resume:
         directory = args.resume.resolve()
     else:
-        run_file = RunFile.begin(experiment.experiment_output,
-                                run_name=make_run_name(pacific_now(), experiment.patient_input, branch))
+        variant_root = variant_output_root(experiment.experiment_output, experiment.selected_variants)
+        run_name = make_run_name(pacific_now(), experiment.patient_input, branch)
+        run_name += f"__{uuid4().hex[:12]}"
+        run_file = RunFile.begin(variant_root, run_name=run_name)
         directory = run_file.run_dir
 
     with ExitStack() as resources:

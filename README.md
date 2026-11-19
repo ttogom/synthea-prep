@@ -240,10 +240,10 @@ it does not establish the weight revision used by the original study.
 
 The experiment YAML selects the patient embedding, keyword-extraction and cross-encoder models, hybrid embedding weight, candidate count and retained reranking count. Only the first reranked reference enters the final prompt. It also selects the guideline-question model, community hierarchy level, answer description and diagnostic verbosity. `guideline_response_type` is free-form text (for example, `Single Paragraph`, `Single Sentence` or `List of 3-7 Points`), matching upstream GraphRAG. Reference matching uses S/O only for embeddings, keyword overlap, and cross-encoder reranking, through [scripts/med_copilot_retrieval.py](scripts/med_copilot_retrieval.py). The selected reference's complete SOAP is still supplied to final generation. S/O embeddings and the FAISS index are built on first use under the configured `patient_retrieval_artifacts_dir` (default `med_copilot/data/patient_retrieval_so/`), separate from the upstream S/O/A artifacts. A `matching.json` manifest binds the cache to the ordered S/O texts and encoder identity and checks artifact hashes; missing, stale, or corrupt caches are rebuilt. Upstream source and artifacts are left intact.
 
-Each new run writes a new directory; `--resume` reuses its existing directory:
+Each new run writes a new directory; selected variant IDs partition the output root, and a random run ID distinguishes concurrent executions of the same selection on different machines. `--resume` reuses its existing directory:
 
 ```text
-experiments/output/<Pacific timestamp>__<input stem>__<branch>/
+experiments/output/variants/<selected variant IDs>/<Pacific timestamp>__<input stem>__<branch>__<run ID>/
 ├── run.json             # configuration, cohort, provenance, status and resource fingerprints
 ├── results.jsonl        # one line per patient: components, then variants → models → outputs/scores
 ├── provenance/
@@ -252,6 +252,13 @@ experiments/output/<Pacific timestamp>__<input stem>__<branch>/
 ├── jobs.sqlite3         # concurrent runner's durable job recovery; retain accompanying WAL/SHM files
 └── results_summary.html # generated automatically after a completed batch, including batches with errors
 ```
+
+To run one variant, leave its ID as the only entry in `selected_variants` in
+`experiments/configs/experiment.yaml`, then run `python run_experiments.py`.
+Use `python run_experiments.py --dry-run` to validate the selection and show its
+planned request count and isolated output directory without starting workers or
+making model calls. Each selection has its own output subtree, and each run has
+a unique suffix so concurrent runs cannot overwrite one another.
 
 The concurrent runner writes the two `provenance/` reports only on exit, after all
 model calls and resource cleanup finish. Resuming recalculates cumulative usage

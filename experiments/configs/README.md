@@ -43,7 +43,7 @@ python judge_treatment_plans.py RUN_DIRECTORY --concurrency 8 --context-length 4
 | `guideline_community_level` | Nonnegative community hierarchy level passed to GraphRAG. |
 | `guideline_response_type` | Free-form answer description, e.g. `Single Paragraph`, `Single Sentence`, `List of 3-7 Points`; any nonblank text is accepted upstream. |
 | `guideline_verbose` | Boolean controlling GraphRAG diagnostic output. |
-| `experiment_output` | Parent directory for timestamped run artifacts and the generated HTML report. |
+| `experiment_output` | Parent directory for timestamped run artifacts and the generated HTML report; selected variant IDs create separate subdirectories. |
 | `execution` | Concurrent runner scheduling and isolated Ollama settings, detailed below. |
 
 The shipped `execution` values are:

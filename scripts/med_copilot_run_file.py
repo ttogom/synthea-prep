@@ -65,6 +65,14 @@ def make_run_name(started_at, input_path, branch):
     return f"{_timestamp(started_at)}__{Path(input_path).stem}__{path_safe_branch(branch)}"
 
 
+def variant_output_root(output_root, variants):
+    """Keep each selected variant set in a separate results subtree."""
+    if not isinstance(variants, (list, tuple)) or not variants:
+        raise ValueError("selected_variants must be a nonempty list")
+    slug = "__".join(path_safe_branch(variant) for variant in variants)
+    return Path(output_root) / "variants" / slug
+
+
 def _fsync_directory(directory):
     """Persist created, replaced, or removed directory entries before proceeding."""
     descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))

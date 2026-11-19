@@ -5,6 +5,7 @@ are real. Evidence subprocesses, model transport, and encoder runtimes are fake.
 """
 
 from copy import deepcopy
+from contextlib import redirect_stdout
 import hashlib
 from io import StringIO
 import json
@@ -1299,7 +1300,8 @@ class RunnerEntryTests(unittest.TestCase):
             return self.entry(["--config", str(self.config), "--yes", *(extra or [])])
 
     def saved(self):
-        [directory] = (self.root / "output").iterdir()
+        variant_root = self.root / "output" / "variants" / "__".join(VARIANTS)
+        [directory] = variant_root.iterdir()
         return directory, json.loads((directory / "run.json").read_text()), [
             json.loads(line) for line in (directory / "results.jsonl").read_text().splitlines()]
 
@@ -1339,6 +1341,22 @@ class RunnerEntryTests(unittest.TestCase):
         recovery = json.loads((provenance_files / "recovery-incidents.json").read_text())
         self.assertEqual(recovery["run_restarts"], 1)
         self.assertEqual(len(recovery["events"]), 1)
+
+    def test_dry_run_reports_only_configured_agentic_variants_without_starting_work(self):
+        variants = ["agentic_patient_retrieval", "agentic_guidelines", "agentic_both"]
+        self.settings["selected_variants"] = variants
+        self.write()
+        with redirect_stdout(StringIO()) as output:
+            self.assertEqual(self.invoke(["--dry-run"]), 0)
+        text = output.getvalue()
+        for variant in variants:
+            self.assertIn(variant, text)
+        self.assertIn("Variant output root:", text)
+        self.assertIn("variants/" + "__".join(variants), text)
+        self.assertIn("DRY RUN", text)
+        self.assertEqual(self.fixture.calls, [])
+        self.assertEqual(self.fixture.prepared, [])
+        self.assertFalse((self.root / "output").exists())
 
     def test_root_entry_and_provenance_resolve_from_an_unrelated_working_directory(self):
         caller = self.root / "unrelated-caller"
@@ -1503,7 +1521,7 @@ class RunnerEntryTests(unittest.TestCase):
     def test_server_startup_failure_marks_run_failed_without_provider_requests(self):
         with self.assertRaisesRegex(RuntimeError, "server offline"):
             self.invoke(server_failure=True)
-        [directory] = (self.root / "output").iterdir()
+        [directory] = (self.root / "output" / "variants" / "__".join(VARIANTS)).iterdir()
         metadata = json.loads((directory / "run.json").read_text())
         self.assertEqual(metadata["status"], "failed_incomplete")
         self.assertEqual(self.fixture.calls, [])
@@ -1526,7 +1544,7 @@ class RunnerEntryTests(unittest.TestCase):
             model = model_factory(*args, **kwargs)
             completion = model.completion
             def complete(**kwargs):
-                self.assertFalse(list((self.root / "output").glob("*/provenance/*.json")))
+                self.assertFalse(list((self.root / "output").glob("variants/*/*/provenance/*.json")))
                 events.append("call")
                 return completion(**kwargs)
             model.completion = complete
