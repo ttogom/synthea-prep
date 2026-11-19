@@ -103,14 +103,14 @@ def test_all_patient_candidates_reach_the_agent_without_truncation():
     assert len(r["trace"][0]["output"]) == 1500  # saved preview remains bounded
 
 
-def test_guideline_preview_remains_bounded():
+def test_full_guideline_answer_reaches_the_agent():
     reply = "answer" * 2000
     t = tools()
     t["search_guidelines"] = lambda query: reply
     c = FakeClient([msg(("search_guidelines", {"question": "q"})),
                     msg(("finish", {"guideline_refs": ["G1"]}))])
     r = run_retrieval_agent(c, "x", t, model="m", use_patients=False)
-    assert len(c.requests[1]["messages"][-1]["content"]) == 3500
+    assert c.requests[1]["messages"][-1]["content"] == reply
     assert r["guideline_refs"] == ["G1"]
     assert len(r["trace"][0]["output"]) == 1500
 

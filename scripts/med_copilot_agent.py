@@ -16,7 +16,6 @@ PATIENT_TOOL = "search_similar_patients"
 GUIDELINE_TOOL = "search_guidelines"
 FINISH_TOOL = "finish"
 _ARG_NAME = {PATIENT_TOOL: "query", GUIDELINE_TOOL: "question"}
-_TOOL_OUTPUT_LIMIT = 3500       # guideline-answer characters shown per tool call
 _TRACE_OUTPUT_LIMIT = 1500      # characters kept in the saved trace per tool call
 
 
@@ -171,8 +170,6 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                 # The agent selects the full evidence used in the final prompt.
                 # Truncation would hide candidates or part of a guideline answer.
                 reply = str(tools[name](text))   # tool errors propagate
-                if name == GUIDELINE_TOOL:
-                    reply = reply[:_TOOL_OUTPUT_LIMIT]
                 out["trace"].append({"search": out["searches"], "tool": name, "input": text,
                                      "output": reply[:_TRACE_OUTPUT_LIMIT]})
             messages.append({"role": "tool", "tool_call_id": call.id, "content": reply})

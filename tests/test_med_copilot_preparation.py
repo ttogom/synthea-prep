@@ -336,6 +336,22 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(self.errors)
         self.assertEqual(self.snapshots[-1], result)
 
+    def test_agent_sees_the_complete_guideline_answer_used_in_the_final_prompt(self):
+        self.data["selected_variants"] = ["agentic_guidelines"]
+        answer = "First recommendation. " + "More supporting evidence. " * 300 + "Last recommendation."
+        self.client = ScriptedAgentClient([
+            agent_message(("search_guidelines", {"question": "What findings?"})),
+            agent_message(("finish", {"guideline_refs": ["G1"]})),
+        ])
+        preparer = self.preparer(guideline_search=lambda **kwargs: (answer, {}))
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_guidelines"]
+        self.assertEqual(component["status"], "completed")
+        self.assertEqual(self.client.requests[1]["messages"][-1]["content"], "[G1] " + answer)
+        self.assertEqual(component["outputs"]["Key_info"], answer)
+        self.assertEqual(component["capture"]["agent"]["guideline_results"], {"G1": answer})
+        self.assertIn(answer, result["variants"]["agentic_guidelines"]["assessment_plan_prompts"]["user"])
+        self.assertEqual(self.snapshots[-1], result)
 
     def test_finish_rejects_unknown_reference_ids_instead_of_silently_substituting_empty_evidence(self):
         for variant, component_id, selection in [

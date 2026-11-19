@@ -112,6 +112,8 @@ override the agent model, search budget, temperature, diagnosis-term screen, and
 retrieval/guideline settings declared by that variant.
 Each patient search shows the agent all `results_per_search` reranked cases
 (three by default), and its selected case alone enters the final prompt.
+Patient cases and guideline answers reach the agent in full; only the saved trace
+preview is shortened, with full evidence retained in the component capture.
 Retrieval completes only through an explicit `finish` call. Unfinished runs or
 unknown selected reference IDs fail the component and block its final generation;
 an explicit finish with no selected references remains a valid choice.
