@@ -186,6 +186,23 @@ class PlanStageTests(unittest.TestCase):
             self.assertEqual(snapshot["plan_evaluation"]["status"], "running")
             self.assertEqual(snapshot["evaluation"]["correctness"], original)
 
+    def test_agentic_variant_outputs_are_accepted_by_plan_judging(self):
+        variant = "agentic_both"
+        self.metadata["experiment"]["selected_variants"] = [variant]
+        for record in self.records:
+            record["variants"] = {variant: record["variants"].pop("llm_only")}
+        self.write()
+
+        judges = self.run_stage(FakeModels())
+
+        metadata, records = self.saved()
+        self.assertEqual(judges.calls, 18)
+        self.assertEqual(metadata["experiment"]["selected_variants"], [variant])
+        self.assertTrue(all(set(record["variants"]) == {variant} for record in records))
+        self.assertTrue(all(output["status"] == "completed"
+                            for record in records
+                            for output in record["variants"][variant]["assessment_plans"].values()))
+
     def test_old_generation_hash_does_not_block_recovery_after_failed_export(self):
         self.metadata["evaluation"]["correctness"] = self.generation_correctness()
         self.metadata["evaluation"]["correctness"]["plan"]["rubric_sha256"] = "old-generation-rubric"

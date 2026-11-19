@@ -308,6 +308,23 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(data["variant_labels"]["custom_evidence"], "Registered custom")
         self.assertIn("Registered custom", render_report(data))
 
+    def test_agentic_variant_outputs_are_reportable_from_the_current_registry(self):
+        self.native_v3()
+        selected = ["agentic_patient_retrieval", "agentic_guidelines", "agentic_both"]
+        self.metadata["experiment"]["selected_variants"] = selected
+        original = self.rows[0]["variants"]
+        self.rows[0]["variants"] = {
+            variant: deepcopy(original["guidelines" if variant == "agentic_guidelines" else "llm_only"])
+            for variant in selected
+        }
+        self.write()
+
+        data = self.load()
+
+        self.assertEqual(data["selected_variants"], selected)
+        self.assertEqual({item["variant"] for item in data["patients"][0]["outputs"]}, set(selected))
+        self.assertTrue(all(data["variant_labels"][variant] for variant in selected))
+
     def test_saved_legacy_definition_without_description_uses_stable_identity(self):
         self.native_v4()
         self.metadata["variant_definitions"]["custom_evidence"].pop("description")

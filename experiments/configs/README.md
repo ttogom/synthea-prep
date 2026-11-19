@@ -43,7 +43,7 @@ python judge_treatment_plans.py RUN_DIRECTORY --concurrency 8 --context-length 4
 | `guideline_community_level` | Nonnegative community hierarchy level passed to GraphRAG. |
 | `guideline_response_type` | Free-form answer description, e.g. `Single Paragraph`, `Single Sentence`, `List of 3-7 Points`; any nonblank text is accepted upstream. |
 | `guideline_verbose` | Boolean controlling GraphRAG diagnostic output. |
-| `experiment_output` | Parent directory for timestamped run artifacts and the generated HTML report. |
+| `experiment_output` | Parent directory for timestamped run artifacts and the generated HTML report; selected variant IDs create separate subdirectories. |
 | `execution` | Concurrent runner scheduling and isolated Ollama settings, detailed below. |
 
 The shipped `execution` values are:
@@ -102,8 +102,14 @@ and label rows are validated before selection, including excluded rows. An empty
 eligible cohort is an error. The existing `--presenting-evidence-only true|false`
 option in the original serial runner overrides its matching YAML flag; its effective value is saved.
 
-The four variants are `llm_only` (S/O), `patient_retrieval` (S/O + similar patient),
+The fixed variants are `llm_only` (S/O), `patient_retrieval` (S/O + similar patient),
 `guidelines` (S/O + guidelines), and `patient_retrieval_guidelines` (both sources).
+The agentic variants are `agentic_patient_retrieval`, `agentic_guidelines`, and
+`agentic_both`; each uses the search agent to choose evidence for the same existing
+prompt template. Select any desired mix by setting `selected_variants`. Agent defaults
+are a four-search budget, `gpt-4o-mini`, and temperature 0; `variant_settings` can
+override the agent model, search budget, temperature, diagnosis-term screen, and the
+retrieval/guideline settings declared by that variant.
 The component and variant definitions live in `scripts/med_copilot_variants.py`. Required components are prepared once per patient and reused across consuming variants/models. Variant definitions select existing prompt templates and bind component outputs to template fields. Registered settings belong in `variant_settings`; they do not create arbitrary runner overrides. See [Adding a new variant](../../med_copilot/docs/adding_a_new_variant.md) for the always/conditional edit workflow.
 Only evidence sections differ in final prompts; the combined project prompt and
 shared diagnosis/Plan instructions remain unchanged. Source failures block their

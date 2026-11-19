@@ -198,6 +198,7 @@ class ExperimentConfigTests(unittest.TestCase):
                     self.write()
                     with self.assertRaisesRegex(ValueError, field):
                         ExperimentConfig(self.path)
+
         for host in ("0.0.0.0:11435", "127.0.0.1:0", "127.0.0.1:1023", "127.0.0.1:11434",
                      "127.0.0.1:65536", "remote:11435", None):
             with self.subTest(host=host):
@@ -476,6 +477,14 @@ class VariantConfigTests(unittest.TestCase):
                     self.write()
                     with self.assertRaisesRegex(ValueError, field):
                         ExperimentConfig(self.path)
+
+    def test_unknown_variant_names_are_reported_with_supported_choices(self):
+        self.data["selected_variants"] = ["agentic_both", "typo_variant"]
+        self.write()
+        with self.assertRaisesRegex(ValueError, "Unknown selected_variants: typo_variant") as raised:
+            ExperimentConfig(self.path)
+        self.assertIn("agentic_both", str(raised.exception))
+        self.assertIn("patient_retrieval_guidelines", str(raised.exception))
 
     def test_prompt_provenance_names_actual_project_templates_and_hashes(self):
         self.data["selected_variants"] = ["llm_only", "guidelines"]

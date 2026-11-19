@@ -126,10 +126,17 @@ class ExperimentConfig:
         if self.execution["local_concurrency"] > self.execution["ollama_parallel_slots"]:
             raise ValueError("execution.local_concurrency cannot exceed ollama_parallel_slots")
         variants = data["selected_variants"]
-        if (not isinstance(variants, list) or not variants
-                or any(not isinstance(v, str) or not v.strip() or v == "not_recorded" or v not in VARIANTS for v in variants)
-                or len(set(variants)) != len(variants)):
-            raise ValueError("selected_variants must be a nonempty list of unique supported variants")
+        if not isinstance(variants, list) or not variants:
+            raise ValueError("selected_variants must be a nonempty list")
+        if any(not isinstance(v, str) or not v.strip() or v == "not_recorded" for v in variants):
+            raise ValueError("selected_variants entries must be nonempty registered variant names")
+        unknown_variants = [variant for variant in variants if variant not in VARIANTS]
+        if unknown_variants:
+            supported = ", ".join(VARIANTS)
+            raise ValueError(f"Unknown selected_variants: {', '.join(unknown_variants)}. "
+                             f"Supported variants: {supported}")
+        if len(set(variants)) != len(variants):
+            raise ValueError("selected_variants must not contain duplicates")
         for field in PATH_SETTINGS:
             if not isinstance(data[field], str) or not data[field].strip():
                 raise ValueError(f"{field} must be a nonempty path string")

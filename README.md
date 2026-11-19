@@ -217,8 +217,11 @@ Select any nonempty subset of `selected_variants` in YAML:
 | `patient_retrieval` | S/O + similar-patient example |
 | `guidelines` | S/O + clinical guidelines |
 | `patient_retrieval_guidelines` | S/O + both sources (previous behavior) |
+| `agentic_patient_retrieval` | S/O + agent-selected similar-patient example |
+| `agentic_guidelines` | S/O + agent-selected clinical guidelines |
+| `agentic_both` | S/O + agent-selected patient and guideline evidence |
 
-The lightweight [variant registry](scripts/med_copilot_variants.py) declares each variant's component dependencies, prompt template, and bindings from component outputs to prompt fields. Required similar-patient retrieval and guideline retrieval execute once per patient and their component outputs are reused across all consuming variants/models. Each variant renders one prompt; all selected final models receive independent copies of those exact messages. The concurrent runner schedules local requests by model across the cohort, while the serial runner retains its per-patient loop. [diagnosis_plan.py](med_copilot/prompts/diagnosis_plan.py) derives `VARIANT_TEMPLATES` by removing only the unused evidence sections from the existing project prompt, including the reference-specific fallback when reference evidence is absent. The combined prompt's wording/order and shared output instructions remain unchanged. The original runner keeps visible requirement-based `if` blocks for the two components followed by one final variant loop; the concurrent runner delegates these stages to isolated preparation workers. Configuration resolves requirements; shared helpers handle captures, dependency failures, and exact prompt construction. Add variants using [the extension guide](med_copilot/docs/adding_a_new_variant.md); combinations of existing components or prompt-only variants need no runner branch. Optional `variant_settings` in the experiment YAML supplies registered parameters and their effective values are saved in run metadata. [med_copilot_startup.py](scripts/med_copilot_startup.py) handles conditional encoder initialization before FAISS import for Apple Silicon compatibility, preserving encoder errors for dependent variants. The YAML encoder ID controls both preloading and cache identity; changing it after importing the runner requires restarting the script. Each model retains its own raw reply, parsed predictions, provider metadata, generation status/error and evaluation. One model's failure does not prevent the remaining models or patients from running.
+The lightweight [variant registry](scripts/med_copilot_variants.py) declares each variant's component dependencies, prompt template, and bindings from component outputs to prompt fields. Fixed retrieval and guideline components are prepared once per patient and reused across variants/models. Agentic variants run the registered search agent in the isolated preparation workers and retain its evidence selections and search trace. Each variant renders one prompt; all selected final models receive independent copies of those exact messages. The concurrent runner schedules local requests by model across the cohort. [diagnosis_plan.py](med_copilot/prompts/diagnosis_plan.py) derives `VARIANT_TEMPLATES` by removing only unused evidence sections from the existing project prompt, including the reference-specific fallback when reference evidence is absent. The combined prompt's wording/order and shared output instructions remain unchanged. Configuration resolves requirements; shared helpers handle captures, dependency failures, and exact prompt construction. Optional `variant_settings` in the experiment YAML supplies registered parameters and their effective values are saved in run metadata. [med_copilot_startup.py](scripts/med_copilot_startup.py) handles conditional encoder initialization before FAISS import for Apple Silicon compatibility, preserving encoder errors for dependent variants. The YAML encoder ID controls both preloading and cache identity; changing it after importing the runner requires restarting the script. Each model retains its own raw reply, parsed predictions, provider metadata, generation status/error and evaluation. One model's failure does not prevent the remaining models or patients from running.
 
 The original serial runner prints a `RANKED CONDITIONS AND PLANS` section grouped by model alias and provider/model name. Each model contains conditions numbered 1–3, with a separately numbered Plan indented under each condition. Failed models, unavailable fields and empty Plans are labeled explicitly. Console formatting leaves the raw responses and saved predictions unchanged.
 
@@ -237,10 +240,10 @@ it does not establish the weight revision used by the original study.
 
 The experiment YAML selects the patient embedding, keyword-extraction and cross-encoder models, hybrid embedding weight, candidate count and retained reranking count. Only the first reranked reference enters the final prompt. It also selects the guideline-question model, community hierarchy level, answer description and diagnostic verbosity. `guideline_response_type` is free-form text (for example, `Single Paragraph`, `Single Sentence` or `List of 3-7 Points`), matching upstream GraphRAG. Reference matching uses S/O only for embeddings, keyword overlap, and cross-encoder reranking, through [scripts/med_copilot_retrieval.py](scripts/med_copilot_retrieval.py). The selected reference's complete SOAP is still supplied to final generation. S/O embeddings and the FAISS index are built on first use under the configured `patient_retrieval_artifacts_dir` (default `med_copilot/data/patient_retrieval_so/`), separate from the upstream S/O/A artifacts. A `matching.json` manifest binds the cache to the ordered S/O texts and encoder identity and checks artifact hashes; missing, stale, or corrupt caches are rebuilt. Upstream source and artifacts are left intact.
 
-Each new run writes a new directory; `--resume` reuses its existing directory:
+Each new run writes a new directory; selected variant IDs partition the output root, and a random run ID distinguishes concurrent executions of the same selection on different machines. `--resume` reuses its existing directory:
 
 ```text
-experiments/output/<Pacific timestamp>__<input stem>__<branch>/
+experiments/output/variants/<selected variant IDs>/<Pacific timestamp>__<input stem>__<branch>__<run ID>/
 ├── run.json             # configuration, cohort, provenance, status and resource fingerprints
 ├── results.jsonl        # one line per patient: components, then variants → models → outputs/scores
 ├── provenance/
@@ -249,6 +252,13 @@ experiments/output/<Pacific timestamp>__<input stem>__<branch>/
 ├── jobs.sqlite3         # concurrent runner's durable job recovery; retain accompanying WAL/SHM files
 └── results_summary.html # generated automatically after a completed batch, including batches with errors
 ```
+
+To run one variant, leave its ID as the only entry in `selected_variants` in
+`experiments/configs/experiment.yaml`, then run `python run_experiments.py`.
+Use `python run_experiments.py --dry-run` to validate the selection and show its
+planned request count and isolated output directory without starting workers or
+making model calls. Each selection has its own output subtree, and each run has
+a unique suffix so concurrent runs cannot overwrite one another.
 
 The concurrent runner writes the two `provenance/` reports only on exit, after all
 model calls and resource cleanup finish. Resuming recalculates cumulative usage

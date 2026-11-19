@@ -26,7 +26,7 @@ SHARED_CREDENTIALS = ("OPENAI_API_KEY", "GRAPHRAG_API_KEY")
 RUN_STAGES = (
     "startup", "input_loading", "corpus_loading", "retrieval_initialization",
     "keyword_extraction", "patient_retrieval", "reranking", "guideline_question_generation",
-    "guideline_retrieval", "final_generation", "scoring", "output_saving",
+    "guideline_retrieval", "agentic_retrieval", "final_generation", "scoring", "output_saving",
 )
 # The run/patient a failure belongs to and the active stage, local to each execution.
 _ERROR_SCOPE = ContextVar("med_copilot_error_scope", default=None)
@@ -63,6 +63,14 @@ def _timestamp(started_at):
 def make_run_name(started_at, input_path, branch):
     """<Pacific timestamp>__<input filename stem>__<branch name>."""
     return f"{_timestamp(started_at)}__{Path(input_path).stem}__{path_safe_branch(branch)}"
+
+
+def variant_output_root(output_root, variants):
+    """Keep each selected variant set in a separate results subtree."""
+    if not isinstance(variants, (list, tuple)) or not variants:
+        raise ValueError("selected_variants must be a nonempty list")
+    slug = "__".join(path_safe_branch(variant) for variant in variants)
+    return Path(output_root) / "variants" / slug
 
 
 def _fsync_directory(directory):
