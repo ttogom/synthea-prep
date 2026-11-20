@@ -126,11 +126,14 @@ The existing logical components publish these outputs:
 | --- | --- | --- |
 | `patient_retrieval` | `example` | First reranked full reference SOAP example, or the existing `No reference patient available.` fallback after a successful empty retrieval. |
 | `guidelines` | `Key_info` | GraphRAG answer formatted as text, matching the original final prompt's conversion. |
+| `agent_patients` | `example` | Complete selected reference patient from any of the agent's patient searches. |
+| `agent_guidelines` | `Key_info` | Complete selected guideline answers from any searches, joined with blank lines. |
+| `agent_both` | `example`, `Key_info` | Both required selections, using the same full-evidence formatting. |
 
 Components may publish different declared string outputs in future variants.
 An output is final accepted evidence, not merely a successful intermediate tool
 response. Failed or interrupted preparation retains its capture but does not
-become usable evidence accidentally. A successful empty retrieval completes; an
+become usable evidence accidentally. Fixed retrieval retains successful-empty behavior; an
 unavailable component blocks its dependent variants with `EvidenceUnavailable`.
 Independent variants continue, including standalone guidelines when patient
 retrieval fails and standalone patient retrieval when guidelines fail.
@@ -167,6 +170,42 @@ non-string value, preserve it in `capture.guideline_evidence` and format it into
 the string `outputs.Key_info` as the original prompt did (`None` becomes
 `"None"`, for example). This does not block dependent variants; search exceptions
 still fail the component and block its consumers.
+
+### Agent captures
+
+Agents must search each enabled source once before repeating searches, then
+select exactly one nonblank returned patient ID and/or at least one distinct
+nonblank returned guideline ID, as applicable. `agent_both` requires both.
+Selected evidence must be nonblank. All earlier search results remain available:
+the patient instruction asks for the closest match across all searches, and the
+guideline instruction asks for all answers contributing relevant information.
+The runtime validates references and forwards the complete original selected
+evidence; it cannot verify the agent's clinical relevance judgment.
+
+The existing `capture.agent` outcome, reference registries, search-only `trace`
+(1,500-character output previews) and `usage` representation are unchanged.
+Full search responses reach the agent. Agent-control provider metadata stays in
+`capture.model_responses.agent_control`, including rejected responses.
+
+The optional **additional** `capture.agent_diagnostics` array contains error and
+recovery events. Each event records `timestamp`, `patient_id`, `component`,
+consuming `variants`, `stage`, precise `substage`, response `turn`, `response_id`
+when reported, `searches`, `code`, `error_type`, `message`, `correction_used`,
+`action` (`retry`, `recovered`, or `exit`), and `calls` (tool name, call ID and
+argument string for each structurally valid call). Credentials are redacted.
+Events and returned-response usage are checkpointed before more paid work.
+The first error remains saved after recovery; subsequent errors append events.
+Older captures without this field remain valid; no schema migration is needed.
+
+Multiple calls in one response execute nothing, even if the provider ignores
+`parallel_tool_calls=False`; every call ID receives error feedback. Agent-correctable
+errors share one correction attempt per conversation within the unchanged
+`2 * max_searches + 3` response cap. Success continues normally; another error
+fails the component and blocks its dependent generations. Exhausted search
+budget without required nonempty evidence fails without a useless correction.
+Refusal, content filtering, malformed unreplayable responses, and infrastructure
+exceptions receive no agent correction. API transport retries remain unchanged.
+Persistence failures and interruptions retain their existing run-level behavior.
 
 ## Variant and final-model records
 

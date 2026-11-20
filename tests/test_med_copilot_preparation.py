@@ -25,6 +25,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from graphrag.config.load_config import load_config
 from graphrag.language_model.factory import ModelFactory
+from scripts.collate_med_copilot_results import load_report_data
 from scripts.med_copilot_helpers import GUIDELINE_TABLES, new_patient_result
 from scripts.experiment_runtime.preparation import EvidencePreparer, validate_preparation_result
 from scripts.med_copilot_run_file import RunMetadataError
@@ -51,7 +52,9 @@ class FakeClient:
                         if call["id"] in returned}
             for name, argument in (("search_similar_patients", {"query": "cough and oxygen saturation"}),
                                    ("search_guidelines", {"question": "What findings should be checked?"})):
-                if name in names and name not in observed and kwargs["tool_choice"] == "required":
+                if name in names and name not in observed and (
+                        kwargs["tool_choice"] == "required" or
+                        kwargs["tool_choice"].get("function", {}).get("name") == name):
                     break
             else:
                 name, argument = "finish", {}
@@ -347,7 +350,7 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(component["outputs"], {})
         agent = component["capture"]["agent"]
         self.assertFalse(agent["finished"])
-        self.assertEqual(agent["stop_reason"], "turn_cap")
+        self.assertEqual(agent["stop_reason"], "validation_error")
         self.assertEqual(agent["searches"], 1)
         self.assertEqual(len(agent["trace"]), 1)
         self.assertEqual(agent["patient_results"], {"P1": "Reference SOAP example"})
@@ -381,26 +384,32 @@ class PreparationTests(unittest.TestCase):
                 ("agentic_both", "agent_both", {"patient_ref": "P99", "guideline_refs": ["G99"]})]:
             with self.subTest(variant=variant):
                 self.data["selected_variants"] = [variant]
-                self.client = ScriptedAgentClient([agent_message(("finish", selection))])
+                searches = []
+                if "patient_ref" in selection:
+                    searches.append(agent_message(("search_similar_patients", {"query": "cough"})))
+                if "guideline_refs" in selection:
+                    searches.append(agent_message(("search_guidelines", {"question": "What findings?"})))
+                self.client = ScriptedAgentClient([*searches, agent_message(("finish", selection)),
+                                                  agent_message(("finish", selection))])
                 preparer = self.preparer()
                 result = preparer.prepare(self.patient, self.result(preparer))
                 component = result["components"][component_id]
                 self.assertEqual(component["status"], "failed_incomplete")
-                self.assertIn("unknown", component["error"]["message"])
+                self.assertIn("Unknown", component["error"]["message"])
                 self.assertEqual(component["outputs"], {})
                 self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
 
-    def test_explicit_finish_may_choose_no_evidence(self):
+    def test_explicit_empty_finish_is_rejected_and_never_publishes_fallback_evidence(self):
         self.data["selected_variants"] = ["agentic_both"]
-        self.client = ScriptedAgentClient([agent_message(("finish", {}))])
+        self.client = ScriptedAgentClient([agent_message(("finish", {})), agent_message(("finish", {}))])
         preparer = self.preparer()
         result = preparer.prepare(self.patient, self.result(preparer))
         component = result["components"]["agent_both"]
-        self.assertEqual(component["status"], "completed")
-        self.assertTrue(component["capture"]["agent"]["finished"])
-        self.assertEqual(component["outputs"], {"example": "No reference patient available.",
-                                               "Key_info": "No guideline evidence selected."})
-        self.assertIsNotNone(result["variants"]["agentic_both"]["assessment_plan_prompts"])
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertFalse(component["capture"]["agent"]["finished"])
+        self.assertEqual(component["outputs"], {})
+        self.assertIsNone(result["variants"]["agentic_both"]["assessment_plan_prompts"])
+        self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "exit"])
 
     def test_agent_usage_is_durable_before_tools_and_survives_store_reopen_and_retry(self):
         self.data["selected_variants"] = ["agentic_patient_retrieval"]
@@ -430,21 +439,230 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(calls, [{"reported_model": "gpt-4o-mini-2024-07-18", "response_id": "attempt-1",
             "token_usage": {"prompt_tokens": 101, "completion_tokens": 7, "total_tokens": 108,
                             "cached_tokens": 32}}])
-        self.client = MeteredAgentClient([agent_message(("finish", {}))], prefix="retry")
+        self.client = MeteredAgentClient([
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("finish", {"patient_ref": "P1"})),
+        ], prefix="retry")
         resumed = self.preparer(checkpoint=lambda result: store.save(key, result))
         completed = resumed.prepare(self.patient, recovered)
         calls = completed["components"]["agent_patients"]["capture"]["model_responses"]["agent_control"]
-        self.assertEqual([call["response_id"] for call in calls], ["attempt-1", "retry-1"])
+        self.assertEqual([call["response_id"] for call in calls], ["attempt-1", "retry-1", "retry-2"])
         self.assertEqual(store.load(key), completed)
         run_dir = self.root / "run"
         run_dir.mkdir()
         paths = write_provenance(run_dir, metadata={"status": "completed_with_errors"}, records=[completed])
         measured = json.loads(paths["usage"].read_text())["measured_usage"]["by_stage"]["agent_control"]
-        self.assertEqual(measured["responses"], 2)
-        self.assertEqual(measured["reported_tokens"], {"prompt_tokens": 202, "completion_tokens": 14,
-                                                     "total_tokens": 216, "cached_tokens": 64})
+        self.assertEqual(measured["responses"], 3)
+        self.assertEqual(measured["reported_tokens"], {"prompt_tokens": 303, "completion_tokens": 21,
+                                                     "total_tokens": 324, "cached_tokens": 96})
         ledger = [json.loads(line) for line in (run_dir / "provenance/api-usage.jsonl").read_text().splitlines()]
         self.assertTrue(all(row["contexts"][0]["variants"] == ["agentic_patient_retrieval"] for row in ledger))
+
+    def test_unknown_reference_is_corrected_in_conversation_for_each_variant(self):
+        for variant, component_id, patients, guidelines in [
+                ("agentic_patient_retrieval", "agent_patients", True, False),
+                ("agentic_guidelines", "agent_guidelines", False, True),
+                ("agentic_both", "agent_both", True, True)]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = [variant]
+                script, bad, good = [], {}, {}
+                if patients:
+                    script.append(agent_message(("search_similar_patients", {"query": "cough"})))
+                    bad["patient_ref"], good["patient_ref"] = "P99", "P1"
+                if guidelines:
+                    script.append(agent_message(("search_guidelines", {"question": "What findings?"})))
+                    bad["guideline_refs"], good["guideline_refs"] = ["G99"], ["G1"]
+                self.client = MeteredAgentClient([*script, agent_message(("finish", bad)),
+                                                  agent_message(("finish", good))])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][component_id]
+                self.assertEqual(component["status"], "completed")
+                self.assertIsNone(component["error"])
+                self.assertEqual(self.errors, [])
+                events = component["capture"]["agent_diagnostics"]
+                self.assertEqual([e["action"] for e in events], ["retry", "recovered"])
+                self.assertIn("Unknown", self.client.requests[-1]["messages"][-1]["content"])
+                first = events[0]
+                self.assertEqual(first["patient_id"], self.patient["id"])
+                self.assertEqual(first["component"], component_id)
+                self.assertEqual(first["variants"], [variant])
+                self.assertEqual(first["stage"], "agentic_retrieval")
+                self.assertEqual(first["substage"], "finish_validation")
+                self.assertEqual(first["turn"], len(script) + 1)
+                self.assertEqual(first["searches"], len(script))
+                self.assertEqual(first["calls"][0]["tool"], "finish")
+                self.assertEqual(first["response_id"], f"attempt-{len(script) + 1}")
+                self.assertTrue(first["timestamp"])
+                self.assertTrue(any(s["components"].get(component_id, {}).get("capture", {}).get("agent_diagnostics")
+                                    for s in self.snapshots))
+
+    def test_both_requires_patient_and_guidelines_and_retries_omitted_source(self):
+        for invalid in [{"patient_ref": "P1"}, {"guideline_refs": ["G1"]}]:
+            with self.subTest(invalid=invalid):
+                self.data["selected_variants"] = ["agentic_both"]
+                self.client = ScriptedAgentClient([
+                    agent_message(("search_similar_patients", {"query": "cough"})),
+                    agent_message(("search_guidelines", {"question": "What findings?"})),
+                    agent_message(("finish", invalid)),
+                    agent_message(("finish", {"patient_ref": "P1", "guideline_refs": ["G1"]})),
+                ])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                self.assertEqual(result["components"]["agent_both"]["status"], "completed")
+                self.assertEqual(result["components"]["agent_both"]["outputs"], {
+                    "example": "Reference SOAP example", "Key_info": "Guideline evidence"})
+                self.assertIn("Error:", self.client.requests[-1]["messages"][-1]["content"])
+
+    def test_both_selects_earlier_patient_and_combines_complete_earlier_and_later_guidelines(self):
+        self.data["selected_variants"] = ["agentic_both"]
+        self.client = ScriptedAgentClient([
+            agent_message(("search_similar_patients", {"query": "first patient search"})),
+            agent_message(("search_guidelines", {"question": "First findings?"})),
+            agent_message(("search_similar_patients", {"query": "second patient search"})),
+            agent_message(("search_guidelines", {"question": "Later findings?"})),
+            agent_message(("finish", {"patient_ref": "P1", "guideline_refs": ["G1", "G2"]})),
+        ])
+        answers = ["Earlier answer " * 1000, "Later answer " * 1000]
+        replies = iter(answers)
+        preparer = self.preparer(guideline_search=lambda **kwargs: (next(replies), {}))
+        patient_answers = ["Closest earlier patient", "Less similar later patient"]
+        with patch.object(preparer.reranker, "rerank", side_effect=[[p] for p in patient_answers]):
+            result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_both"]
+        self.assertEqual(component["status"], "completed")
+        self.assertEqual(component["outputs"], {"example": patient_answers[0], "Key_info": "\n\n".join(answers)})
+        self.assertEqual(component["capture"]["agent"]["patient_results"], dict(zip(["P1", "P2"], patient_answers)))
+        self.assertEqual(component["capture"]["agent"]["guideline_results"], dict(zip(["G1", "G2"], answers)))
+        final = result["variants"]["agentic_both"]["assessment_plan_prompts"]["user"]
+        self.assertIn(patient_answers[0], final)
+        self.assertNotIn(patient_answers[1], final)
+        for answer in answers:
+            self.assertIn(answer, final)
+            self.assertTrue(any(m["role"] == "tool" and answer in m["content"]
+                                for m in self.client.requests[-1]["messages"]))
+
+    def test_blank_selected_evidence_can_be_replaced_by_another_search(self):
+        for variant, component_id, tool, argument, field, blank_ref, valid_ref in [
+                ("agentic_patient_retrieval", "agent_patients", "search_similar_patients", "query", "patient_ref", "P1", "P2"),
+                ("agentic_guidelines", "agent_guidelines", "search_guidelines", "question", "guideline_refs", ["G1"], ["G2"])]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = [variant]
+                self.client = ScriptedAgentClient([
+                    agent_message((tool, {argument: "First findings?"})),
+                    agent_message(("finish", {field: blank_ref})),
+                    agent_message((tool, {argument: "Other findings?"})),
+                    agent_message(("finish", {field: valid_ref})),
+                ])
+                replies = iter(["  ", "Complete nonempty evidence"])
+                preparer = self.preparer(guideline_search=lambda **kwargs: (next(replies), {}))
+                with patch.object(preparer.reranker, "rerank", side_effect=lambda *a, **kw: [next(replies)]) \
+                        if preparer.reranker is not None else nullcontext():
+                    result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][component_id]
+                self.assertEqual(component["status"], "completed")
+                self.assertIn("blank evidence", self.client.requests[2]["messages"][-1]["content"])
+                self.assertIn("Complete nonempty evidence", component["outputs"].values())
+
+    def test_empty_searches_exhaust_budget_fail_locally_and_next_patient_still_runs(self):
+        for patients in [True, False]:
+            variant, component_id, tool, argument = (
+                ("agentic_patient_retrieval", "agent_patients", "search_similar_patients", "query") if patients else
+                ("agentic_guidelines", "agent_guidelines", "search_guidelines", "question"))
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = ["llm_only", variant]
+                self.client = MeteredAgentClient([
+                    *[agent_message((tool, {argument: f"findings {i}?"})) for i in range(4)],
+                    agent_message((tool, {argument: "cough?"})),
+                    agent_message(("finish", {"patient_ref": "P1"} if patients else {"guideline_refs": ["G1"]})),
+                ])
+                preparer = self.preparer()
+                with patch.object(preparer.retriever, "search", return_value=[]) if patients else \
+                        patch.object(preparer, "guideline_search", return_value=(" ", {})):
+                    result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][component_id]
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(component["outputs"], {})
+                self.assertEqual(len(self.client.requests), 4, "No useless correction without available evidence or searches")
+                self.assertEqual(component["capture"]["agent"]["searches"], 4)
+                event = component["capture"]["agent_diagnostics"][-1]
+                self.assertEqual(event["substage"], "evidence_availability")
+                self.assertEqual(event["action"], "exit")
+                self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
+                self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+                next_patient = {**self.patient, "id": "patient-b"}
+                next_result = self.result(preparer)
+                next_result["id"] = "patient-b"
+                completed = preparer.prepare(next_patient, next_result)
+                self.assertEqual(completed["components"][component_id]["status"], "completed")
+
+    def test_diagnostics_are_additive_durable_exportable_and_optional_on_resume(self):
+        self.data["selected_variants"] = ["agentic_patient_retrieval"]
+        self.client = MeteredAgentClient([
+            agent_message(("finish", {})),
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("finish", {"patient_ref": "P1"})),
+        ])
+        preparer = self.preparer()
+        result = preparer.prepare(self.patient, self.result(preparer))
+        capture = result["components"]["agent_patients"]["capture"]
+        self.assertEqual(set(capture["agent"]), {"patient_ref", "guideline_refs", "searches", "finished", "stop_reason",
+            "trace", "usage", "patient_results", "patient_reference_ids", "guideline_results", "screened_questions"})
+        self.assertEqual(set(capture["agent"]["trace"][0]), {"search", "tool", "input", "output"})
+        self.assertEqual(capture["agent"]["usage"], [{"prompt_tokens": 101, "completion_tokens": 7}] * 3)
+        before = deepcopy(result)
+        store = JobStore(self.root / "diagnostics.sqlite3")
+        key = ("preparation", self.patient["id"], None, None)
+        store.save(key, result)
+        store.close()
+        store = JobStore(self.root / "diagnostics.sqlite3")
+        self.addCleanup(store.close)
+        restored = store.load(key)
+        self.assertEqual(restored, before)
+        validate_preparation_result(preparer.experiment, restored)
+        self.assertEqual(preparer.prepare(self.patient, restored), before)
+        legacy = deepcopy(restored)
+        del legacy["components"]["agent_patients"]["capture"]["agent_diagnostics"]
+        validate_preparation_result(preparer.experiment, legacy)
+        self.assertEqual(preparer.prepare(self.patient, legacy), legacy)
+        self.assertEqual(len(self.client.requests), 3, "Completed evidence is reused with or without new diagnostics")
+        run_dir = self.root / "diagnostic-run"
+        run_dir.mkdir()
+        results_path = run_dir / "results.jsonl"
+        results_path.write_text(json.dumps(restored) + "\n")
+        saved_bytes = results_path.read_bytes()
+        paths = write_provenance(run_dir, metadata={"status": "completed_with_errors"}, records=[restored])
+        self.assertEqual(results_path.read_bytes(), saved_bytes)
+        usage = json.loads(paths["usage"].read_text())["measured_usage"]["by_stage"]["agent_control"]
+        self.assertEqual(usage["responses"], 3)
+        self.assertEqual(usage["reported_tokens"]["total_tokens"], 324)
+        self.assertEqual(restored, before)
+        labels = self.root / "labels.jsonl"
+        labels.write_text(json.dumps({"id": self.patient["id"], "condition": "DX", "plan": ["P"]}) + "\n")
+        (run_dir / "run.json").write_text(json.dumps({"schema_version": 4,
+            "experiment": {"selected_variants": ["agentic_patient_retrieval"]},
+            "evaluation": {"labels_path": str(labels), "selected_patient_ids": [self.patient["id"]]}}))
+        augmented_report = load_report_data(run_dir, root=self.root)
+        results_path.write_text(json.dumps(legacy) + "\n")
+        self.assertEqual(load_report_data(run_dir, root=self.root), augmented_report)
+
+    def test_diagnostic_checkpoint_failure_is_fatal_and_arguments_are_redacted(self):
+        self.data["selected_variants"] = ["agentic_both"]
+        self.client = ScriptedAgentClient([agent_message(("private-openai", {"value": "private-graph"}))])
+
+        def cannot_save(result):
+            events = result["components"]["agent_both"]["capture"].get("agent_diagnostics")
+            if events:
+                text = json.dumps(events)
+                self.assertNotIn("private-openai", text)
+                self.assertNotIn("private-graph", text)
+                raise OSError("disk full")
+
+        preparer = self.preparer(checkpoint=cannot_save)
+        with self.assertRaises(RunMetadataError):
+            preparer.prepare(self.patient, self.result(preparer))
+        self.assertEqual(len(self.client.requests), 1)
+        self.assertEqual(preparer.retriever.requests, [])
 
     def test_agent_usage_is_kept_when_a_tool_fails_and_a_later_variant_can_continue(self):
         self.data["selected_variants"] = ["agentic_guidelines", "agentic_patient_retrieval"]
@@ -462,6 +680,11 @@ class PreparationTests(unittest.TestCase):
         component = result["components"]["agent_guidelines"]
         self.assertEqual(component["status"], "failed_incomplete")
         self.assertEqual(component["capture"]["model_responses"]["agent_control"][0]["response_id"], "attempt-3")
+        self.assertEqual(component["capture"]["agent"]["stop_reason"], "tool_error")
+        diagnostic = component["capture"]["agent_diagnostics"][-1]
+        self.assertEqual((diagnostic["substage"], diagnostic["error_type"], diagnostic["action"]),
+                         ("tool_execution", "RuntimeError", "exit"))
+        self.assertEqual(diagnostic["calls"][0]["tool"], "search_guidelines")
         self.assertEqual(result["components"]["agent_patients"]["status"], "completed")
         self.assertTrue(any(snapshot["components"]["agent_guidelines"]["capture"]["model_responses"].get(
             "agent_control") for snapshot in self.snapshots))

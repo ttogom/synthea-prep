@@ -25,7 +25,7 @@ from scripts.med_copilot_helpers import (
 )
 from scripts.med_copilot_observability import capture_graphrag_responses
 from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
-from scripts.med_copilot_run_file import RunMetadataError, checkpoint, error_scope, pipeline_stage
+from scripts.med_copilot_run_file import RunMetadataError, checkpoint, error_scope, pacific_now, pipeline_stage
 from scripts.med_copilot_variants import COMPONENTS
 
 
@@ -317,6 +317,47 @@ class EvidencePreparer:
                         reranker=self.reranker, credential_names=experiment.required_credentials) as capture:
                     seen_patients, patient_identities, seen_guidelines, screened = {}, {}, {}, []
 
+                    def save_outcome(partial):
+                        capture["agent"] = {**partial, "patient_results": seen_patients,
+                                            "patient_reference_ids": patient_identities,
+                                            "guideline_results": seen_guidelines,
+                                            "screened_questions": screened}
+
+                    def save_agent_diagnostic(event, partial):
+                        capture.setdefault("agent_diagnostics", []).append(json.loads(self._owner.redact(json.dumps({
+                            **event, "timestamp": pacific_now().isoformat(), "patient_id": result["id"],
+                            "component": instance, "stage": "agentic_retrieval",
+                            "variants": [v for v, output in result["variants"].items()
+                                         if instance in output["components"].values()],
+                        }))))
+                        save_outcome(partial)
+                        try:
+                            checkpoint()
+                        except RunMetadataError:
+                            raise
+                        except Exception as exc:
+                            raise RunMetadataError("Could not save agent diagnostic") from exc
+
+                    def validate_selection(args, searches_remaining):
+                        for field, pool, required in (("patient_ref", seen_patients, use_patients),
+                                                      ("guideline_refs", seen_guidelines, use_guidelines)):
+                            if not required:
+                                continue
+                            if not searches_remaining and not any(value.strip() for value in pool.values()):
+                                raise LookupError(f"No nonempty evidence for {field}; search budget exhausted")
+                            if not isinstance(args, dict):
+                                continue
+                            refs = [args.get(field)] if field == "patient_ref" else args.get(field, [])
+                            if not isinstance(refs, list):
+                                continue  # The agent module checks argument types and required fields.
+                            for ref in refs:
+                                if not isinstance(ref, str) or not ref.strip():
+                                    continue
+                                if ref not in pool:
+                                    raise ValueError(f"Unknown {field} ID {ref!r}; select returned references.")
+                                if not pool[ref].strip():
+                                    raise ValueError(f"{ref} contains blank evidence; search again or select nonempty evidence.")
+
                     def save_agent_response(response):
                         capture["model_responses"].setdefault("agent_control", []).append(
                             model_response_metadata(response))
@@ -378,27 +419,20 @@ class EvidencePreparer:
                             use_guidelines=use_guidelines,
                             allow_diagnosis_terms=settings["allow_diagnosis_terms"],
                             on_response=save_agent_response,
+                            validate_selection=validate_selection, on_diagnostic=save_agent_diagnostic,
                         )
                     except RetrievalAgentError as exc:
                         outcome = exc.outcome
                         raise
                     finally:
                         if outcome is not None:
-                            capture["agent"] = {**outcome, "patient_results": seen_patients,
-                                                 "patient_reference_ids": patient_identities,
-                                                 "guideline_results": seen_guidelines,
-                                                 "screened_questions": screened}
+                            save_outcome(outcome)
                     if not outcome["finished"] or outcome["stop_reason"] != "finish":
                         raise ValueError("Retrieval agent did not finish evidence selection")
-                    if outcome["patient_ref"] is not None and outcome["patient_ref"] not in seen_patients:
-                        raise ValueError("Retrieval agent selected an unknown patient reference")
-                    if any(ref not in seen_guidelines for ref in outcome["guideline_refs"]):
-                        raise ValueError("Retrieval agent selected an unknown guideline reference")
+                    validate_selection(outcome, 0)
                     if use_patients:
-                        component["outputs"]["example"] = seen_patients.get(
-                            outcome["patient_ref"], "No reference patient available.")
-                        capture["selected_reference_patient"] = patient_identities.get(outcome["patient_ref"])
+                        component["outputs"]["example"] = seen_patients[outcome["patient_ref"]]
+                        capture["selected_reference_patient"] = patient_identities[outcome["patient_ref"]]
                     if use_guidelines:
-                        kept = [seen_guidelines[ref] for ref in outcome["guideline_refs"]
-                                if ref in seen_guidelines]
-                        component["outputs"]["Key_info"] = "\n\n".join(kept) or "No guideline evidence selected."
+                        component["outputs"]["Key_info"] = "\n\n".join(
+                            seen_guidelines[ref] for ref in outcome["guideline_refs"])
