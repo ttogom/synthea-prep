@@ -387,6 +387,15 @@ def test_guideline_budget_is_in_instructions_and_schema_without_changing_protoco
 
 
 def test_guideline_context_contract_is_in_system_and_tool_instructions_only_when_enabled():
+    grounding_instruction = (
+        "Each guideline search is independent: GraphRAG sees only your question, not the patient notes or "
+        "previous answers. Make every question self-contained. If you ask it to consider age, history, "
+        "medications, or earlier findings, explicitly supply those details, including medication names "
+        "and doses where recorded. Preserve measurement values, symptom severity scores, and recorded "
+        "timing. Label historical findings with dates or intervals; describe findings as current or "
+        "recent only when supported. Treat past diagnoses as history, not confirmed explanations for "
+        "today’s symptoms. Never attribute reference-patient facts to the target patient. Before "
+        "searching, check for omitted context or altered facts.")
     for patients in (False, True):
         script = [msg((P, {"query": "cough"}))] if patients else []
         selection = {"guideline_refs": ["G1"], **({"patient_ref": "P1"} if patients else {})}
@@ -398,13 +407,16 @@ def test_guideline_context_contract_is_in_system_and_tool_instructions_only_when
         description = next(t["function"]["description"] for t in request["tools"] if t["function"]["name"] == G)
         for text in (prompt, description):
             assert "self-contained" in text and "measurement values" in text
-            assert "follow-up references" in text and "reference-patient facts" in text
-        assert "only your question, not the patient notes or conversation history" in prompt
+            assert "reference-patient facts" in text
+        assert "follow-up references" in description
+        assert "only your question, not the patient notes or previous answers" in prompt
         assert "only this question, not the patient notes or previous answers" in description
-        assert "original S/O" in prompt and "4117" in prompt
+        assert "4117" in prompt
+        assert all(r["messages"][0]["content"].count(grounding_instruction) == 1 for r in c.requests)
     c = FakeClient([msg((P, {"query": "cough"})), msg((F, {"patient_ref": "P1"}))])
     run(c)
     assert "GraphRAG" not in c.requests[0]["messages"][0]["content"]
+    assert all(grounding_instruction not in r["messages"][0]["content"] for r in c.requests)
 
 
 def test_question_validation_retries_before_spending_search_and_preserves_usage_and_query():

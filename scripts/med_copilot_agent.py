@@ -78,12 +78,15 @@ def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagno
         parts.append("Use search_guidelines with focused questions, one topic per question. Select the most "
                      "relevant answers across ALL earlier and later searches; selected "
                      "answers are passed in full to the final clinician model, without summarization.")
-        parts.append("Each guideline search is independent: GraphRAG receives only your question, not the "
-                     "patient notes or conversation history. Make every question self-contained with the "
-                     "relevant target-patient findings and measurement values from the original S/O. "
-                     "Restate what follow-up references mean; do not rely on phrases such as 'this patient' "
-                     "or 'that finding' without the actual facts. Never present reference-patient facts "
-                     "as facts about the target patient.")
+        parts.append("Each guideline search is independent: GraphRAG sees only your question, not the "
+                     "patient notes or previous answers. Make every question self-contained. If you ask "
+                     "it to consider age, history, medications, or earlier findings, explicitly supply "
+                     "those details, including medication names and doses where recorded. Preserve "
+                     "measurement values, symptom severity scores, and recorded timing. Label historical "
+                     "findings with dates or intervals; describe findings as current or recent only when "
+                     "supported. Treat past diagnoses as history, not confirmed explanations for today’s "
+                     "symptoms. Never attribute reference-patient facts to the target patient. Before "
+                     "searching, check for omitted context or altered facts.")
         if guideline_byte_budget is not None:
             parts.append(f"Selected guideline content must total at most {guideline_byte_budget} UTF-8 bytes. "
                          "Tool replies report each answer's evidence_bytes; add 2 bytes between selected answers "
