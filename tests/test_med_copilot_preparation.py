@@ -371,7 +371,8 @@ class PreparationTests(unittest.TestCase):
         result = preparer.prepare(self.patient, self.result(preparer))
         component = result["components"]["agent_guidelines"]
         self.assertEqual(component["status"], "completed")
-        self.assertEqual(self.client.requests[1]["messages"][-1]["content"], "[G1] " + answer)
+        self.assertEqual(self.client.requests[1]["messages"][-1]["content"],
+                         f"[G1] evidence_bytes={len(answer.encode('utf-8'))}\n{answer}")
         self.assertEqual(component["outputs"]["Key_info"], answer)
         self.assertEqual(component["capture"]["agent"]["guideline_results"], {"G1": answer})
         self.assertIn(answer, result["variants"]["agentic_guidelines"]["assessment_plan_prompts"]["user"])
@@ -523,7 +524,7 @@ class PreparationTests(unittest.TestCase):
             agent_message(("search_guidelines", {"question": "Later findings?"})),
             agent_message(("finish", {"patient_ref": "P1", "guideline_refs": ["G1", "G2"]})),
         ])
-        answers = ["Earlier answer " * 1000, "Later answer " * 1000]
+        answers = ["Earlier answer " * 100, "Later answer " * 100]
         replies = iter(answers)
         preparer = self.preparer(guideline_search=lambda **kwargs: (next(replies), {}))
         patient_answers = ["Closest earlier patient", "Less similar later patient"]
@@ -541,6 +542,132 @@ class PreparationTests(unittest.TestCase):
             self.assertIn(answer, final)
             self.assertTrue(any(m["role"] == "tool" and answer in m["content"]
                                 for m in self.client.requests[-1]["messages"]))
+
+    def test_guideline_budget_counts_utf8_and_joins_then_recovers_using_any_prior_answer(self):
+        for variant, logical in [("agentic_guidelines", "agent_guidelines"), ("agentic_both", "agent_both")]:
+            for budget, kept in [(12, ["G1", "G2"]), (11, ["G1"]), (4, ["G2"])]:
+                with self.subTest(variant=variant, budget=budget):
+                    self.data.update(selected_variants=[variant], variant_settings={
+                        variant: {logical: {"guideline_byte_budget": budget}}})
+                    selection = {"patient_ref": "P1"} if variant == "agentic_both" else {}
+                    script = ([agent_message(("search_similar_patients", {"query": "cough"}))] if selection else [])
+                    script += [agent_message(("search_guidelines", {"question": "First findings?"})),
+                               agent_message(("search_guidelines", {"question": "Later findings?"})),
+                               agent_message(("finish", {**selection, "guideline_refs": ["G1", "G2"]}))]
+                    if budget < 12:
+                        script.append(agent_message(("finish", {**selection, "guideline_refs": kept})))
+                    self.client = MeteredAgentClient(script)
+                    answers = {"G1": "ééé", "G2": "🙂"}  # 6 + 2 separator + 4 = 12 bytes, only 6 characters.
+                    replies = iter(answers.values())
+                    preparer = self.preparer(guideline_search=lambda **kw: (next(replies), {}))
+                    result = preparer.prepare(self.patient, self.result(preparer))
+                    instance = preparer.experiment.variant_components[variant][logical]
+                    component = result["components"][instance]
+                    self.assertEqual(component["status"], "completed")
+                    self.assertEqual(component["settings"]["guideline_byte_budget"], budget)
+                    joined = "\n\n".join(answers[ref] for ref in kept)
+                    self.assertEqual(component["outputs"]["Key_info"], joined)
+                    self.assertEqual(component["capture"]["agent"]["guideline_results"], answers)
+                    final = result["variants"][variant]["assessment_plan_prompts"]["user"]
+                    self.assertIn(joined, final)
+                    self.assertNotIn("evidence_bytes=", final)
+                    tool_replies = [m["content"] for m in self.client.requests[-1]["messages"] if m["role"] == "tool"]
+                    self.assertIn("[G1] evidence_bytes=6\nééé", tool_replies)
+                    self.assertIn("[G2] evidence_bytes=4\n🙂", tool_replies)
+                    events = component["capture"].get("agent_diagnostics", [])
+                    self.assertEqual([e["action"] for e in events], [] if budget == 12 else ["retry", "recovered"])
+                    if events:
+                        self.assertIn(f"12 UTF-8 bytes; allowed {budget}; excess {12-budget}", events[0]["message"])
+                    self.assertEqual(len(component["capture"]["model_responses"]["agent_control"]), len(script))
+                    self.assertEqual(len(self.client.requests), len(script))
+
+    def test_default_variant_budgets_allow_more_guidelines_without_truncation(self):
+        for variant, logical, budget in [("agentic_guidelines", "agent_guidelines", 8637),
+                                           ("agentic_both", "agent_both", 4117)]:
+            with self.subTest(variant=variant):
+                self.data.update(selected_variants=[variant, "llm_only"], variant_settings={})
+                selection = {"guideline_refs": ["G1"]}
+                script = []
+                if variant == "agentic_both":
+                    selection["patient_ref"] = "P1"
+                    script.append(agent_message(("search_similar_patients", {"query": "cough"})))
+                script += [agent_message(("search_guidelines", {"question": "Findings?"})),
+                           agent_message(("finish", selection))]
+                if budget < 5000:
+                    script.append(agent_message(("finish", selection)))
+                self.client = MeteredAgentClient(script)
+                answer = "x" * 5000
+                preparer = self.preparer(guideline_search=lambda **kw: (answer, {}))
+                result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][logical]
+                self.assertEqual(component["settings"]["guideline_byte_budget"], budget)
+                self.assertEqual(component["capture"]["agent"]["guideline_results"], {"G1": answer})
+                if budget > 5000:
+                    self.assertEqual(component["outputs"]["Key_info"], answer)
+                    self.assertIn(answer, result["variants"][variant]["assessment_plan_prompts"]["user"])
+                else:
+                    self.assertEqual(component["status"], "failed_incomplete")
+                    self.assertEqual(component["outputs"], {})
+                    self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
+                    events = component["capture"]["agent_diagnostics"]
+                    self.assertEqual([e["action"] for e in events], ["retry", "exit"])
+                    self.assertIn("excess 883", events[-1]["message"])
+                    self.assertEqual(events[-1]["patient_id"], self.patient["id"])
+                    self.assertEqual(events[-1]["variants"], [variant])
+                    self.assertEqual(events[-1]["substage"], "finish_validation")
+                    self.assertEqual(events[-1]["calls"][0]["tool"], "finish")
+                    self.assertEqual(len(component["capture"]["model_responses"]["agent_control"]), len(script))
+                    self.assertTrue(any(s["components"].get(logical, {}).get("capture", {}).get("agent_diagnostics")
+                                        for s in self.snapshots))
+                self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+                preparer.client = FakeClient()
+                later = {**self.patient, "id": "later-patient"}
+                self.assertIsNotNone(preparer.prepare(later, self.result_for_patient(preparer, later))["variants"]["llm_only"]["assessment_plan_prompts"])
+
+    def result_for_patient(self, preparer, patient):
+        result = self.result(preparer)
+        result["id"] = patient["id"]
+        return result
+
+    def test_budget_error_shares_the_existing_correction_allowance(self):
+        for first, second in [(["G99"], ["G1"]), (["G1"], ["G99"])]:
+            with self.subTest(first=first):
+                self.data.update(selected_variants=["agentic_guidelines"], variant_settings={
+                    "agentic_guidelines": {"agent_guidelines": {"guideline_byte_budget": 1}}})
+                self.client = MeteredAgentClient([
+                    agent_message(("search_guidelines", {"question": "Findings?"})),
+                    agent_message(("finish", {"guideline_refs": first})),
+                    agent_message(("finish", {"guideline_refs": second})),
+                ])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                instance = preparer.experiment.variant_components["agentic_guidelines"]["agent_guidelines"]
+                component = result["components"][instance]
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(len(self.client.requests), 3)
+                events = component["capture"]["agent_diagnostics"]
+                self.assertEqual([e["action"] for e in events], ["retry", "exit"])
+                self.assertTrue(any("allowed 1" in e["message"] for e in events))
+                self.assertTrue(any("Unknown" in e["message"] for e in events))
+
+    def test_budget_correction_can_retrieve_a_shorter_answer_within_search_limit(self):
+        self.data.update(selected_variants=["agentic_guidelines"], variant_settings={
+            "agentic_guidelines": {"agent_guidelines": {"guideline_byte_budget": 3}}})
+        self.client = ScriptedAgentClient([
+            agent_message(("search_guidelines", {"question": "First findings?"})),
+            agent_message(("finish", {"guideline_refs": ["G1"]})),
+            agent_message(("search_guidelines", {"question": "Different findings?"})),
+            agent_message(("finish", {"guideline_refs": ["G2"]})),
+        ])
+        replies = iter(["too long", "yes"])
+        preparer = self.preparer(guideline_search=lambda **kw: (next(replies), {}))
+        result = preparer.prepare(self.patient, self.result(preparer))
+        instance = preparer.experiment.variant_components["agentic_guidelines"]["agent_guidelines"]
+        component = result["components"][instance]
+        self.assertEqual(component["status"], "completed")
+        self.assertEqual(component["outputs"]["Key_info"], "yes")
+        self.assertEqual(component["capture"]["agent"]["searches"], 2)
+        self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "recovered"])
 
     def test_blank_selected_evidence_can_be_replaced_by_another_search(self):
         for variant, component_id, tool, argument, field, blank_ref, valid_ref in [

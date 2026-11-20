@@ -178,7 +178,8 @@ select exactly one nonblank returned patient ID and/or at least one distinct
 nonblank returned guideline ID, as applicable. `agent_both` requires both.
 Selected evidence must be nonblank. All earlier search results remain available:
 the patient instruction asks for the closest match across all searches, and the
-guideline instruction asks for all answers contributing relevant information.
+guideline instruction asks for the most relevant complete answers that fit its
+byte budget, considering all searches.
 The runtime validates references and forwards the complete original selected
 evidence; it cannot verify the agent's clinical relevance judgment.
 
@@ -206,6 +207,64 @@ budget without required nonempty evidence fails without a useless correction.
 Refusal, content filtering, malformed unreplayable responses, and infrastructure
 exceptions receive no agent correction. API transport retries remain unchanged.
 Persistence failures and interruptions retain their existing run-level behavior.
+
+#### Guideline byte budgets and oversized final prompts
+
+Agent guideline components add a positive integer `guideline_byte_budget` to
+their existing effective `settings` and `run.json.experiment.variant_settings`.
+Defaults are **8,637** for `agent_guidelines` and **4,117** for `agent_both`;
+overrides use the existing variant/component settings mechanism. Patient-only
+components have no guideline budget. No existing result fields are renamed,
+removed or repurposed, and historical results are not rewritten.
+
+Each guideline tool reply reports `evidence_bytes`, the UTF-8 length of the
+stored raw answer. This metadata and its reference label are shown only to the
+agent; neither enters final evidence. Selected answers remain complete original
+strings joined by `\n\n`, so their combined size is the sum of their byte lengths
+plus two bytes per join. Finish validation measures that exact string. An
+oversized choice reports actual, allowed and excess bytes through the existing
+`finish_validation` diagnostics and shared corrective retry; another error, a
+previously used correction, or the response cap fails only that patient/component
+and blocks its dependent generations. At least one nonblank guideline is still
+required; no fitting answer is not permission for an empty finish.
+
+The defaults reserve the longest target S/O and a conservative complete reference
+bound for the current datasets, not the current patient's shorter content:
+
+| Content or reserve | Bytes |
+| --- | ---: |
+| Configured local context budget | 16,384 |
+| Chat-template/special-token reserve | 1,024 |
+| Completion reserve | 768 |
+| Remaining message-content allowance | 14,592 |
+| Longest target S/O across all 4,959 `test_so` records | 4,403 |
+| Largest full reference bound across 3,354 corpus records | 4,280 |
+| Guideline-only fixed template and system message | 1,552 |
+| Combined fixed template and system message | 1,792 |
+
+Thus guideline-only allows `14592 - 4403 - 1552 = 8637` bytes; combined allows
+`14592 - 4403 - 4280 - 1792 = 4117`. Fixed counts include the 26-byte system
+message, task/output instructions, example JSON, section headings and whitespace.
+The reference bound includes S/O, condition, plan, headings/result number through
+10, the 30 largest candidate concept strings with scores/formatting, and a
+315-byte finite-float rerank-score reserve. It is a conservative bound, not an
+observed retrieved reference or proof of actual model-token overflow. The audit
+used the installed `en_core_sci_md` 0.5.4 / spaCy 3.7.5 span extraction; re-audit
+the defaults when data, NLP, formatting, templates or model/context settings change.
+The existing reserve remains an approximation for provider formatting; the
+separate structured-output schema is not measured as message-content bytes.
+
+The final local-generation guard remains authoritative for every variant,
+including fixed variants and saved/resumed prompts. A rejected oversized prompt
+is checkpointed as a `failed_incomplete` patient/variant/model slot with byte
+counts, reserves, limit and excess in its error, also attributed to that patient
+and `final_generation` in `run.json.errors`. It makes no model request, retains
+existing raw replies and usage, and does not change evidence or context settings.
+Other models, variants and patients continue; storage/error-recording failures
+still stop the run. A saved complete raw reply can still be parsed on resume
+without repeating generation or rejecting its old prompt. Incomplete oversized
+slots may be checked again on resume and remain visible failures without
+stopping independent work. The cap does not imply every case produces a prediction.
 
 ## Variant and final-model records
 

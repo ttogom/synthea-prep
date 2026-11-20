@@ -359,6 +359,31 @@ def test_sdk_multicall_rejection_and_full_evidence_protocol_for_all_variants():
         assert out["usage"][0] == {"prompt_tokens": 10, "completion_tokens": 2}
 
 
+def test_guideline_budget_is_in_instructions_and_schema_without_changing_protocol():
+    for budget in [4117, 8637]:
+        c = FakeClient([msg((G, {"question": "findings?"})), msg((F, {"guideline_refs": ["G1"]}))])
+        assert run(c, use_patients=False, use_guidelines=True, guideline_byte_budget=budget)["finished"]
+        request = c.requests[0]
+        prompt = request["messages"][0]["content"]
+        description = request["tools"][-1]["function"]["parameters"]["properties"]["guideline_refs"]["description"]
+        assert str(budget) in prompt and str(budget) in description
+        assert "UTF-8 bytes" in prompt and "add 2 bytes" in prompt and "evidence_bytes" in prompt
+        assert "ALL earlier and later searches" in prompt and "without summarization" in prompt
+        assert "Keep ALL" not in prompt and "IDs of ALL answers" not in description
+        assert request["parallel_tool_calls"] is False and len(c.requests) == 2
+    c = FakeClient([msg((P, {"query": "cough"})), msg((F, {"patient_ref": "P1"}))])
+    assert run(c)["finished"]
+    assert "evidence_bytes" not in c.requests[0]["messages"][0]["content"]
+    for bad in [0, -1, True, "100", 1.5]:
+        c = FakeClient([])
+        try:
+            run(c, guideline_byte_budget=bad)
+        except ValueError as exc:
+            assert "guideline_byte_budget" in str(exc) and not c.requests
+        else:
+            raise AssertionError("invalid byte budget accepted")
+
+
 if __name__ == "__main__":
     tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_")]
     for name, fn in tests:

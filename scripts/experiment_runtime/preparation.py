@@ -357,6 +357,14 @@ class EvidencePreparer:
                                     raise ValueError(f"Unknown {field} ID {ref!r}; select returned references.")
                                 if not pool[ref].strip():
                                     raise ValueError(f"{ref} contains blank evidence; search again or select nonempty evidence.")
+                        refs = args.get("guideline_refs") if isinstance(args, dict) else None
+                        if use_guidelines and isinstance(refs, list) and all(
+                                isinstance(ref, str) and ref in seen_guidelines for ref in refs):
+                            actual = len("\n\n".join(seen_guidelines[ref] for ref in refs).encode("utf-8"))
+                            budget = settings["guideline_byte_budget"]
+                            if actual > budget:
+                                raise ValueError(f"Selected guidelines use {actual} UTF-8 bytes; allowed {budget}; "
+                                                 f"excess {actual - budget}. Select fewer relevant complete answers.")
 
                     def save_agent_response(response):
                         capture["model_responses"].setdefault("agent_control", []).append(
@@ -407,7 +415,7 @@ class EvidencePreparer:
                             )
                         ref = f"G{len(seen_guidelines) + 1}"
                         seen_guidelines[ref] = format(key_info)
-                        return f"[{ref}] {key_info}"
+                        return f"[{ref}] evidence_bytes={len(seen_guidelines[ref].encode('utf-8'))}\n{seen_guidelines[ref]}"
 
                     outcome = None
                     try:
@@ -420,6 +428,7 @@ class EvidencePreparer:
                             allow_diagnosis_terms=settings["allow_diagnosis_terms"],
                             on_response=save_agent_response,
                             validate_selection=validate_selection, on_diagnostic=save_agent_diagnostic,
+                            guideline_byte_budget=settings.get("guideline_byte_budget"),
                         )
                     except RetrievalAgentError as exc:
                         outcome = exc.outcome

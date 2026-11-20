@@ -69,13 +69,50 @@ class ExperimentConfigTests(unittest.TestCase):
         guideline_search = {"community_level": 2, "response_type": "Multiple Paragraphs", "verbose": False}
         self.assertEqual(metadata["variant_settings"], {
             "agentic_patient_retrieval": {"agent_patients": {**agent, **patient_search}},
-            "agentic_guidelines": {"agent_guidelines": {**agent, **guideline_search}},
-            "agentic_both": {"agent_both": {**agent, **patient_search, **guideline_search}},
+            "agentic_guidelines": {"agent_guidelines": {**agent, **guideline_search, "guideline_byte_budget": 8637}},
+            "agentic_both": {"agent_both": {**agent, **patient_search, **guideline_search, "guideline_byte_budget": 4117}},
         })
         registry, _ = read_yaml_config(config.model_config)
         self.assertEqual(set(registry), {"models"})
         self.assertTrue(all(not ({"temperature", "max_retries", "selected_models"} & set(model))
                             for model in registry["models"].values()))
+
+    def test_guideline_budgets_validate_and_record_defaults_and_overrides(self):
+        for variant, component, default in [("agentic_guidelines", "agent_guidelines", 8637),
+                                             ("agentic_both", "agent_both", 4117)]:
+            for value in [default, 1, 12345]:
+                with self.subTest(variant=variant, value=value):
+                    self.data.update(selected_variants=[variant], variant_settings={
+                        variant: {component: {"guideline_byte_budget": value}}})
+                    self.write()
+                    config = ExperimentConfig(self.path)
+                    instance = config.variant_components[variant][component]
+                    self.assertEqual(config.metadata(self.root)["variant_settings"][variant][component]["guideline_byte_budget"], value)
+                    self.assertEqual(config.variant_metadata(ROOT)["component_definitions"][instance]["settings"]["guideline_byte_budget"], value)
+            for invalid in [0, -1, True, "100", 1.5, None]:
+                with self.subTest(variant=variant, invalid=invalid):
+                    self.data["variant_settings"] = {variant: {component: {"guideline_byte_budget": invalid}}}
+                    self.write()
+                    with self.assertRaisesRegex(ValueError, "guideline_byte_budget"):
+                        ExperimentConfig(self.path)
+
+    def test_audited_default_budgets_match_current_target_templates_and_local_settings(self):
+        config = ExperimentConfig(ROOT / "experiments/configs/experiment.yaml")
+        patients = [json.loads(line) for line in config.patient_input.read_text().splitlines() if line.strip()]
+        longest_target = max(len(f'Subjective: {p["subjective"]}\nObjective: {p["objective"]}'.encode("utf-8"))
+                             for p in patients)
+        self.assertEqual(longest_target, 4403)
+        registry, _ = read_yaml_config(config.model_config)
+        local_completion = max(entry.get("max_tokens") or 768 for alias, entry in registry["models"].items()
+                               if alias in config.selected_models and entry.get("api_base"))
+        content_limit = config.execution["ollama_context_length"] - 1024 - local_completion
+        for variant, component, reference_bound in [("agentic_guidelines", "agent_guidelines", 0),
+                                                    ("agentic_both", "agent_both", 4280)]:
+            fixed = len("You are a clinical expert.".encode("utf-8")) + len(
+                VARIANT_TEMPLATES[VARIANTS[variant].prompt_key].format(
+                    conditions="", example="", Key_info="").encode("utf-8"))
+            default = COMPONENTS[component].parameters["guideline_byte_budget"].default
+            self.assertEqual(default + longest_target + fixed + reference_bound, content_limit)
 
     def test_values_metadata_fingerprint_and_caller_lists_are_independent(self):
         self.data.update(temperature=0.35, max_retries=5, selected_models=["llama", "mini"])

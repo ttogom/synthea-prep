@@ -18,7 +18,7 @@ from scripts.experiment_runtime.execution import JobStore, bounded_map, write_re
 from scripts.med_copilot_helpers import new_patient_result
 from scripts.experiment_runtime.preparation import validate_preparation_result
 from scripts.med_copilot_judges import BIOLORD_MODEL, BIOLORD_REVISION, BioLordSimilarity, CorrectnessJudges, JUDGE_FILE
-from scripts.med_copilot_run_file import error_scope, pacific_now, pipeline_stage
+from scripts.med_copilot_run_file import error_scope, pacific_now, pipeline_stage, record_error
 
 
 MAX_PREPARATION_REPLACEMENTS = 2
@@ -452,6 +452,7 @@ class ExperimentScheduler:
         owner = _JobScope(self.store, ("generation", patient_id, variant, model_id), output, self.run_file)
         start = perf_counter()
         with error_scope(owner, patient_id=patient_id), pipeline_stage("final_generation"):
+            context_error = None
             if self.models.model_is_local(model_id) and not output.get("_generation_reply_complete"):
                 # Byte fallback tokenizers cannot normally need more text tokens
                 # than input bytes; reserve extra space for template/special
@@ -460,8 +461,18 @@ class ExperimentScheduler:
                 prompt_bytes = sum(len(message["content"].encode("utf-8")) for message in messages)
                 completion = self.models.metadata(self.root)["models"][model_id]["config"].get("max_tokens") or 768
                 if prompt_bytes + 1024 + completion > self.settings["ollama_context_length"]:
-                    raise ValueError(f"Prompt for {patient_id}/{variant} exceeds the conservative local context budget")
-            self.models.generate_one(model_id, messages, output)
+                    context_error = ValueError(
+                        f"Prompt for {patient_id}/{variant}/{model_id} exceeds the conservative local context budget: "
+                        f"{prompt_bytes} content bytes + 1024 template reserve + {completion} output reserve "
+                        f"> {self.settings['ollama_context_length']}; "
+                        f"excess {prompt_bytes + 1024 + completion - self.settings['ollama_context_length']}")
+            if context_error is None:
+                self.models.generate_one(model_id, messages, output)
+            else:
+                output.update(status="failed_incomplete", error=self.models.error_metadata(context_error),
+                              predictions=None, evaluation=None)
+                record_error(context_error)
+                owner.checkpoint()
         elapsed = perf_counter() - start
         timing = {"patient_id": patient_id, "variant": variant,
             "model": model_id, "seconds": elapsed, "status": output["status"],

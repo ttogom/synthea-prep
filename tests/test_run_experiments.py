@@ -280,9 +280,108 @@ class SchedulerPipelineTests(unittest.TestCase):
         fixture = self.fixture
         output = deepcopy(self.scheduler.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"])
         messages = [{"role": "user", "content": "é" * 9000}]
-        with self.assertRaisesRegex(ValueError, "SHORT/llm_only.*context budget"):
-            self.scheduler._generate(("SHORT", "llm_only", "local-a", messages, output))
+        result = self.scheduler._generate(("SHORT", "llm_only", "local-a", messages, output))
+        self.assertEqual(result["status"], "failed_incomplete")
+        self.assertIsNone(result["predictions"])
+        self.assertIsNone(result["evaluation"])
+        self.assertIn("SHORT/llm_only/local-a", result["error"]["message"])
+        self.assertIn("18000 content bytes + 1024 template reserve + 768 output reserve > 16384; excess 3408",
+                      result["error"]["message"])
         self.assertEqual(fixture.calls, [])
+        self.assertEqual(self.scheduler.store.load(("generation", "SHORT", "llm_only", "local-a")), result)
+        self.assertFalse(self.scheduler._stop.is_set())
+        self.assertEqual(self.scheduler.timings["generation"][-1]["status"], "failed_incomplete")
+        error = fixture.run_file.metadata["errors"][-1]
+        self.assertEqual((error["patient_id"], error["stage"]), ("SHORT", "final_generation"))
+        self.assertEqual(error["message"], result["error"]["message"])
+        self.assertEqual(json.loads((fixture.run_dir / "run.json").read_text())["errors"][-1], error)
+
+    def test_context_guard_exact_boundary_counts_all_messages_and_model_output_reserve(self):
+        self.fixture.models._settings["local-a"]["config"]["max_tokens"] = 64
+        limit = self.scheduler.settings["ollama_context_length"] - 1024 - 64
+        for extra in [0, 1]:
+            with self.subTest(extra=extra):
+                output = deepcopy(self.scheduler.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"])
+                messages = [{"role": "system", "content": "é"},
+                            {"role": "user", "content": "x" * (limit - 2 + extra)}]
+                calls_before = len(self.fixture.calls)
+                result = self.scheduler._generate(("SHORT", "llm_only", "local-a", messages, output))
+                self.assertEqual(result["status"], "completed" if extra == 0 else "failed_incomplete")
+                self.assertEqual(len(self.fixture.calls) - calls_before, int(extra == 0))
+                if extra:
+                    self.assertIn("64 output reserve", result["error"]["message"])
+                    self.assertIn("excess 1", result["error"]["message"])
+
+    def test_oversized_prompts_fail_only_local_slots_and_survive_export_reopen_and_resume(self):
+        fixture = self.fixture
+        original = fixture.preparer_factory()
+        class LargePromptWorker(original):
+            def prepare(self, item):
+                event = super().prepare(item)
+                if item[0]["id"] == "SHORT":
+                    for output in event["result"]["variants"].values():
+                        output["assessment_plan_prompts"]["user"] = "é" * 9000
+                    self.store.save(("preparation", "SHORT", None, None), event["result"], "completed")
+                return event
+        with patch.object(scheduler_module, "PreparationWorker", LargePromptWorker):
+            self.scheduler.prepare_and_generate()
+        self.scheduler.score()
+        records = fixture.records()
+        for record in records:
+            for body in record["variants"].values():
+                for model, slot in body["assessment_plans"].items():
+                    failed = record["id"] == "SHORT" and model != "hosted"
+                    self.assertEqual(slot["status"], "failed_incomplete" if failed else "completed")
+                    self.assertEqual(slot["evaluation"] is None, failed)
+        self.assertEqual(len(fixture.calls), 36)  # 48 slots less 12 rejected local requests.
+        self.assertEqual(len(fixture.run_file.metadata["errors"]), 12)
+        self.assertIsNone(self.scheduler._failure)
+        paid = list(fixture.paid_preparation)
+        calls = deepcopy(fixture.calls)
+        errors = deepcopy(fixture.run_file.metadata["errors"])
+        self.scheduler.close()
+        resumed = fixture.scheduler()
+        self.addCleanup(resumed.close)
+        saved = resumed.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"]
+        self.assertEqual(saved["error"]["message"], records[0]["variants"]["llm_only"]["assessment_plans"]["local-a"]["error"]["message"])
+        resumed.prepare_and_generate()
+        self.assertEqual(fixture.calls, calls)
+        self.assertEqual(fixture.paid_preparation, paid)
+        self.assertEqual(fixture.records(), records)
+        self.assertEqual(fixture.run_file.metadata["errors"][:12], errors)
+        self.assertIsNone(resumed._failure)
+
+    def test_oversized_rejection_preserves_prior_usage_and_raw_reply(self):
+        output = deepcopy(self.scheduler.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"])
+        output.update(assessment_plan_raw="previous incomplete reply", model_responses=[{
+            "response_id": "previous-attempt", "token_usage": {"prompt_tokens": 8}}])
+        result = self.scheduler._generate(("SHORT", "llm_only", "local-a",
+            [{"role": "user", "content": "é" * 9000}], output))
+        self.assertEqual(result["assessment_plan_raw"], "previous incomplete reply")
+        self.assertEqual(result["model_responses"], [{"response_id": "previous-attempt", "token_usage": {"prompt_tokens": 8}}])
+        self.assertEqual(self.scheduler.store.load(("generation", "SHORT", "llm_only", "local-a")), result)
+        self.assertEqual(self.fixture.calls, [])
+
+    def test_size_rejection_checkpoint_failure_is_fatal(self):
+        output = deepcopy(self.scheduler.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"])
+        save = self.scheduler.store.save
+        def fail_generation_checkpoint(key, payload, status="checkpoint"):
+            if key[0] == "generation":
+                raise RunMetadataError("checkpoint disk full")
+            return save(key, payload, status)
+        with patch.object(self.scheduler.store, "save", side_effect=fail_generation_checkpoint), \
+                self.assertRaisesRegex(RunMetadataError, "checkpoint disk full"):
+            self.scheduler._generate(("SHORT", "llm_only", "local-a", [{"role": "user", "content": "x" * 20000}], output))
+        self.assertTrue(self.scheduler._stop.is_set())
+        self.assertEqual(self.fixture.calls, [])
+
+    def test_size_rejection_error_log_failure_is_fatal(self):
+        output = deepcopy(self.scheduler.records["SHORT"]["variants"]["llm_only"]["assessment_plans"]["local-a"])
+        with patch.object(self.fixture.run_file, "add_error", side_effect=OSError("error log disk full")), \
+                self.assertRaises(RunMetadataError):
+            self.scheduler._generate(("SHORT", "llm_only", "local-a", [{"role": "user", "content": "x" * 20000}], output))
+        self.assertTrue(self.scheduler._stop.is_set())
+        self.assertEqual(self.fixture.calls, [])
         self.assertIsNone(self.scheduler.store.load(("generation", "SHORT", "llm_only", "local-a")))
 
     def test_received_raw_reply_recovery_does_not_reject_large_prompt_or_repeat_transport(self):
@@ -339,7 +438,7 @@ class SchedulerPipelineTests(unittest.TestCase):
         self.assertEqual(fixture.maximum["hosted"], 2)
         self.assertEqual(fixture.server.unloaded, list(ALIASES[1:]))
 
-    def test_local_failure_signals_waiting_preparation_before_executor_shutdown(self):
+    def test_unexpected_guard_failure_signals_waiting_preparation_before_executor_shutdown(self):
         fixture = self.fixture
         original = fixture.preparer_factory()
         stopped = Event()
@@ -356,7 +455,8 @@ class SchedulerPipelineTests(unittest.TestCase):
                         output["assessment_plan_prompts"]["user"] = "é" * 9000
                 return event
         with patch.object(scheduler_module, "PreparationWorker", WaitingWorker), \
-                self.assertRaisesRegex(ValueError, "context budget"):
+                patch.object(fixture.models, "metadata", side_effect=ValueError("unexpected guard failure")), \
+                self.assertRaisesRegex(ValueError, "unexpected guard failure"):
             self.scheduler.prepare_and_generate()
         self.assertTrue(stopped.is_set(), "Stop must be set before waiting for preparation cleanup")
         self.assertNotIn("LONG", fixture.paid_preparation)

@@ -27,7 +27,7 @@ class RetrievalAgentError(RuntimeError):
         self.outcome = outcome
 
 
-def _tool_specs(use_patients, use_guidelines):
+def _tool_specs(use_patients, use_guidelines, guideline_byte_budget=None):
     specs = []
     if use_patients:
         specs.append({"type": "function", "function": {
@@ -51,8 +51,11 @@ def _tool_specs(use_patients, use_guidelines):
     if use_guidelines:
         props["guideline_refs"] = {"type": "array", "minItems": 1, "uniqueItems": True,
                                    "items": {"type": "string", "minLength": 1},
-                                   "description": "IDs of ALL answers contributing relevant information "
-                                                  "across ALL guideline searches, e.g. [\"G1\", \"G2\"]"}
+                                   "description": "IDs of the most relevant complete answers across ALL "
+                                                  "guideline searches that fit the guideline byte budget, "
+                                                  "e.g. [\"G1\", \"G2\"]"}
+        if guideline_byte_budget is not None:
+            props["guideline_refs"]["description"] += f" Maximum {guideline_byte_budget} UTF-8 bytes including separators."
     specs.append({"type": "function", "function": {
         "name": FINISH_TOOL, "description": "Stop searching and return the evidence to use.",
         "parameters": {"type": "object", "properties": props, "required": list(props),
@@ -60,7 +63,8 @@ def _tool_specs(use_patients, use_guidelines):
     return specs
 
 
-def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagnosis_terms=False):
+def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagnosis_terms=False,
+                        guideline_byte_budget=None):
     parts = ["You gather supporting evidence for a clinician. You only see the patient's subjective and "
              "objective notes; you do not know the diagnosis or plan."]
     if use_patients:
@@ -68,9 +72,14 @@ def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagno
                      "emphasise the most discriminating symptoms and findings. Select the single most "
                      "similar patient to the original S/O across ALL searches, not just the latest results.")
     if use_guidelines:
-        parts.append("Use search_guidelines with focused questions, one topic per question. Keep ALL "
-                     "answers contributing relevant information from earlier and later searches; selected "
+        parts.append("Use search_guidelines with focused questions, one topic per question. Select the most "
+                     "relevant answers across ALL earlier and later searches; selected "
                      "answers are passed in full to the final clinician model, without summarization.")
+        if guideline_byte_budget is not None:
+            parts.append(f"Selected guideline content must total at most {guideline_byte_budget} UTF-8 bytes. "
+                         "Tool replies report each answer's evidence_bytes; add 2 bytes between selected answers "
+                         "for the blank-line separator. Metadata labels are not evidence. Omit lower-priority "
+                         "answers to fit; never shorten an answer or omit all guideline evidence.")
     if not allow_diagnosis_terms:
         parts.append("Describe symptoms, findings and risk factors in your searches; do not name specific diagnoses.")
     parts.append(f"You may make at most {max_searches} searches in total. When you have enough, call finish "
@@ -116,7 +125,8 @@ def _finish_arguments(args, use_patients, use_guidelines):
 
 def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperature=0.0,
                         use_patients=True, use_guidelines=True, allow_diagnosis_terms=False,
-                        on_response=None, validate_selection=None, on_diagnostic=None):
+                        on_response=None, validate_selection=None, on_diagnostic=None,
+                        guideline_byte_budget=None):
     """Run the agent loop.
 
     tools: {"search_similar_patients": f(query)->str, "search_guidelines": f(question)->str}; each
@@ -132,15 +142,17 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
         raise ValueError("agent needs at least one search tool")
     if type(max_searches) is not int or max_searches < 1:
         raise ValueError("max_searches must be a positive integer")
+    if guideline_byte_budget is not None and (type(guideline_byte_budget) is not int or guideline_byte_budget < 1):
+        raise ValueError("guideline_byte_budget must be a positive integer")
     enabled = {n for n, on in ((PATIENT_TOOL, use_patients), (GUIDELINE_TOOL, use_guidelines)) if on}
     if max_searches < len(enabled):
         raise ValueError("max_searches must allow at least one search of every enabled source")
     missing = enabled - set(tools)
     if missing:
         raise ValueError(f"missing tool callables: {sorted(missing)}")
-    specs = _tool_specs(use_patients, use_guidelines)
+    specs = _tool_specs(use_patients, use_guidelines, guideline_byte_budget)
     messages = [{"role": "system", "content": build_system_prompt(max_searches, use_patients, use_guidelines,
-                                                                  allow_diagnosis_terms)},
+                                                                  allow_diagnosis_terms, guideline_byte_budget)},
                 {"role": "user", "content": s_o}]
     out = {"patient_ref": None, "guideline_refs": [], "searches": 0, "finished": False,
            "stop_reason": None, "trace": [], "usage": []}

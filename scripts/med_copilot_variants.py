@@ -170,14 +170,16 @@ COMPONENTS = {
     "agent_guidelines": ComponentSpec(
         description="Agent-driven clinical guideline search",
         outputs=("Key_info",),
-        parameters={**AGENT_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS},
+        parameters={**AGENT_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS,
+                    "guideline_byte_budget": Parameter("int", default=8637, minimum=1)},
         resources=("guidelines",), credentials=("OPENAI_API_KEY", "GRAPHRAG_API_KEY"),
         implementation="scripts/med_copilot_agent.py",
     ),
     "agent_both": ComponentSpec(
         description="Agent-driven patient and guideline search",
         outputs=("example", "Key_info"),
-        parameters={**AGENT_PARAMETERS, **PATIENT_SEARCH_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS},
+        parameters={**AGENT_PARAMETERS, **PATIENT_SEARCH_PARAMETERS, **GUIDELINE_SEARCH_PARAMETERS,
+                    "guideline_byte_budget": Parameter("int", default=4117, minimum=1)},
         resources=("patient_retrieval", "guidelines"), credentials=("OPENAI_API_KEY", "GRAPHRAG_API_KEY"),
         implementation="scripts/med_copilot_agent.py",
     ),
