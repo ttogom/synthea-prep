@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import sys
 
+import httpx
+from openai import OpenAI
+
 # Direct script execution must resolve the project before importing its agent.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.med_copilot_agent import RetrievalAgentError, run_retrieval_agent
@@ -54,11 +57,13 @@ def test_budget_forces_finish():
     assert r["finished"] and r["searches"] == 1
 
 def test_extra_search_beyond_budget_is_refused():
-    c = FakeClient([msg(("search_similar_patients", {"query": "a"}), ("search_similar_patients", {"query": "b"})),
+    c = FakeClient([msg(("search_similar_patients", {"query": "a"})),
+                    msg(("search_similar_patients", {"query": "b"})),
                     msg(("finish", {}))])
     r = run_retrieval_agent(c, "x", tools(), model="m", max_searches=1)
     assert r["searches"] == 1
-    assert any("budget" in m["content"] for m in c.requests[1]["messages"] if m["role"] == "tool")
+    assert c.requests[1]["tool_choice"]["function"]["name"] == "finish"
+    assert any("budget" in m["content"] for m in c.requests[2]["messages"] if m["role"] == "tool")
 
 def test_bad_arguments_and_disabled_tool():
     c = FakeClient([msg(("search_similar_patients", "{not json")),
@@ -101,6 +106,100 @@ def test_all_patient_candidates_reach_the_agent_without_truncation():
     assert c.requests[1]["messages"][-1]["content"] == reply
     assert r["patient_ref"] == "P3"
     assert len(r["trace"][0]["output"]) == 1500  # saved preview remains bounded
+
+
+def test_sdk_requests_single_calls_and_supplies_full_evidence_before_finish():
+    patient_reply = "\n\n".join(f"[P{i}] " + str(i) * 4000 for i in range(1, 4))
+    cases = [
+        (True, False, "search_similar_patients", "query", patient_reply, {"patient_ref": "P3"}),
+        (True, True, "search_similar_patients", "query", patient_reply, {"patient_ref": "P3"}),
+        (False, True, "search_guidelines", "question", "[G1] " + "evidence " * 1000,
+         {"guideline_refs": ["G1"]}),
+    ]
+    for patients, guidelines, tool, argument, evidence, selection in cases:
+        for budget in (1, 4):
+            requests, events = [], []
+
+            def handle(request):
+                body = json.loads(request.content)
+                requests.append(body)
+                assert body["parallel_tool_calls"] is False
+                if len(requests) == 1:
+                    assert events == []
+                    assert body["tool_choice"] == "required"
+                    assert not any(item["role"] == "tool" for item in body["messages"])
+                    events.append("request_search")
+                    name, args, call_id = tool, {argument: "cough"}, "search-call"
+                else:
+                    assert len(requests) == 2
+                    assert events == ["request_search", "search_result"]
+                    assert body["messages"][-1] == {
+                        "role": "tool", "tool_call_id": "search-call", "content": evidence}
+                    assert body["messages"][-2]["tool_calls"][0]["function"]["name"] == tool
+                    expected_choice = ({"type": "function", "function": {"name": "finish"}}
+                                       if budget == 1 else "required")
+                    assert body["tool_choice"] == expected_choice
+                    # Generate the selection only after checking its complete evidence in this request.
+                    events.append("request_finish")
+                    name, args, call_id = "finish", selection, "finish-call"
+                return httpx.Response(200, json={
+                    "id": f"offline-{len(requests)}", "object": "chat.completion", "created": 0,
+                    "model": "gpt-4o-mini", "choices": [{"index": 0, "finish_reason": "tool_calls",
+                        "message": {"role": "assistant", "content": None, "tool_calls": [{
+                            "id": call_id, "type": "function", "function": {
+                                "name": name, "arguments": json.dumps(args)}}]}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                })
+
+            def search(query):
+                assert query == "cough"
+                assert events == ["request_search"]
+                events.append("search_result")
+                return evidence
+
+            available_tools = tools()
+            available_tools[tool] = search
+            with OpenAI(api_key="offline", base_url="https://offline.invalid/v1", max_retries=0,
+                        http_client=httpx.Client(transport=httpx.MockTransport(handle))) as client:
+                outcome = run_retrieval_agent(
+                    client, "Subjective: cough\nObjective: recorded findings", available_tools,
+                    model="gpt-4o-mini", use_patients=patients, use_guidelines=guidelines,
+                    max_searches=budget,
+                )
+            assert events == ["request_search", "search_result", "request_finish"]
+            assert outcome["finished"] and outcome["searches"] == 1
+            assert outcome["patient_ref"] == selection.get("patient_ref")
+            assert outcome["guideline_refs"] == selection.get("guideline_refs", [])
+
+
+def test_four_patient_searches_supply_each_result_before_next_decision_and_finish():
+    for guidelines in (False, True):
+        c = FakeClient([
+            *[msg(("search_similar_patients", {"query": f"query-{i}"})) for i in range(4)],
+            msg(("finish", {"patient_ref": "P12"})),
+        ])
+        replies = []
+
+        def search(query):
+            i = len(replies)
+            assert query == f"query-{i}"
+            assert len(c.requests) == i + 1
+            if i:
+                assert c.requests[-1]["messages"][-1]["content"] == replies[-1]
+            reply = "\n\n".join(f"[P{3 * i + j}] {query} candidate {j}" for j in range(1, 4))
+            replies.append(reply)
+            return reply
+
+        t = tools()
+        t["search_similar_patients"] = search
+        outcome = run_retrieval_agent(c, "S/O", t, model="m", use_guidelines=guidelines)
+        assert outcome["finished"] and outcome["patient_ref"] == "P12" and outcome["searches"] == 4
+        assert len(c.requests) == 5
+        assert all(request["parallel_tool_calls"] is False for request in c.requests)
+        assert c.requests[-1]["tool_choice"]["function"]["name"] == "finish"
+        for i, reply in enumerate(replies):
+            assert c.requests[i + 1]["messages"][-1] == {
+                "role": "tool", "tool_call_id": "c0", "content": reply}
 
 
 def test_full_guideline_answer_reaches_the_agent():

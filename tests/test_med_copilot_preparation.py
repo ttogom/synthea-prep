@@ -42,20 +42,25 @@ class FakeClient:
     def create(self, **kwargs):
         self.requests.append(deepcopy(kwargs))
         if kwargs.get("tools"):
+            assert kwargs["parallel_tool_calls"] is False
             names = {tool["function"]["name"] for tool in kwargs["tools"]}
-            calls = []
+            returned = {message["tool_call_id"] for message in kwargs["messages"]
+                        if message["role"] == "tool"}
+            observed = {call["function"]["name"] for message in kwargs["messages"]
+                        if message["role"] == "assistant" for call in message.get("tool_calls", [])
+                        if call["id"] in returned}
             for name, argument in (("search_similar_patients", {"query": "cough and oxygen saturation"}),
                                    ("search_guidelines", {"question": "What findings should be checked?"})):
-                if name in names:
-                    calls.append(SimpleNamespace(id=f"call-{len(calls)}", function=SimpleNamespace(
-                        name=name, arguments=json.dumps(argument))))
-            finish = {}
-            if "search_similar_patients" in names:
-                finish["patient_ref"] = "P1"
-            if "search_guidelines" in names:
-                finish["guideline_refs"] = ["G1"]
-            calls.append(SimpleNamespace(id=f"call-{len(calls)}", function=SimpleNamespace(
-                name="finish", arguments=json.dumps(finish))))
+                if name in names and name not in observed and kwargs["tool_choice"] == "required":
+                    break
+            else:
+                name, argument = "finish", {}
+                if "search_similar_patients" in observed:
+                    argument["patient_ref"] = "P1"
+                if "search_guidelines" in observed:
+                    argument["guideline_refs"] = ["G1"]
+            calls = [SimpleNamespace(id=f"call-{len(self.requests)}", function=SimpleNamespace(
+                name=name, arguments=json.dumps(argument)))]
             return SimpleNamespace(model="fake-agent", id=f"agent-{len(self.requests)}", usage=None,
                 choices=[SimpleNamespace(finish_reason="tool_calls", message=SimpleNamespace(
                     content=None, refusal=None, tool_calls=calls))])
@@ -270,7 +275,9 @@ class PreparationTests(unittest.TestCase):
             "example": "Reference SOAP example", "Key_info": "Guideline evidence"})
         self.assertTrue(all(component["capture"]["agent"]["finished"]
                             for component in result["components"].values()))
-        self.assertEqual(len([request for request in self.client.requests if request.get("tools")]), len(variants))
+        agent_requests = [request for request in self.client.requests if request.get("tools")]
+        self.assertEqual(len(agent_requests), 7)  # Two turns for each single-source variant, three for both.
+        self.assertTrue(all(request["parallel_tool_calls"] is False for request in agent_requests))
 
     def test_agent_sees_three_full_reranked_cases_and_selects_the_third_for_both_patient_variants(self):
         records = [{"id": f"reference-{i}", "subjective": f"Case {i}: " + str(i) * 4000,
@@ -281,8 +288,8 @@ class PreparationTests(unittest.TestCase):
         self.client = ScriptedAgentClient([
             agent_message(("search_similar_patients", {"query": "cough"})),
             agent_message(("finish", {"patient_ref": "P3"})),
-            agent_message(("search_similar_patients", {"query": "cough"}),
-                          ("search_guidelines", {"question": "What findings?"})),
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("search_guidelines", {"question": "What findings?"})),
             agent_message(("finish", {"patient_ref": "P3", "guideline_refs": ["G1"]})),
         ])
         adapter = load_retrieval_module()
@@ -313,7 +320,7 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(list(component["capture"]["agent"]["patient_results"]), ["P1", "P2", "P3"])
             self.assertIn(records[0]["subjective"], component["outputs"]["example"])
             self.assertNotIn(records[1]["subjective"], component["outputs"]["example"])
-        for request in (self.client.requests[1], self.client.requests[3]):
+        for request in (self.client.requests[1], self.client.requests[4]):
             reply = next(message["content"] for message in request["messages"]
                          if message["role"] == "tool" and "[P1]" in message["content"])
             for i in range(1, 4):

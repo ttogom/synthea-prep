@@ -133,7 +133,7 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
         force_finish = finish_requested or out["searches"] >= max_searches
         choice = {"type": "function", "function": {"name": FINISH_TOOL}} if force_finish else "required"
         resp = client.chat.completions.create(model=model, messages=messages, tools=specs,
-                                              tool_choice=choice, temperature=temperature)
+                                              tool_choice=choice, temperature=temperature, parallel_tool_calls=False)
         if on_response is not None:
             on_response(resp)
         out["usage"].append(_usage(resp))
