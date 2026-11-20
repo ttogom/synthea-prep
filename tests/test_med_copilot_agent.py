@@ -106,10 +106,11 @@ def test_empty_or_premature_finish_can_recover_without_locking_out_search():
 
 
 def test_repeated_empty_finish_fails_without_search_or_fallback():
-    c = FakeClient([msg((F, {})), msg((F, {})), msg((P, {"query": "never"}))])
+    c = FakeClient([msg((F, {})) for _ in range(3)])
     out, events = fail(c, "invalid_finish")
-    assert len(c.requests) == 2 and out["searches"] == 0 and out["trace"] == []
-    assert [e["action"] for e in events] == ["retry", "exit"]
+    assert len(c.requests) == 3 and out["searches"] == 0 and out["trace"] == []
+    assert [e["action"] for e in events] == ["retry", "retry", "exit"]
+    assert all(e["phase"] == "search" and e["corrections_used"]["finish"] == 0 for e in events)
 
 
 def test_multiple_calls_execute_none_and_reply_to_every_id_before_retry():
@@ -136,9 +137,9 @@ def test_multiple_calls_execute_none_and_reply_to_every_id_before_retry():
 
 def test_repeated_multicall_fails_and_executes_no_tools():
     batch = msg((P, {"query": "a"}), (F, {"patient_ref": "P1"}))
-    c = FakeClient([batch, batch])
+    c = FakeClient([batch, batch, batch])
     out, _ = fail(c, "multiple_tool_calls", {P: lambda q: (_ for _ in ()).throw(AssertionError("executed"))})
-    assert out["searches"] == 0 and len(c.requests) == 2
+    assert out["searches"] == 0 and len(c.requests) == 3
 
 
 def test_correctable_argument_categories_each_get_one_successful_correction():
@@ -152,7 +153,7 @@ def test_correctable_argument_categories_each_get_one_successful_correction():
         out = run(c, on_diagnostic=lambda e, o: events.append(deepcopy(e)))
         assert out["searches"] == 1 and len(c.requests) == 3
         assert [e["action"] for e in events] == ["retry", "recovered"]
-        assert "only correction" in c.requests[1]["messages"][-1]["content"]
+        assert "Corrections remaining: search=1, finish=1" in c.requests[1]["messages"][-1]["content"]
         assert all(m.get("content") is not None for m in c.requests[1]["messages"]
                    if m["role"] == "assistant" and not m.get("tool_calls"))
 
@@ -176,16 +177,17 @@ def test_finish_argument_types_missing_empty_duplicate_and_disabled_fields():
         assert run(c, use_patients=patients, use_guidelines=guidelines)["finished"]
 
 
-def test_one_shared_correction_not_one_per_error_or_reset_after_success():
+def test_two_shared_corrections_do_not_reset_after_success_or_error_type_change():
     for script in [
-            [msg(content="done"), msg((P, {"query": " "}))],
-            [msg((P, "{bad")), msg((P, {"query": "cough"})), msg((F, {}))],
-            [msg((P, {"query": "cough"})), msg((F, {})), msg((F, {}))]]:
+            [msg(content="done"), msg((P, {"query": " "})), msg((P, "{bad"))],
+            [msg((P, "{bad")), msg((P, {"query": "cough"})), msg(content="done"),
+             msg((P, {"query": "second"})), msg((P, {"query": " "}))]]:
         c = FakeClient(script)
-        out, events = fail(c, "invalid_finish" if len(script) == 3 else "invalid_arguments")
+        out, events = fail(c, "invalid_arguments")
         assert len(c.requests) == len(script)
         assert events[0]["action"] == "retry" and events[-1]["correction_used"] is True
-        assert sum(e["action"] == "retry" for e in events) == 1
+        assert sum(e["action"] == "retry" for e in events) == 2
+        assert events[-1]["corrections_used"] == {"search": 2, "finish": 0}
 
 
 def test_mandatory_source_reserved_before_repeated_searches():
@@ -198,13 +200,13 @@ def test_mandatory_source_reserved_before_repeated_searches():
     assert "search_similar_patients first" not in c.requests[2]["messages"][-1]["content"]
 
 
-def test_full_budget_and_correction_stay_within_original_response_cap():
+def test_full_budget_and_correction_stay_within_response_cap():
     for budget in [1, 4]:
         c = FakeClient([*[msg((P, {"query": str(i)})) for i in range(budget)],
                         msg((P, {"query": "over budget"})), msg((F, {"patient_ref": "P1"}))])
         out = run(c, max_searches=budget)
         assert out["searches"] == budget and len(out["trace"]) == budget
-        assert len(c.requests) == budget + 2 <= 2 * budget + 3
+        assert len(c.requests) == budget + 2 <= budget + 4
         assert c.requests[-2]["tool_choice"]["function"]["name"] == F
         assert "budget exhausted" in c.requests[-1]["messages"][-1]["content"]
 
@@ -440,7 +442,7 @@ def test_question_validation_retries_before_spending_search_and_preserves_usage_
     assert feedback["role"] == "tool" and feedback["tool_call_id"] == "c0" and "Rewrite" in feedback["content"]
     assert c.requests[1]["tool_choice"]["function"]["name"] == G
     assert c.requests[2]["tool_choice"]["function"]["name"] == F
-    assert len(c.requests) == 3 <= 2 * 1 + 3
+    assert len(c.requests) == 3 <= 1 + 4
 
 
 def test_question_validator_runs_only_after_call_structure_and_tool_arguments_are_valid():
@@ -467,21 +469,21 @@ def test_question_validator_runs_only_after_call_structure_and_tool_arguments_ar
     assert seen == ["valid"]
 
 
-def test_question_errors_share_one_correction_with_each_other_and_other_error_types():
+def test_question_errors_share_search_allowance_and_preserve_finish_allowance():
     def validate(text):
         if text == "bad":
             raise ValueError("Rewrite the question.")
 
     cases = [
-        ([msg((G, {"question": "bad"})), msg((G, {"question": "bad"}))], "invalid_guideline_question", 0),
-        ([msg(content="done"), msg((G, {"question": "bad"}))], "invalid_guideline_question", 0),
-        ([msg((G, {"question": "bad"})), msg((G, {"question": "good"})), msg((F, {}))], "invalid_finish", 1),
+        ([msg((G, {"question": "bad"})) for _ in range(3)], "invalid_guideline_question", 0),
+        ([msg(content="done"), msg((G, {"question": "bad"})), msg((G, {"question": "bad"}))], "invalid_guideline_question", 0),
+        ([msg((G, {"question": "bad"})), msg((G, {"question": "good"})), msg((F, {})), msg((F, {}))], "invalid_finish", 1),
     ]
     for script, code, searches in cases:
         c = FakeClient(script)
         out, events = fail(c, code, use_patients=False, use_guidelines=True, validate_guideline_question=validate)
         assert len(c.requests) == len(script) and out["searches"] == searches
-        assert sum(e["action"] == "retry" for e in events) == 1
+        assert sum(e["action"] == "retry" for e in events) == 2
         assert events[-1]["correction_used"] is True
 
 
@@ -546,6 +548,118 @@ def test_sdk_question_correction_has_valid_tool_feedback_and_no_speculative_retr
                   validate_guideline_question=validate, on_response=lambda r: responses.append(r.id))
     assert out["searches"] == 1 and len(out["usage"]) == 3
     assert responses == ["response-1", "response-2", "response-3"]
+
+
+def test_two_search_corrections_and_reserved_finish_correction_succeed_at_reply_cap():
+    for patients, guidelines, budget in [(True, False, 1), (True, False, 2), (True, False, 4),
+                                          (False, True, 4), (True, True, 4)]:
+        for consecutive in (False, True):
+            names = ([P, G, P, G] if patients and guidelines else [P if patients else G] * budget)
+            script = [msg(content="use a tool"), msg((names[0], {}))] if consecutive else []
+            for index, name in enumerate(names):
+                if not consecutive and index in (0, len(names) - 1):
+                    script.append(msg((name, {})))
+                argument = "query" if name == P else "question"
+                script.append(msg((name, {argument: f"findings {index}"})))
+            if not consecutive and len(names) == 1:
+                script.insert(0, msg(content="use a tool"))
+            selection = {**({"patient_ref": "P1"} if patients else {}),
+                         **({"guideline_refs": ["G1"]} if guidelines else {})}
+            script += [msg((F, {})), msg((F, selection))]
+            c = FakeClient(script * 2)
+            # A new invocation must restore both allowances, even on the same client.
+            for invocation in range(2):
+                events = []
+                out = run(c, use_patients=patients, use_guidelines=guidelines, max_searches=budget,
+                          on_diagnostic=lambda e, o: events.append(deepcopy(e)))
+                assert out["finished"] and out["searches"] == len(out["trace"]) == budget
+                assert len(c.requests) == (invocation + 1) * (budget + 4)
+                assert len(out["usage"]) == budget + 4
+                retries = [e for e in events if e["action"] == "retry"]
+                assert [e["phase"] for e in retries] == ["search", "search", "finish"]
+                assert [e["corrections_used"] for e in retries] == [
+                    {"search": 0, "finish": 0}, {"search": 1, "finish": 0}, {"search": 2, "finish": 0}]
+                assert events[-1]["corrections_used"] == {"search": 2, "finish": 1}
+                assert sum(e["action"] == "recovered" for e in events) == 3
+                assert events[0]["turn"] == 1
+                feedback = c.requests[(invocation + 1) * (budget + 4) - 1]["messages"][-1]["content"]
+                assert "search=0, finish=0" in feedback
+
+
+def test_search_exhaustion_preserves_partial_evidence_and_reserved_finish_allowance():
+    c = FakeClient([msg((P, {"query": "cough"})), *[msg((G, {})) for _ in range(3)]])
+    out, events = fail(c, "invalid_arguments", use_guidelines=True)
+    assert out["searches"] == len(out["trace"]) == 1 and len(out["usage"]) == len(c.requests) == 4
+    assert [e["action"] for e in events] == ["retry", "retry", "exit"]
+    assert all(e["phase"] == "search" for e in events)
+    assert events[-1]["corrections_used"] == {"search": 2, "finish": 0}
+    assert out["stop_reason"] == "validation_error"
+
+
+def test_finish_allowance_does_not_reset_after_a_successful_search():
+    c = FakeClient([msg((P, {"query": "first"})), msg((F, {})),
+                    msg((P, {"query": "refine"})), msg((F, {}))])
+    out, events = fail(c, "invalid_finish")
+    assert out["searches"] == 2 and len(c.requests) == 4
+    assert [e["action"] for e in events] == ["retry", "recovered", "exit"]
+    assert all(e["phase"] == "finish" for e in events)
+    assert events[-1]["corrections_used"] == {"search": 0, "finish": 1}
+
+
+def test_premature_finish_uses_search_allowance_until_every_mandatory_source_is_searched():
+    c = FakeClient([msg((F, {})), msg((P, {"query": "cough"})),
+                    msg((F, {"patient_ref": "P1"})), msg((G, {"question": "findings?"})),
+                    msg((F, {"patient_ref": "P1"})),
+                    msg((F, {"patient_ref": "P1", "guideline_refs": ["G1"]}))])
+    events = []
+    out = run(c, use_guidelines=True, on_diagnostic=lambda e, o: events.append(deepcopy(e)))
+    assert out["finished"] and out["searches"] == 2 and len(c.requests) == 6
+    assert [e["phase"] for e in events if e["action"] == "retry"] == ["search", "search", "finish"]
+    assert "Search every enabled source" in c.requests[1]["messages"][-1]["content"]
+    assert c.requests[3]["tool_choice"]["function"]["name"] == G
+
+
+def test_search_calls_after_budget_never_consume_finish_allowance_even_in_rejected_batches():
+    for batch in [msg((P, {"query": "over budget"})),
+                  msg((P, {"query": "over budget"}), (F, {"patient_ref": "P1"})),
+                  msg((F, {"patient_ref": "P1"}), (P, {"query": "over budget"}))]:
+        c = FakeClient([*[msg((P, {"query": str(i)})) for i in range(4)], batch, batch,
+                        msg((F, {})), msg((F, {"patient_ref": "P1"}))])
+        events = []
+        out = run(c, on_diagnostic=lambda e, o: events.append(deepcopy(e)))
+        assert out["finished"] and out["searches"] == len(out["trace"]) == 4
+        assert len(c.requests) == 8
+        assert [e["phase"] for e in events if e["action"] == "retry"] == ["search", "search", "finish"]
+        if len(batch.tool_calls) == 2:
+            assert [m["tool_call_id"] for m in c.requests[5]["messages"][-2:]] == ["c0", "c1"]
+
+
+def test_finish_protocol_errors_use_only_the_reserved_finish_allowance():
+    for invalid in [msg(content="done"), msg((F, {}), (F, {})), msg(("unknown", {})),
+                    SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason="length", message=msg((F, "{cut")))])]:
+        for budget, first_error in [(1, invalid), (4, msg((F, {})))]:
+            c = FakeClient([msg((P, {"query": "cough"})), first_error, invalid])
+            events = []
+            try:
+                run(c, max_searches=budget, on_diagnostic=lambda e, o: events.append(deepcopy(e)))
+            except RetrievalAgentError as exc:
+                assert exc.outcome["searches"] == 1 and len(c.requests) == 3
+                assert [e["action"] for e in events] == ["retry", "exit"]
+                assert all(e["phase"] == "finish" for e in events)
+                assert events[-1]["corrections_used"] == {"search": 0, "finish": 1}
+            else:
+                raise AssertionError("Final reply received an extra correction")
+
+
+def test_last_invalid_reply_stops_at_max_searches_plus_four_without_an_extra_request():
+    for budget in (1, 2, 4):
+        c = FakeClient([msg((P, {})), msg((P, {})),
+                        *[msg((P, {"query": str(i)})) for i in range(budget)],
+                        msg((F, {})), msg((F, {})), msg((F, {"patient_ref": "P1"}))])
+        out, events = fail(c, "invalid_finish", max_searches=budget)
+        assert len(c.requests) == len(out["usage"]) == budget + 4
+        assert out["searches"] == budget and out["stop_reason"] == "turn_cap"
+        assert events[-1]["turn"] == budget + 4 and events[-1]["action"] == "exit"
 
 
 if __name__ == "__main__":

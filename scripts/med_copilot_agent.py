@@ -147,7 +147,9 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
     args=None checks availability only. ValueError is correctable; other exceptions are not.
     on_diagnostic(event, outcome) persists errors/recovery without changing the legacy trace.
     validate_guideline_question(question) runs before spending a search; ValueError
-    uses the same correction allowance as other invalid calls. Other exceptions propagate.
+    shares two search-phase corrections. Finish has one separate correction after
+    mandatory searches. Allowances persist across successful calls within this invocation.
+    All replies, including invalid ones, count toward max_searches + 4.
     """
     if not (use_patients or use_guidelines):
         raise ValueError("agent needs at least one search tool")
@@ -167,14 +169,16 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                 {"role": "user", "content": s_o}]
     out = {"patient_ref": None, "guideline_refs": [], "searches": 0, "finished": False,
            "stop_reason": None, "trace": [], "usage": []}
-    searched, correction_used, pending_error = set(), False, None
-    cap = 2 * max_searches + 3
+    searched, pending_errors = set(), []
+    corrections_used, correction_limits = {"search": 0, "finish": 0}, {"search": 2, "finish": 1}
+    cap = max_searches + 4
 
-    def diagnose(code, message, substage, action, error_type="ValueError"):
+    def diagnose(code, message, substage, action, error_type="ValueError", error_phase=None):
         if on_diagnostic is not None:
             on_diagnostic({"turn": turn, "searches": out["searches"], "substage": substage,
                            "code": code, "error_type": error_type, "message": message,
-                           "action": action, "correction_used": correction_used,
+                           "action": action, "correction_used": any(corrections_used.values()),
+                           "phase": error_phase or phase, "corrections_used": dict(corrections_used),
                            "response_id": getattr(resp, "id", None),
                            "calls": [{"tool": c.function.name, "call_id": c.id,
                                       "arguments": c.function.arguments} for c in calls]}, out)
@@ -183,6 +187,9 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
         required = next((n for n in (PATIENT_TOOL, GUIDELINE_TOOL) if n in enabled - searched), None)
         forced = FINISH_TOOL if out["searches"] >= max_searches else required
         choice = {"type": "function", "function": {"name": forced}} if forced else "required"
+        phase = pending_errors[-1][1] if pending_errors else "search"
+        if forced == FINISH_TOOL:
+            phase = "finish"
         resp, calls = None, []
         try:
             resp = client.chat.completions.create(model=model, messages=messages, tools=specs,
@@ -218,6 +225,10 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
             diagnose("refusal", message, "response_validation", "exit", "RetrievalAgentError")
             raise RetrievalAgentError(message, out)
         messages.append(_assistant_dict(msg))
+        if any(c.function.name in _ARG_NAME for c in calls):
+            phase = "search"  # Search errors never consume the reserved finish correction.
+        elif calls and all(c.function.name == FINISH_TOOL for c in calls):
+            phase = "search" if enabled - searched else "finish"
         code, substage = "invalid_response", "response_validation"
         try:
             if getattr(response_choice, "finish_reason", None) == "length":
@@ -237,11 +248,11 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                 args = None
             if name == FINISH_TOOL:
                 code, substage = "invalid_finish", "finish_validation"
+                if enabled - searched:
+                    raise ValueError("Search every enabled source and read its results before finish.")
                 if validate_selection is not None:
                     validate_selection(args, max_searches - out["searches"])
                 ref, refs = _finish_arguments(args, use_patients, use_guidelines)
-                if enabled - searched:
-                    raise ValueError("Search every enabled source and read its results before finish.")
             elif name not in enabled:
                 code = "unknown_tool"
                 raise ValueError(f"Unknown or disabled tool: {name}. Call an enabled tool.")
@@ -257,14 +268,17 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                 code, substage = "invalid_guideline_question", "query_validation"
                 validate_guideline_question(args["question"].strip())
         except ValueError as exc:
-            retry = not correction_used and turn < cap
+            retry = corrections_used[phase] < correction_limits[phase] and turn < cap
             if not retry:
                 out["stop_reason"] = "turn_cap" if turn == cap else "validation_error"
             diagnose(code, str(exc), substage, "retry" if retry else "exit", type(exc).__name__)
             if not retry:
                 raise RetrievalAgentError(str(exc), out) from exc
-            correction_used, pending_error = True, code
-            feedback = f"Error: {exc} This is your only correction attempt."
+            corrections_used[phase] += 1
+            pending_errors.append((code, phase))
+            feedback = (f"Error: {exc} Retry this {phase}-phase decision. Corrections remaining: "
+                        f"search={correction_limits['search'] - corrections_used['search']}, "
+                        f"finish={correction_limits['finish'] - corrections_used['finish']}.")
             if calls:
                 messages.extend({"role": "tool", "tool_call_id": c.id, "content": feedback} for c in calls)
             else:
@@ -300,9 +314,9 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
                     diagnose("evidence_error", str(exc), "evidence_availability", "exit", type(exc).__name__)
                     raise
         messages.append({"role": "tool", "tool_call_id": call.id, "content": reply})
-        if pending_error is not None:
-            diagnose(pending_error, "Agent correction accepted", "response_validation", "recovered")
-            pending_error = None
+        for code, error_phase in pending_errors:
+            diagnose(code, "Agent correction accepted", "response_validation", "recovered", error_phase=error_phase)
+        pending_errors.clear()
         if out["finished"]:
             break
     else:

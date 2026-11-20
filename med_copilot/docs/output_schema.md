@@ -190,8 +190,8 @@ values and resolve follow-up references without treating reference-patient facts
 as target facts. These instructions do not mechanically verify clinical completeness.
 When diagnosis screening is enabled, flagged agent questions are rejected before
 retrieval instead of silently rewritten as "these findings". Rewrite feedback
-uses the same single correction allowance as other errors, including oversized
-guideline selections; a rejected question consumes a response but no search.
+uses the two shared search-phase corrections; a rejected question consumes a
+reply but no search. Final guideline selection errors have a separate allowance.
 Accepted question text reaches GraphRAG unchanged and is saved in the existing
 search trace's `input`. Rejections retain the existing `screened_questions`
 entries and checkpointed diagnostics (`invalid_guideline_question`, `query_validation`).
@@ -208,15 +208,25 @@ consuming `variants`, `stage`, precise `substage`, response `turn`, `response_id
 when reported, `searches`, `code`, `error_type`, `message`, `correction_used`,
 `action` (`retry`, `recovered`, or `exit`), and `calls` (tool name, call ID and
 argument string for each structurally valid call). Credentials are redacted.
+Additional `phase` and `corrections_used` (`search`/`finish` counts) identify the
+applicable allowance and counts before that event; the existing `correction_used`
+boolean still reports whether any earlier correction has been used.
 Events and returned-response usage are checkpointed before more paid work.
 The first error remains saved after recovery; subsequent errors append events.
 Older captures without this field remain valid; no schema migration is needed.
 
 Multiple calls in one response execute nothing, even if the provider ignores
 `parallel_tool_calls=False`; every call ID receives error feedback. Agent-correctable
-errors share one correction attempt per conversation within the unchanged
-`2 * max_searches + 3` response cap. Success continues normally; another error
-fails the component and blocks its dependent generations. Exhausted search
+search-phase errors share two correction opportunities per invocation. Premature
+finish attempts before mandatory searches use this search allowance. Once the
+mandatory sources have been searched, finish-validation errors have one separate
+correction; search errors never consume it. Missing or malformed decisions during
+a forced or pending finish correction use the finish allowance, while explicit
+search calls remain search-phase decisions. Successful calls do not reset either
+allowance; a new invocation resets both. All replies count toward `max_searches + 4`
+(eight at the default four-search limit), including invalid replies and corrections.
+An error after its applicable allowance is spent, or at the reply cap, fails the
+component and blocks its dependent generations. Exhausted search
 budget without required nonempty evidence fails without a useless correction.
 Refusal, content filtering, malformed unreplayable responses, and infrastructure
 exceptions receive no agent correction. API transport retries remain unchanged.
@@ -237,8 +247,8 @@ agent; neither enters final evidence. Selected answers remain complete original
 strings joined by `\n\n`, so their combined size is the sum of their byte lengths
 plus two bytes per join. Finish validation measures that exact string. An
 oversized choice reports actual, allowed and excess bytes through the existing
-`finish_validation` diagnostics and shared corrective retry; another error, a
-previously used correction, or the response cap fails only that patient/component
+`finish_validation` diagnostics and the separate finish correction; another finish
+error, a previously used finish correction, or the reply cap fails only that patient/component
 and blocks its dependent generations. At least one nonblank guideline is still
 required; no fitting answer is not permission for an empty finish.
 

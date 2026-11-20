@@ -402,7 +402,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_explicit_empty_finish_is_rejected_and_never_publishes_fallback_evidence(self):
         self.data["selected_variants"] = ["agentic_both"]
-        self.client = ScriptedAgentClient([agent_message(("finish", {})), agent_message(("finish", {}))])
+        self.client = ScriptedAgentClient([agent_message(("finish", {})) for _ in range(3)])
         preparer = self.preparer()
         result = preparer.prepare(self.patient, self.result(preparer))
         component = result["components"]["agent_both"]
@@ -410,7 +410,7 @@ class PreparationTests(unittest.TestCase):
         self.assertFalse(component["capture"]["agent"]["finished"])
         self.assertEqual(component["outputs"], {})
         self.assertIsNone(result["variants"]["agentic_both"]["assessment_plan_prompts"])
-        self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "exit"])
+        self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "retry", "exit"])
 
     def test_agent_usage_is_durable_before_tools_and_survives_store_reopen_and_retry(self):
         self.data["selected_variants"] = ["agentic_patient_retrieval"]
@@ -894,17 +894,17 @@ class PreparationTests(unittest.TestCase):
                 self.searches.clear()
                 prefix = [agent_message(("search_similar_patients", {"query": "cough"}))] if patients else []
                 self.client = MeteredAgentClient([*prefix, agent_message(("search_guidelines", {"question": bad})),
-                    agent_message(("search_guidelines", {"question": "Which HYPERTENSION stage fits?"}))])
+                    *[agent_message(("search_guidelines", {"question": "Which HYPERTENSION stage fits?"})) for _ in range(2)]])
                 preparer = self.preparer()
                 result = preparer.prepare(self.patient, self.result(preparer))
                 component = result["components"][logical]
                 self.assertEqual(component["status"], "failed_incomplete")
                 self.assertEqual(component["outputs"], {})
                 self.assertEqual(self.searches, [])
-                self.assertEqual(len(self.client.requests), len(prefix) + 2)
+                self.assertEqual(len(self.client.requests), len(prefix) + 3)
                 self.assertEqual(component["capture"]["agent"]["searches"], len(prefix))
                 self.assertEqual(component["capture"]["agent"]["stop_reason"], "validation_error")
-                self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "exit"])
+                self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "retry", "exit"])
                 self.assertEqual(self.errors[-1]["stage"], "agentic_retrieval")
                 self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
                 self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
@@ -934,12 +934,14 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(component["capture"]["agent"]["screened_questions"], [])
                 self.assertNotIn("agent_diagnostics", component["capture"])
 
-    def test_agent_question_errors_share_correction_with_finish_byte_budget_errors(self):
+    def test_agent_question_and_finish_byte_budget_errors_have_separate_allowances(self):
         bad = agent_message(("search_guidelines", {"question": "Which hypertension treatment fits?"}))
         good = agent_message(("search_guidelines", {"question": "For cough and O2 98%, which tests?"}))
         finish = agent_message(("finish", {"guideline_refs": ["G1"]}))
-        for script, codes in [([bad, good, finish], ["invalid_guideline_question", "invalid_guideline_question", "invalid_finish"]),
-                              ([good, finish, bad], ["invalid_finish", "invalid_guideline_question"])]:
+        for script, codes in [([bad, good, finish, finish],
+                              ["invalid_guideline_question", "invalid_guideline_question", "invalid_finish", "invalid_finish"]),
+                             ([good, finish, bad, bad, bad],
+                              ["invalid_finish", "invalid_guideline_question", "invalid_guideline_question", "invalid_guideline_question"])]:
             with self.subTest(codes=codes):
                 self.data.update(selected_variants=["agentic_guidelines"], variant_settings={
                     "agentic_guidelines": {"agent_guidelines": {"guideline_byte_budget": 1}}})
@@ -952,11 +954,11 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(component["status"], "failed_incomplete")
                 self.assertEqual(component["outputs"], {})
                 self.assertEqual(len(self.searches), 1)
-                self.assertEqual(len(self.client.requests), 3)
+                self.assertEqual(len(self.client.requests), len(script))
                 self.assertEqual(component["capture"]["agent"]["searches"], 1)
                 events = component["capture"]["agent_diagnostics"]
                 self.assertEqual([e["code"] for e in events], codes)
-                self.assertEqual(sum(e["action"] == "retry" for e in events), 1)
+                self.assertEqual(sum(e["action"] == "retry" for e in events), 2 if len(script) == 4 else 3)
                 self.assertEqual(events[-1]["action"], "exit")
 
     def test_rejected_question_leaves_all_four_searches_and_earlier_answers_available(self):
@@ -1075,6 +1077,104 @@ class PreparationTests(unittest.TestCase):
             preparer.prepare(self.patient, self.result(preparer))
         self.assertEqual(self.searches, [])
         self.assertEqual(len(self.client.requests), 1)
+
+    def test_split_allowances_allow_eight_reply_success_and_reset_for_each_patient(self):
+        records = []
+        for variant, logical, names in [
+                ("agentic_patient_retrieval", "agent_patients", ["search_similar_patients"] * 4),
+                ("agentic_guidelines", "agent_guidelines", ["search_guidelines"] * 4),
+                ("agentic_both", "agent_both", ["search_similar_patients", "search_guidelines"] * 2)]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = ["llm_only", variant]
+                script = []
+                for index, name in enumerate(names):
+                    if index == 0:
+                        script.append(agent_message(content="done"))
+                    if index == 2:
+                        script.append(agent_message((name, {})))
+                    argument = "query" if name == "search_similar_patients" else "question"
+                    script.append(agent_message((name, {argument: f"For cough and O2 98%, findings {index}?"})))
+                selection = {**({"patient_ref": "P1"} if "search_similar_patients" in names else {}),
+                             **({"guideline_refs": ["G1"]} if "search_guidelines" in names else {})}
+                script += [agent_message(("finish", {})), agent_message(("finish", selection))]
+                self.client = MeteredAgentClient(script * 2, prefix=variant)
+                store_path = self.root / f"{variant}.sqlite3"
+                store = JobStore(store_path)
+                self.addCleanup(store.close)
+                preparer = self.preparer(checkpoint=lambda r: store.save(("preparation", r["id"], None, None), r))
+                records.clear()
+                for number in range(2):
+                    patient = {**self.patient, "id": f"patient-{number}"}
+                    result = preparer.prepare(patient, self.result_for_patient(preparer, patient))
+                    records.append(result)
+                    component = result["components"][logical]
+                    self.assertEqual(component["status"], "completed")
+                    self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+                    self.assertIsNotNone(result["variants"][variant]["assessment_plan_prompts"])
+                    capture = component["capture"]
+                    self.assertEqual(capture["agent"]["searches"], 4)
+                    self.assertEqual(len(capture["agent"]["trace"]), 4)
+                    self.assertEqual(len(capture["agent"]["usage"]), 8)
+                    self.assertEqual(len(capture["model_responses"]["agent_control"]), 8)
+                    self.assertEqual(len(self.client.requests), (number + 1) * 8)
+                    events = capture["agent_diagnostics"]
+                    retry = [e for e in events if e["action"] == "retry"]
+                    self.assertEqual([e["phase"] for e in retry], ["search", "search", "finish"])
+                    self.assertEqual(retry[0]["corrections_used"], {"search": 0, "finish": 0})
+                    self.assertEqual(events[-1]["corrections_used"], {"search": 2, "finish": 1})
+                    self.assertEqual(events[-1]["turn"], 8)
+                    self.assertTrue(all(e["patient_id"] == patient["id"] for e in events))
+                    self.assertTrue(all(type(e["correction_used"]) is bool for e in events))
+                store.close()
+                store = JobStore(store_path)
+                self.addCleanup(store.close)
+                for result in records:
+                    restored = store.load(("preparation", result["id"], None, None))
+                    self.assertEqual(restored, result)
+                    validate_preparation_result(preparer.experiment, restored)
+                run_dir = self.root / f"{variant}-usage"
+                run_dir.mkdir()
+                paths = write_provenance(run_dir, metadata={"status": "completed"}, records=records)
+                usage = json.loads(paths["usage"].read_text())["measured_usage"]["by_stage"]["agent_control"]
+                self.assertEqual(usage["responses"], 16)
+                self.assertEqual(usage["reported_tokens"], {"prompt_tokens": 1616, "completion_tokens": 112,
+                                                          "total_tokens": 1728, "cached_tokens": 512})
+
+    def test_eighth_reply_failure_saves_partial_results_and_usage_without_blocking_other_work(self):
+        self.data["selected_variants"] = ["llm_only", "agentic_patient_retrieval"]
+        self.client = MeteredAgentClient([
+            *[agent_message(("search_similar_patients", {})) for _ in range(2)],
+            *[agent_message(("search_similar_patients", {"query": f"cough {i}"})) for i in range(4)],
+            agent_message(("finish", {})), agent_message(("finish", {})),
+            agent_message(("finish", {"patient_ref": "P1"})),  # Must never be requested.
+        ])
+        path = self.root / "cap.sqlite3"
+        store = JobStore(path)
+        self.addCleanup(store.close)
+        key = ("preparation", self.patient["id"], None, None)
+        preparer = self.preparer(checkpoint=lambda r: store.save(key, r))
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_patients"]
+        self.assertEqual(component["status"], "failed_incomplete")
+        self.assertEqual(component["outputs"], {})
+        capture = component["capture"]
+        self.assertEqual(capture["agent"]["stop_reason"], "turn_cap")
+        self.assertEqual(capture["agent"]["searches"], 4)
+        self.assertEqual(len(capture["agent"]["patient_results"]), 4)
+        self.assertEqual(len(capture["agent"]["trace"]), 4)
+        self.assertEqual(len(capture["agent"]["usage"]), 8)
+        self.assertEqual(len(capture["model_responses"]["agent_control"]), 8)
+        self.assertEqual(len(self.client.requests), 8)
+        self.assertEqual(capture["agent_diagnostics"][-1]["action"], "exit")
+        self.assertEqual(capture["agent_diagnostics"][-1]["turn"], 8)
+        self.assertEqual(capture["agent_diagnostics"][-1]["corrections_used"], {"search": 2, "finish": 1})
+        self.assertIsNone(result["variants"]["agentic_patient_retrieval"]["assessment_plan_prompts"])
+        self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+        self.assertEqual(self.errors[-1]["stage"], "agentic_retrieval")
+        store.close()
+        store = JobStore(path)
+        self.addCleanup(store.close)
+        self.assertEqual(store.load(key), result)
 
     def test_completed_preparation_and_exact_prompts_are_reused(self):
         preparer = self.preparer()
