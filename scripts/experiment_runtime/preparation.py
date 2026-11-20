@@ -24,7 +24,7 @@ from scripts.med_copilot_helpers import (
     validate_guideline_tables,
 )
 from scripts.med_copilot_observability import capture_graphrag_responses
-from scripts.med_copilot_question_screen import find_diagnosis_terms, remove_diagnosis_terms
+from scripts.med_copilot_question_screen import find_diagnosis_terms
 from scripts.med_copilot_run_file import RunMetadataError, checkpoint, error_scope, pacific_now, pipeline_stage
 from scripts.med_copilot_variants import COMPONENTS
 
@@ -397,14 +397,16 @@ class EvidencePreparer:
                             lines.append(f"[{ref}] {text}")
                         return "\n\n".join(lines) or "No similar patients found."
 
-                    def search_guidelines(question):
+                    def validate_guideline_question(question):
                         if not settings["allow_diagnosis_terms"]:
                             found = find_diagnosis_terms(question, s_o)
                             if found:
                                 screened.append({"question": question, "terms": found})
-                                question = remove_diagnosis_terms(question, found)
-                                if not str(question).strip():
-                                    return "Question removed by the diagnosis-term screen; ask about symptoms or findings."
+                                raise ValueError(f"Unrecorded diagnosis terms: {', '.join(found)}. Rewrite one "
+                                                 "self-contained question using the target patient's recorded "
+                                                 "findings and measurement values.")
+
+                    def search_guidelines(question):
                         with chdir(self.guideline_output), capture_graphrag_responses(capture["model_responses"]):
                             key_info, _context = self.guideline_search(
                                 config_filepath=experiment.guidelines / "settings.yaml",
@@ -429,6 +431,7 @@ class EvidencePreparer:
                             on_response=save_agent_response,
                             validate_selection=validate_selection, on_diagnostic=save_agent_diagnostic,
                             guideline_byte_budget=settings.get("guideline_byte_budget"),
+                            validate_guideline_question=validate_guideline_question,
                         )
                     except RetrievalAgentError as exc:
                         outcome = exc.outcome

@@ -183,6 +183,20 @@ byte budget, considering all searches.
 The runtime validates references and forwards the complete original selected
 evidence; it cannot verify the agent's clinical relevance judgment.
 
+Guideline-agent instructions require self-contained questions: each independent
+GraphRAG call receives only its question, without the target notes or agent
+history. Questions must include relevant recorded target findings and measurement
+values and resolve follow-up references without treating reference-patient facts
+as target facts. These instructions do not mechanically verify clinical completeness.
+When diagnosis screening is enabled, flagged agent questions are rejected before
+retrieval instead of silently rewritten as "these findings". Rewrite feedback
+uses the same single correction allowance as other errors, including oversized
+guideline selections; a rejected question consumes a response but no search.
+Accepted question text reaches GraphRAG unchanged and is saved in the existing
+search trace's `input`. Rejections retain the existing `screened_questions`
+entries and checkpointed diagnostics (`invalid_guideline_question`, `query_validation`).
+Fixed-variant question generation and shared screening rules are unchanged.
+
 The existing `capture.agent` outcome, reference registries, search-only `trace`
 (1,500-character output previews) and `usage` representation are unchanged.
 Full search responses reach the agent. Agent-control provider metadata stays in

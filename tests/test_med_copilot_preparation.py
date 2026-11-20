@@ -830,6 +830,252 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(preparer.retriever.requests, [])
         self.assertEqual(len(self.client.requests), 1)
 
+    def test_agent_question_rewrite_precedes_retrieval_and_preserves_exact_query_and_usage(self):
+        self.patient.update(subjective="Breathlessness", objective="Oxygen saturation 89%; BP 172/104")
+        bad = "Which hypertension treatment fits?"
+        question = "For breathlessness, oxygen saturation 89% and BP 172/104, which investigations are recommended?"
+        for variant, logical, patients in [("agentic_guidelines", "agent_guidelines", False),
+                                           ("agentic_both", "agent_both", True)]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = [variant]
+                self.searches.clear()
+                self.snapshots.clear()
+                prefix = [agent_message(("search_similar_patients", {"query": "breathlessness"}))] if patients else []
+                selection = {"guideline_refs": ["G1"], **({"patient_ref": "P1"} if patients else {})}
+                self.client = MeteredAgentClient([*prefix,
+                    agent_message(("search_guidelines", {"question": bad})),
+                    agent_message(("search_guidelines", {"question": "  " + question + "  "})),
+                    agent_message(("finish", selection))])
+
+                def graph(**kwargs):
+                    saved = self.snapshots[-1]["components"][logical]["capture"]
+                    self.assertEqual(saved["agent_diagnostics"][0]["action"], "retry")
+                    self.assertEqual(len(saved["model_responses"]["agent_control"]), len(prefix) + 2)
+                    return self.graph_search(**kwargs)
+
+                preparer = self.preparer(guideline_search=graph)
+                result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][logical]
+                capture, agent = component["capture"], component["capture"]["agent"]
+                self.assertEqual(component["status"], "completed")
+                self.assertEqual([q["query"] for q in self.searches], [question])
+                self.assertEqual(agent["screened_questions"], [{"question": bad, "terms": ["hypertension"]}])
+                self.assertEqual(agent["searches"], len(prefix) + 1)
+                self.assertEqual(agent["guideline_results"], {"G1": "Guideline evidence"})
+                self.assertEqual(agent["trace"][-1]["input"], question)
+                self.assertEqual(set(agent["trace"][-1]), {"search", "tool", "input", "output"})
+                events = capture["agent_diagnostics"]
+                self.assertEqual([e["action"] for e in events], ["retry", "recovered"])
+                self.assertEqual((events[0]["code"], events[0]["substage"], events[0]["searches"]),
+                                 ("invalid_guideline_question", "query_validation", len(prefix)))
+                self.assertEqual(json.loads(events[0]["calls"][0]["arguments"]), {"question": bad})
+                self.assertEqual(events[0]["response_id"], f"attempt-{len(prefix) + 1}")
+                self.assertEqual((events[0]["patient_id"], events[0]["variants"]), (self.patient["id"], [variant]))
+                retry = self.client.requests[len(prefix) + 1]
+                self.assertIn("hypertension", retry["messages"][-1]["content"])
+                self.assertIn("recorded findings and measurement values", retry["messages"][-1]["content"])
+                self.assertEqual(retry["tool_choice"]["function"]["name"], "search_guidelines")
+                self.assertEqual(component["outputs"]["Key_info"], "Guideline evidence")
+                self.assertNotIn("evidence_bytes", result["variants"][variant]["assessment_plan_prompts"]["user"])
+                self.assertIsNone(component["error"])
+                run_dir = self.root / variant
+                run_dir.mkdir()
+                paths = write_provenance(run_dir, metadata={"status": "completed"}, records=[result])
+                measured = json.loads(paths["usage"].read_text())["measured_usage"]["by_stage"]["agent_control"]
+                self.assertEqual(measured["responses"], len(prefix) + 3)
+                self.assertEqual(measured["reported_tokens"]["total_tokens"], 108 * (len(prefix) + 3))
+
+    def test_repeated_flagged_questions_fail_locally_and_later_patient_continues(self):
+        bad = "Which hypertension treatment fits?"
+        for variant, logical, patients in [("agentic_guidelines", "agent_guidelines", False),
+                                           ("agentic_both", "agent_both", True)]:
+            with self.subTest(variant=variant):
+                self.data["selected_variants"] = ["llm_only", variant]
+                self.searches.clear()
+                prefix = [agent_message(("search_similar_patients", {"query": "cough"}))] if patients else []
+                self.client = MeteredAgentClient([*prefix, agent_message(("search_guidelines", {"question": bad})),
+                    agent_message(("search_guidelines", {"question": "Which HYPERTENSION stage fits?"}))])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                component = result["components"][logical]
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(component["outputs"], {})
+                self.assertEqual(self.searches, [])
+                self.assertEqual(len(self.client.requests), len(prefix) + 2)
+                self.assertEqual(component["capture"]["agent"]["searches"], len(prefix))
+                self.assertEqual(component["capture"]["agent"]["stop_reason"], "validation_error")
+                self.assertEqual([e["action"] for e in component["capture"]["agent_diagnostics"]], ["retry", "exit"])
+                self.assertEqual(self.errors[-1]["stage"], "agentic_retrieval")
+                self.assertIsNone(result["variants"][variant]["assessment_plan_prompts"])
+                self.assertIsNotNone(result["variants"]["llm_only"]["assessment_plan_prompts"])
+                preparer.client = FakeClient()
+                later = {**self.patient, "id": "later-patient"}
+                completed = preparer.prepare(later, self.result_for_patient(preparer, later))
+                self.assertEqual(completed["components"][logical]["status"], "completed")
+
+    def test_agent_question_screen_respects_existing_setting_and_recorded_diagnoses(self):
+        question = "Which hypertension treatment fits?"
+        for allow, subjective in [(True, "Cough"), (False, "Cough; history of hypertension")]:
+            with self.subTest(allow=allow):
+                self.data.update(selected_variants=["agentic_guidelines"], variant_settings={
+                    "agentic_guidelines": {"agent_guidelines": {"allow_diagnosis_terms": allow}}})
+                self.patient["subjective"] = subjective
+                self.searches.clear()
+                self.client = ScriptedAgentClient([
+                    agent_message(("search_guidelines", {"question": question})),
+                    agent_message(("finish", {"guideline_refs": ["G1"]})),
+                ])
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                instance = preparer.experiment.variant_components["agentic_guidelines"]["agent_guidelines"]
+                component = result["components"][instance]
+                self.assertEqual(component["status"], "completed")
+                self.assertEqual([q["query"] for q in self.searches], [question])
+                self.assertEqual(component["capture"]["agent"]["screened_questions"], [])
+                self.assertNotIn("agent_diagnostics", component["capture"])
+
+    def test_agent_question_errors_share_correction_with_finish_byte_budget_errors(self):
+        bad = agent_message(("search_guidelines", {"question": "Which hypertension treatment fits?"}))
+        good = agent_message(("search_guidelines", {"question": "For cough and O2 98%, which tests?"}))
+        finish = agent_message(("finish", {"guideline_refs": ["G1"]}))
+        for script, codes in [([bad, good, finish], ["invalid_guideline_question", "invalid_guideline_question", "invalid_finish"]),
+                              ([good, finish, bad], ["invalid_finish", "invalid_guideline_question"])]:
+            with self.subTest(codes=codes):
+                self.data.update(selected_variants=["agentic_guidelines"], variant_settings={
+                    "agentic_guidelines": {"agent_guidelines": {"guideline_byte_budget": 1}}})
+                self.searches.clear()
+                self.client = MeteredAgentClient(script)
+                preparer = self.preparer()
+                result = preparer.prepare(self.patient, self.result(preparer))
+                instance = preparer.experiment.variant_components["agentic_guidelines"]["agent_guidelines"]
+                component = result["components"][instance]
+                self.assertEqual(component["status"], "failed_incomplete")
+                self.assertEqual(component["outputs"], {})
+                self.assertEqual(len(self.searches), 1)
+                self.assertEqual(len(self.client.requests), 3)
+                self.assertEqual(component["capture"]["agent"]["searches"], 1)
+                events = component["capture"]["agent_diagnostics"]
+                self.assertEqual([e["code"] for e in events], codes)
+                self.assertEqual(sum(e["action"] == "retry" for e in events), 1)
+                self.assertEqual(events[-1]["action"], "exit")
+
+    def test_rejected_question_leaves_all_four_searches_and_earlier_answers_available(self):
+        self.data["selected_variants"] = ["agentic_guidelines"]
+        questions = [f"For cough and O2 98%, what {topic} is recommended?"
+                     for topic in ["investigation", "monitoring", "follow-up", "education"]]
+        self.client = ScriptedAgentClient([
+            agent_message(("search_guidelines", {"question": "Which hypertension treatment fits?"})),
+            *[agent_message(("search_guidelines", {"question": q})) for q in questions],
+            agent_message(("finish", {"guideline_refs": ["G1", "G4"]})),
+        ])
+        answers = [f"Complete answer {i}" for i in range(4)]
+        replies = iter(answers)
+
+        def graph(**kwargs):
+            self.searches.append(kwargs)
+            return next(replies), {}
+
+        preparer = self.preparer(guideline_search=graph)
+        result = preparer.prepare(self.patient, self.result(preparer))
+        component = result["components"]["agent_guidelines"]
+        self.assertEqual(component["status"], "completed")
+        self.assertEqual([q["query"] for q in self.searches], questions)
+        self.assertEqual(component["capture"]["agent"]["searches"], 4)
+        self.assertEqual(len(self.client.requests), 6)
+        self.assertEqual(component["capture"]["agent"]["guideline_results"],
+                         {f"G{i + 1}": a for i, a in enumerate(answers)})
+        self.assertEqual(component["outputs"]["Key_info"], "\n\n".join([answers[0], answers[3]]))
+        self.assertEqual(self.client.requests[-1]["tool_choice"]["function"]["name"], "finish")
+
+    def test_all_seven_variants_preserve_fixed_screening_and_agent_patient_behavior(self):
+        self.data["selected_variants"] += ["agentic_patient_retrieval", "agentic_guidelines", "agentic_both"]
+        bad = "Which hypertension treatment fits?"
+        good = "For cough and oxygen saturation 98%, which investigations are recommended?"
+        self.client = ScriptedAgentClient([
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("finish", {"patient_ref": "P1"})),
+            agent_message(("search_guidelines", {"question": bad})),
+            agent_message(("search_guidelines", {"question": good})),
+            agent_message(("finish", {"guideline_refs": ["G1"]})),
+            agent_message(("search_similar_patients", {"query": "cough"})),
+            agent_message(("search_guidelines", {"question": bad})),
+            agent_message(("search_guidelines", {"question": good})),
+            agent_message(("finish", {"patient_ref": "P1", "guideline_refs": ["G1"]})),
+        ])
+        original = self.client.chat.completions.create
+        raw = json.dumps({"Key Questions": [bad]})
+
+        def create(**kwargs):
+            if kwargs.get("response_format") == {"type": "json_object"}:
+                self.client.requests.append(deepcopy(kwargs))
+                return SimpleNamespace(usage=None, choices=[SimpleNamespace(finish_reason="stop",
+                    message=SimpleNamespace(content=raw, refusal=None))])
+            return original(**kwargs)
+
+        self.client.chat.completions.create = create
+        preparer = self.preparer()
+        result = preparer.prepare(self.patient, self.result(preparer))
+        fixed_query = json.dumps({"Key Questions": ["Which these findings treatment fits?"]})
+        self.assertEqual([q["query"] for q in self.searches], [fixed_query, good, good])
+        fixed = result["components"]["guidelines"]["capture"]
+        self.assertEqual(fixed["guideline_query"], fixed_query)
+        self.assertEqual(fixed["guideline_question_screen"], {"first_reply": raw, "first_terms": ["hypertension"],
+                         "retry_reply": raw, "retry_terms": ["hypertension"]})
+        fixed_requests = [q for q in self.client.requests if q.get("response_format")]
+        self.assertEqual(len(fixed_requests), 2)
+        self.assertEqual(fixed_requests[0], fixed_requests[1])
+        self.assertIn("Keep recorded measurements", fixed_requests[0]["messages"][1]["content"])
+        self.assertTrue(all(c["status"] == "completed" for c in result["components"].values()))
+        self.assertEqual(len(preparer.retriever.requests), 3)
+        self.assertNotIn("agent_diagnostics", result["components"]["agent_patients"]["capture"])
+        for variant in self.data["selected_variants"]:
+            self.assertIsNotNone(result["variants"][variant]["assessment_plan_prompts"])
+
+    def test_question_diagnostic_survives_interruption_and_store_reopen_before_any_retrieval(self):
+        self.data["selected_variants"] = ["agentic_guidelines"]
+        self.client = MeteredAgentClient([
+            agent_message(("search_guidelines", {"question": "Which hypertension treatment fits?"}))])
+        path, interrupted = self.root / "query.sqlite3", []
+        key = ("preparation", self.patient["id"], None, None)
+        store = JobStore(path)
+        self.addCleanup(store.close)
+
+        def save(result):
+            store.save(key, result)
+            if result["components"]["agent_guidelines"]["capture"].get("agent_diagnostics") and not interrupted:
+                interrupted.append(True)
+                raise KeyboardInterrupt()
+
+        preparer = self.preparer(checkpoint=save)
+        with self.assertRaises(KeyboardInterrupt):
+            preparer.prepare(self.patient, self.result(preparer))
+        store.close()
+        store = JobStore(path)
+        self.addCleanup(store.close)
+        saved = store.load(key)
+        capture = saved["components"]["agent_guidelines"]["capture"]
+        self.assertEqual(self.searches, [])
+        self.assertEqual(len(self.client.requests), 1)
+        self.assertEqual(capture["agent_diagnostics"][0]["substage"], "query_validation")
+        self.assertEqual(capture["agent"]["screened_questions"][0]["terms"], ["hypertension"])
+        self.assertEqual(capture["model_responses"]["agent_control"][0]["token_usage"]["total_tokens"], 108)
+        validate_preparation_result(preparer.experiment, saved)
+
+    def test_question_diagnostic_persistence_failure_is_fatal_before_retrieval(self):
+        self.data["selected_variants"] = ["agentic_guidelines"]
+        self.client = MeteredAgentClient([
+            agent_message(("search_guidelines", {"question": "Which hypertension treatment fits?"}))])
+
+        def save(result):
+            if result["components"]["agent_guidelines"]["capture"].get("agent_diagnostics"):
+                raise OSError("disk full")
+
+        preparer = self.preparer(checkpoint=save)
+        with self.assertRaises(RunMetadataError):
+            preparer.prepare(self.patient, self.result(preparer))
+        self.assertEqual(self.searches, [])
+        self.assertEqual(len(self.client.requests), 1)
+
     def test_completed_preparation_and_exact_prompts_are_reused(self):
         preparer = self.preparer()
         result = preparer.prepare(self.patient, self.result(preparer))

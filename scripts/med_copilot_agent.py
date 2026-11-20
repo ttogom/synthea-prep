@@ -39,8 +39,11 @@ def _tool_specs(use_patients, use_guidelines, guideline_byte_budget=None):
     if use_guidelines:
         specs.append({"type": "function", "function": {
             "name": GUIDELINE_TOOL,
-            "description": "Ask ONE focused clinical-guideline question about the patient's symptoms, "
-                           "findings or risk factors. Returns a reference id like [G1] and the answer.",
+            "description": "Ask ONE focused, self-contained clinical-guideline question. GraphRAG sees only "
+                           "this question, not the patient notes or previous answers. Include relevant "
+                           "target-patient findings and measurement values; spell out follow-up references. "
+                           "Do not attribute reference-patient facts to the target patient. "
+                           "Returns a reference id like [G1] and the answer.",
             "parameters": {"type": "object", "properties": {"question": {"type": "string"}},
                            "required": ["question"]}}})
     props = {}
@@ -75,6 +78,12 @@ def build_system_prompt(max_searches, use_patients, use_guidelines, allow_diagno
         parts.append("Use search_guidelines with focused questions, one topic per question. Select the most "
                      "relevant answers across ALL earlier and later searches; selected "
                      "answers are passed in full to the final clinician model, without summarization.")
+        parts.append("Each guideline search is independent: GraphRAG receives only your question, not the "
+                     "patient notes or conversation history. Make every question self-contained with the "
+                     "relevant target-patient findings and measurement values from the original S/O. "
+                     "Restate what follow-up references mean; do not rely on phrases such as 'this patient' "
+                     "or 'that finding' without the actual facts. Never present reference-patient facts "
+                     "as facts about the target patient.")
         if guideline_byte_budget is not None:
             parts.append(f"Selected guideline content must total at most {guideline_byte_budget} UTF-8 bytes. "
                          "Tool replies report each answer's evidence_bytes; add 2 bytes between selected answers "
@@ -126,7 +135,7 @@ def _finish_arguments(args, use_patients, use_guidelines):
 def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperature=0.0,
                         use_patients=True, use_guidelines=True, allow_diagnosis_terms=False,
                         on_response=None, validate_selection=None, on_diagnostic=None,
-                        guideline_byte_budget=None):
+                        guideline_byte_budget=None, validate_guideline_question=None):
     """Run the agent loop.
 
     tools: {"search_similar_patients": f(query)->str, "search_guidelines": f(question)->str}; each
@@ -137,6 +146,8 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
     validate_selection(args, searches_remaining) checks the caller's evidence registry;
     args=None checks availability only. ValueError is correctable; other exceptions are not.
     on_diagnostic(event, outcome) persists errors/recovery without changing the legacy trace.
+    validate_guideline_question(question) runs before spending a search; ValueError
+    uses the same correction allowance as other invalid calls. Other exceptions propagate.
     """
     if not (use_patients or use_guidelines):
         raise ValueError("agent needs at least one search tool")
@@ -242,6 +253,9 @@ def run_retrieval_agent(client, s_o, tools, *, model, max_searches=4, temperatur
             elif required is not None and name != required:
                 code = "required_source"
                 raise ValueError(f"Call {required} first so every required source fits in the search budget.")
+            elif name == GUIDELINE_TOOL and validate_guideline_question is not None:
+                code, substage = "invalid_guideline_question", "query_validation"
+                validate_guideline_question(args["question"].strip())
         except ValueError as exc:
             retry = not correction_used and turn < cap
             if not retry:

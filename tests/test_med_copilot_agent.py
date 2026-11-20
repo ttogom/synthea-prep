@@ -384,6 +384,170 @@ def test_guideline_budget_is_in_instructions_and_schema_without_changing_protoco
             raise AssertionError("invalid byte budget accepted")
 
 
+def test_guideline_context_contract_is_in_system_and_tool_instructions_only_when_enabled():
+    for patients in (False, True):
+        script = [msg((P, {"query": "cough"}))] if patients else []
+        selection = {"guideline_refs": ["G1"], **({"patient_ref": "P1"} if patients else {})}
+        c = FakeClient([*script, msg((G, {"question": "For cough and O2 98%, which tests?"})),
+                        msg((F, selection))])
+        run(c, use_patients=patients, use_guidelines=True, guideline_byte_budget=4117)
+        request = c.requests[0]
+        prompt = request["messages"][0]["content"]
+        description = next(t["function"]["description"] for t in request["tools"] if t["function"]["name"] == G)
+        for text in (prompt, description):
+            assert "self-contained" in text and "measurement values" in text
+            assert "follow-up references" in text and "reference-patient facts" in text
+        assert "only your question, not the patient notes or conversation history" in prompt
+        assert "only this question, not the patient notes or previous answers" in description
+        assert "original S/O" in prompt and "4117" in prompt
+    c = FakeClient([msg((P, {"query": "cough"})), msg((F, {"patient_ref": "P1"}))])
+    run(c)
+    assert "GraphRAG" not in c.requests[0]["messages"][0]["content"]
+
+
+def test_question_validation_retries_before_spending_search_and_preserves_usage_and_query():
+    question, events, diagnostics = "For cough and O₂ 98%, which investigations?", [], []
+    script = [msg((G, {"question": "bad question"})), msg((G, {"question": "  " + question + "  "})),
+              msg((F, {"guideline_refs": ["G1"]}))]
+    c = FakeClient([SimpleNamespace(id=f"r{i}", choices=[SimpleNamespace(message=m)],
+                    usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2)) for i, m in enumerate(script)])
+
+    def validate(text):
+        events.append(("validate", text))
+        if text == "bad question":
+            raise ValueError("Rewrite using recorded target findings and measurement values.")
+
+    def search(text):
+        assert text == question and len(c.requests) == 2
+        events.append(("tool", text))
+        return "[G1] complete answer"
+
+    def diagnostic(event, out):
+        diagnostics.append((deepcopy(event), deepcopy(out)))
+        events.append((event["action"], event["searches"]))
+
+    out = run(c, {G: search}, use_patients=False, use_guidelines=True, max_searches=1,
+              validate_guideline_question=validate, on_diagnostic=diagnostic,
+              on_response=lambda r: events.append(("response", r.id)))
+    assert events == [("response", "r0"), ("validate", "bad question"), ("retry", 0),
+                      ("response", "r1"), ("validate", question), ("tool", question),
+                      ("recovered", 1), ("response", "r2")]
+    assert out["searches"] == 1 and out["trace"][0]["input"] == question
+    assert out["usage"] == [{"prompt_tokens": 10, "completion_tokens": 2}] * 3
+    assert diagnostics[0][0]["code"] == "invalid_guideline_question"
+    assert diagnostics[0][0]["substage"] == "query_validation" and diagnostics[0][1]["trace"] == []
+    feedback = c.requests[1]["messages"][-1]
+    assert feedback["role"] == "tool" and feedback["tool_call_id"] == "c0" and "Rewrite" in feedback["content"]
+    assert c.requests[1]["tool_choice"]["function"]["name"] == G
+    assert c.requests[2]["tool_choice"]["function"]["name"] == F
+    assert len(c.requests) == 3 <= 2 * 1 + 3
+
+
+def test_question_validator_runs_only_after_call_structure_and_tool_arguments_are_valid():
+    invalid = [msg((G, args)) for args in ["{bad", "[]", {}, {"question": 1}, {"question": " "}]]
+    invalid += [msg(("disabled", {})), msg((G, {"question": "not executed"}), (F, {}))]
+    for bad in invalid:
+        seen = []
+        c = FakeClient([bad, msg((G, {"question": "valid"})), msg((F, {"guideline_refs": ["G1"]}))])
+        out = run(c, use_patients=False, use_guidelines=True, validate_guideline_question=seen.append)
+        assert out["finished"] and seen == ["valid"]
+    seen = []
+    c = FakeClient([msg((P, {"query": "cough"})), msg((F, {"patient_ref": "P1"}))])
+    run(c, validate_guideline_question=seen.append)
+    assert seen == []
+    c = FakeClient([msg((G, {"question": "valid"})), msg((G, {"question": "beyond budget"})),
+                    msg((F, {"guideline_refs": ["G1"]}))])
+    run(c, use_patients=False, use_guidelines=True, max_searches=1, validate_guideline_question=seen.append)
+    assert seen == ["valid"]
+    seen = []
+    c = FakeClient([msg((G, {"question": "before required patient search"})),
+                    msg((P, {"query": "cough"})), msg((G, {"question": "valid"})),
+                    msg((F, {"patient_ref": "P1", "guideline_refs": ["G1"]}))])
+    run(c, use_guidelines=True, validate_guideline_question=seen.append)
+    assert seen == ["valid"]
+
+
+def test_question_errors_share_one_correction_with_each_other_and_other_error_types():
+    def validate(text):
+        if text == "bad":
+            raise ValueError("Rewrite the question.")
+
+    cases = [
+        ([msg((G, {"question": "bad"})), msg((G, {"question": "bad"}))], "invalid_guideline_question", 0),
+        ([msg(content="done"), msg((G, {"question": "bad"}))], "invalid_guideline_question", 0),
+        ([msg((G, {"question": "bad"})), msg((G, {"question": "good"})), msg((F, {}))], "invalid_finish", 1),
+    ]
+    for script, code, searches in cases:
+        c = FakeClient(script)
+        out, events = fail(c, code, use_patients=False, use_guidelines=True, validate_guideline_question=validate)
+        assert len(c.requests) == len(script) and out["searches"] == searches
+        assert sum(e["action"] == "retry" for e in events) == 1
+        assert events[-1]["correction_used"] is True
+
+
+def test_question_validator_infrastructure_failures_and_tool_value_errors_are_not_retried():
+    for where, error in [("validator", OSError("resource failure")), ("validator", KeyboardInterrupt()),
+                         ("tool", ValueError("GraphRAG failed"))]:
+        seen = []
+
+        def boom(text):
+            raise error
+
+        c = FakeClient([msg((G, {"question": "valid"}))])
+        try:
+            run(c, {G: boom if where == "tool" else seen.append}, use_patients=False, use_guidelines=True,
+                validate_guideline_question=boom if where == "validator" else None,
+                on_diagnostic=lambda e, o: seen.append(deepcopy(e)))
+        except BaseException as exc:
+            assert exc is error and len(c.requests) == 1
+            if not isinstance(error, KeyboardInterrupt):
+                assert seen[-1]["action"] == "exit"
+                assert seen[-1]["substage"] == ("tool_execution" if where == "tool" else "query_validation")
+        else:
+            raise AssertionError("Infrastructure failure was retried or swallowed")
+
+
+def test_sdk_question_correction_has_valid_tool_feedback_and_no_speculative_retrieval():
+    requests, executed, responses = [], [], []
+    question = "For cough and O2 98%, which investigations?"
+
+    def validate(text):
+        if text != question:
+            raise ValueError("Use recorded findings and values in a self-contained question.")
+
+    def handle(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        assert body["parallel_tool_calls"] is False
+        if len(requests) == 1:
+            name, args = G, {"question": "bad"}
+        elif len(requests) == 2:
+            assert executed == []
+            assert body["tool_choice"]["function"]["name"] == G
+            assert body["messages"][-1]["tool_call_id"] == "call-1"
+            assert "self-contained" in body["messages"][-1]["content"]
+            assert "O2 98%" in body["messages"][1]["content"]
+            name, args = G, {"question": question}
+        else:
+            assert len(requests) == 3 and executed == [question]
+            assert body["messages"][-1] == {"role": "tool", "tool_call_id": "call-2", "content": "[G1] full answer"}
+            name, args = F, {"guideline_refs": ["G1"]}
+        return httpx.Response(200, json={"id": f"response-{len(requests)}", "object": "chat.completion",
+            "created": 0, "model": "gpt-4o-mini", "choices": [{"index": 0, "finish_reason": "tool_calls",
+            "message": {"role": "assistant", "content": None, "tool_calls": [{
+                "id": f"call-{len(requests)}", "type": "function", "function": {
+                    "name": name, "arguments": json.dumps(args)}}]}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}})
+
+    with OpenAI(api_key="offline", base_url="https://offline.invalid/v1", max_retries=0,
+                http_client=httpx.Client(transport=httpx.MockTransport(handle))) as c:
+        out = run(c, {G: lambda q: executed.append(q) or "[G1] full answer"},
+                  use_patients=False, use_guidelines=True, max_searches=1,
+                  validate_guideline_question=validate, on_response=lambda r: responses.append(r.id))
+    assert out["searches"] == 1 and len(out["usage"]) == 3
+    assert responses == ["response-1", "response-2", "response-3"]
+
+
 if __name__ == "__main__":
     tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_")]
     for name, fn in tests:
