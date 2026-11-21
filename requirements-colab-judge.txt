@@ -1,0 +1,5 @@
+# Plan judge v2 on a Colab GPU runtime only. Do not install into the main pipeline
+# environment: requirements.txt pins transformers 4.42, which predates Gemma 3 and Qwen3.
+# vLLM brings compatible torch, transformers, and huggingface_hub versions.
+# Not yet exercised on Colab; record any adjustment in med_copilot/docs/plan_judging_v2.md.
+vllm==0.10.1.1
