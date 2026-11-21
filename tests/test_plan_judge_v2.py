@@ -888,33 +888,122 @@ class PilotTests(unittest.TestCase):
             by_prompt[message["content"]] = json.dumps({"reference_items": items, "harmful_actions": harmful})
         return FakeBackend(lambda messages, schema: by_prompt[messages[0]["content"]])
 
-    def test_perfect_judge_scores_perfectly_and_draft_is_refused(self):
-        cases = validate_models.load_cases(PILOT_CASES)
+    def validate_parser(self):
+        import argparse
+        parser = argparse.ArgumentParser()
+        validate_models.build_parsers(parser.add_subparsers(dest="command"))
+        return parser
+
+    def test_perfect_judge_scores_perfectly_on_uncontested_cases(self):
+        cases, disputed = validate_models.split_disputed(validate_models.load_cases(PILOT_CASES))
+        self.assertEqual([c["case_id"] for c in disputed], ["less-chf"])
         outcomes, timing = validate_models.evaluate(cases, self.gold_backend(cases), batch_size=10)
         metrics = validate_models.metrics(cases, outcomes)
+        self.assertEqual(metrics["cases"], 47)
         self.assertEqual(metrics["valid_json_rate"], 1.0)
         self.assertEqual(metrics["item_quadratic_kappa"], 1.0)
         self.assertEqual(metrics["coverage_mae"], 0.0)
         self.assertEqual(metrics["harmful_precision"], 1.0)
+        self.assertEqual((metrics["harmful_false_positives"], metrics["harmful_false_positive_cases"]), (0, 0))
         self.assertGreater(metrics["separation_correct_minus_worst_wrong"], 0.5)
+
+    def test_pilot_labels_are_preliminary_and_case_9_is_disputed_unchanged(self):
+        cases = {c["case_id"]: c for c in validate_models.load_cases(PILOT_CASES)}
+        statuses = {c["review"]["status"] for cid, c in cases.items() if cid != "less-chf"}
+        self.assertEqual(statuses, {"preliminary"})
+        chf = cases["less-chf"]
+        self.assertEqual(chf["review"]["status"], "disputed")
+        self.assertEqual(chf["gold"], {"matches": ["partial", "none"], "harmful": []})
+        self.assertIn("stress ecg", chf["review"]["dispute"]["position"].lower())
+
+    def test_validate_excludes_disputed_cases_and_marks_report_preliminary(self):
+        all_cases = validate_models.load_cases(PILOT_CASES)
+        seen = []
+        def factory(name, model, **kw):
+            backend = self.gold_backend(all_cases)
+            original = backend.generate
+            def generate(requests):
+                seen.extend(r.messages[0]["content"] for r in requests)
+                return original(requests)
+            backend.generate = generate
+            return backend
         with tempfile.TemporaryDirectory() as directory:
-            import argparse
-            parser = argparse.ArgumentParser()
-            validate_models.build_parsers(parser.add_subparsers(dest="command"))
+            parser = self.validate_parser()
             args = parser.parse_args(["validate", "--cases", str(PILOT_CASES), "--model", "fake/judge",
                                       "--out-dir", directory])
-            factory = lambda name, model, **kw: self.gold_backend(cases)  # noqa: E731
             logs = []
-            self.assertEqual(validate_models.validate(args, backend_factory=factory, log=logs.append), 1)
-            args.allow_draft = True
             self.assertEqual(validate_models.validate(args, backend_factory=factory, log=logs.append), 0)
             report = json.loads((Path(directory) / "fake_judge.json").read_text())
-            self.assertEqual(report["labels_status"], "draft")
+            self.assertEqual(report["labels_status"], "preliminary")
+            self.assertIn("not independently clinically validated", report["labels_note"])
+            self.assertEqual([c["case_id"] for c in report["excluded_cases"]], ["less-chf"])
+            self.assertEqual(report["metrics"]["cases"], 47)
+            self.assertNotIn("less-chf", [o["case_id"] for o in report["outcomes"]])
+            self.assertEqual(len(seen), 47)
             self.assertIn("pilot", report["pilot_note"].lower())
             compare_args = parser.parse_args(["compare", "--reports", directory])
             self.assertEqual(validate_models.compare(compare_args, log=logs.append), 0)
-            self.assertTrue((Path(directory) / "comparison.csv").exists())
+            rows = list(csv.DictReader((Path(directory) / "comparison.csv").open()))
+            self.assertEqual((rows[0]["labels_status"], rows[0]["excluded_cases"]), ("preliminary", "less-chf"))
+            self.assertEqual(rows[0]["invalid_responses"], "0")
 
+    def write_cases(self, directory, edit):
+        lines = []
+        for line in Path(PILOT_CASES).read_text(encoding="utf-8").splitlines():
+            case = json.loads(line)
+            edit(case)
+            lines.append(json.dumps(case))
+        path = Path(directory) / "cases.jsonl"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+
+    def test_draft_labels_are_refused_without_allow_draft(self):
+        def to_draft(case):
+            if case["case_id"] == "exact-strep":
+                case["review"]["status"] = "draft"
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_cases(directory, to_draft)
+            cases = validate_models.load_cases(path)
+            factory = lambda name, model, **kw: self.gold_backend(cases)  # noqa: E731
+            args = self.validate_parser().parse_args(["validate", "--cases", str(path), "--model", "fake/judge",
+                                                      "--out-dir", directory])
+            self.assertEqual(validate_models.validate(args, backend_factory=factory, log=lambda *_: None), 1)
+            self.assertFalse((Path(directory) / "fake_judge.json").exists())
+            args.allow_draft = True
+            self.assertEqual(validate_models.validate(args, backend_factory=factory, log=lambda *_: None), 0)
+            report = json.loads((Path(directory) / "fake_judge.json").read_text())
+            self.assertEqual(report["labels_status"], "draft")
+
+    def test_review_status_rules(self):
+        status = lambda *names: validate_models.review_status([{"review": {"status": n}} for n in names])  # noqa: E731
+        self.assertEqual(status("reviewed", "spot_checked", "disputed"), "reviewed")
+        self.assertEqual(status("preliminary", "reviewed", "disputed"), "preliminary")
+        self.assertEqual(status("preliminary", "draft"), "draft")
+
+    def test_disputed_case_needs_a_dispute_and_status_must_be_known(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_cases(directory, lambda c: c["review"].pop("dispute", None))
+            with self.assertRaisesRegex(ValueError, "review.dispute"):
+                validate_models.load_cases(path)
+            path = self.write_cases(directory, lambda c: c["review"].update(status="approved"))
+            with self.assertRaisesRegex(ValueError, "unknown review.status"):
+                validate_models.load_cases(path)
+
+    def test_harmful_false_positives_are_counted(self):
+        cases = [c for c in validate_models.load_cases(PILOT_CASES) if c["case_id"] in ("exact-strep", "harmful-htn")]
+        def reply(messages, schema):
+            case = next(c for c in cases if c["condition"] in messages[0]["content"])
+            items = [{"ref": n, "match": m, "generated": [] if m == "none" else [1]}
+                     for n, m in enumerate(case["gold"]["matches"], 1)]
+            harmful = [{"generated": 1, "why": "flag"}]  # flags item 1 in both cases
+            return json.dumps({"reference_items": items, "harmful_actions": harmful})
+        outcomes, _ = validate_models.evaluate(cases, FakeBackend(reply))
+        metrics = validate_models.metrics(cases, outcomes)
+        gold_harmful = set(next(c for c in cases if c["case_id"] == "harmful-htn")["gold"]["harmful"])
+        expected_items = 1 + (1 not in gold_harmful)
+        self.assertEqual(metrics["harmful_false_positives"], expected_items)
+        self.assertEqual(metrics["harmful_false_positive_cases"], 1)
+        self.assertEqual(metrics["harmful_false_positive_case_rate"], 1.0)
 
 if __name__ == "__main__":
     unittest.main()

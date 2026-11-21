@@ -231,15 +231,20 @@ Each report records:
 - **Agreement with the gold labels:** item exact agreement, quadratic-weighted kappa, and
   coverage mean absolute error.
 - **Separation:** mean coverage by category, and the margin between correct and wrong categories.
-- **Harmful-item accuracy:** precision and recall, and the false-positive rate on cases with
-  no harmful items.
+- **Harmful-item accuracy:** precision and recall, false-positive items (flags on items
+  the gold labels do not mark harmful), and the number and rate of cases with no gold harmful
+  items that were flagged anyway.
+- **Invalid responses and request errors**, and the `excluded_cases` (disputed) that were left out.
 - **Bias:** coverage bias by generator family. MedGemma shares the Gemma 3 base with the
   `gemma3_4b` generator, so watch for self-preference.
 - **Runtime:** throughput, load time and GPU.
 
 The pilot is a preliminary model-selection step on about 48 cases, not definitive
-validation. Labels must be reviewed before use: `validate` refuses draft labels unless
-`--allow-draft` is given, and marks such reports `draft`.
+validation. `validate` refuses `draft` labels unless `--allow-draft` is given, and marks
+such reports `draft`. It accepts `preliminary` labels and marks the report `preliminary`.
+It does not run `disputed` cases and leaves them out of every statistic. Currently 47
+cases are preliminary and `less-chf` is disputed; see the
+[pilot README](../../experiments/validation/README.md).
 
 ## Tests
 

@@ -8,9 +8,13 @@ Case file: JSONL, one object per case:
   case_id, category, condition, subjective, objective, reference_actions,
   generated_actions, source {kind, patient_id, generator_model, variant, run},
   gold {matches: ["full"|"partial"|"none" per reference action], harmful: [generated numbers]},
-  review {status: "draft"|"reviewed"|"spot_checked", reviewer, notes}
+  review {status: "draft"|"preliminary"|"reviewed"|"spot_checked"|"disputed", reviewer, notes,
+          dispute (required when disputed)}
 Gold labels follow protocol 2's rubric. Unreviewed (draft) labels are refused
-unless --allow-draft is given, and such reports are marked as draft.
+unless --allow-draft is given, and such reports are marked as draft. Preliminary
+labels are accepted and the report is marked preliminary. Disputed cases keep
+their gold labels but are not run and are left out of every agreement statistic;
+the report lists them under excluded_cases.
 """
 
 import argparse
@@ -34,6 +38,13 @@ CATEGORIES = ("exact", "valid_substitute", "more_specific", "less_specific_or_st
 CORRECT = ("exact", "valid_substitute", "more_specific")
 WRONG = ("off_target", "placeholder")
 REVIEWED = ("reviewed", "spot_checked")
+PRELIMINARY = "preliminary"
+DISPUTED = "disputed"
+STATUSES = ("draft", PRELIMINARY, *REVIEWED, DISPUTED)
+LABELS_NOTES = {
+    "draft": "DRAFT labels: not approved; for a pipeline check only.",
+    PRELIMINARY: "PRELIMINARY labels: approved for preliminary pilot use, not independently clinically validated.",
+}
 LEVEL = {"none": 0, "partial": 1, "full": 2}
 
 
@@ -61,13 +72,29 @@ def load_cases(path):
                 raise ValueError(f"{where}: gold.matches needs one full/partial/none per reference action")
             if any(type(h) is not int or not 1 <= h <= m for h in gold.get("harmful", [])):
                 raise ValueError(f"{where}: gold.harmful must list generated item numbers")
+            status = case["review"].get("status")
+            if status not in STATUSES:
+                raise ValueError(f"{where}: unknown review.status {status!r}")
+            if status == DISPUTED and not case["review"].get("dispute"):
+                raise ValueError(f"{where}: a disputed case needs review.dispute")
             cases.append(case)
     return cases
 
 
+def split_disputed(cases):
+    """(cases to evaluate, disputed cases). Disputed cases are excluded from every statistic."""
+    return ([c for c in cases if c["review"].get("status") != DISPUTED],
+            [c for c in cases if c["review"].get("status") == DISPUTED])
+
+
 def review_status(cases):
-    statuses = {case["review"].get("status") for case in cases}
-    return "reviewed" if statuses <= set(REVIEWED) else "draft"
+    """Status of the cases that are evaluated (disputed cases are excluded before this)."""
+    statuses = {case["review"].get("status") for case in cases if case["review"].get("status") != DISPUTED}
+    if statuses <= set(REVIEWED):
+        return "reviewed"
+    if statuses <= {PRELIMINARY, *REVIEWED}:
+        return PRELIMINARY
+    return "draft"
 
 
 def quadratic_kappa(pairs, levels=3):
@@ -104,7 +131,7 @@ def metrics(cases, outcomes):
     category_means = {name: _mean(values) for name, values in sorted(by_category.items())}
     correct = _mean([v for name in CORRECT for v in by_category.get(name, [])])
     wrong = [category_means[name] for name in WRONG if name in category_means]
-    flagged = gold_flags = true_flags = 0
+    flagged = gold_flags = true_flags = false_flags = 0
     clean_cases = clean_flagged = 0
     for case, out in valid:
         predicted = {h["generated"] for h in out["parsed"]["harmful_actions"]}
@@ -112,6 +139,7 @@ def metrics(cases, outcomes):
         flagged += len(predicted)
         gold_flags += len(gold)
         true_flags += len(predicted & gold)
+        false_flags += len(predicted - gold)
         if not gold:
             clean_cases += 1
             clean_flagged += bool(predicted)
@@ -131,6 +159,8 @@ def metrics(cases, outcomes):
         "separation_correct_minus_worst_wrong": (correct - max(wrong)) if correct is not None and wrong else None,
         "harmful_precision": true_flags / flagged if flagged else None,
         "harmful_recall": true_flags / gold_flags if gold_flags else None,
+        "harmful_false_positives": false_flags,
+        "harmful_false_positive_cases": clean_flagged,
         "harmful_false_positive_case_rate": clean_flagged / clean_cases if clean_cases else None,
         "coverage_bias_by_generator_family": {name: _mean(values) for name, values in sorted(bias.items())},
     }
@@ -187,9 +217,9 @@ def _slug(model_id):
 
 
 def validate(args, *, backend_factory=None, log=print):
-    cases = load_cases(args.cases)
+    cases, disputed = split_disputed(load_cases(args.cases))
     status = review_status(cases)
-    if status != "reviewed" and not args.allow_draft:
+    if status == "draft" and not args.allow_draft:
         log("Cases still contain draft labels. Review them first, or pass --allow-draft "
             "(the report will be marked draft).")
         return 1
@@ -201,22 +231,26 @@ def validate(args, *, backend_factory=None, log=print):
     backend = (backend_factory or build_backend)(args.backend, args.model, **options)
     outcomes, timing = evaluate(cases, backend, batch_size=args.batch_size)
     report = {"kind": "plan_judge_v2_pilot", "pilot_note": "Preliminary model selection on a small pilot set; "
-              "not definitive validation.", "labels_status": status, "created_at": utc_now(),
+              "not definitive validation.", "labels_status": status, "labels_note": LABELS_NOTES.get(status), "created_at": utc_now(),
               "protocol": protocol.protocol_identity(),
               "cases_file": {"path": str(args.cases), "sha256": sha256_file(args.cases)},
+              "excluded_cases": [{"case_id": c["case_id"], "status": DISPUTED, "dispute": c["review"]["dispute"]}
+                                 for c in disputed],
               "judge": backend.identity(), "runtime": backend.runtime(), "timing": timing,
               "metrics": metrics(cases, outcomes), "outcomes": outcomes}
     args.out_dir.mkdir(parents=True, exist_ok=True)
     path = args.out_dir / f"{_slug(args.model)}.json"
     atomic_write_json(path, report)
-    log(json.dumps({"model": args.model, "labels_status": status, **report["metrics"], **timing}, indent=2))
+    log(json.dumps({"model": args.model, "labels_status": status,
+                    "excluded_cases": [c["case_id"] for c in disputed], **report["metrics"], **timing}, indent=2))
     log(f"Report: {path}")
     return 0
 
 
 SUMMARY_COLUMNS = ["model", "revision", "labels_status", "cases", "valid_json_rate", "item_exact_agreement",
                    "item_quadratic_kappa", "coverage_mae", "separation_correct_minus_worst_wrong",
-                   "harmful_precision", "harmful_recall", "harmful_false_positive_case_rate",
+                   "harmful_precision", "harmful_recall", "harmful_false_positives", "harmful_false_positive_cases",
+                   "harmful_false_positive_case_rate", "invalid_responses", "request_errors", "excluded_cases",
                    "plans_per_second", "load_seconds", "gpu"]
 
 
@@ -236,6 +270,7 @@ def compare(args, *, log=print):
         gpu = (report.get("runtime") or {}).get("gpu") or {}
         rows.append({"model": report["judge"]["model_id"], "revision": report["judge"]["revision_resolved"],
                      "labels_status": report["labels_status"], **{k: m.get(k) for k in SUMMARY_COLUMNS if k in m},
+                     "excluded_cases": ";".join(c["case_id"] for c in report.get("excluded_cases", [])),
                      "plans_per_second": t.get("plans_per_second"), "load_seconds": t.get("load_seconds"),
                      "gpu": gpu.get("name")})
     buffer = io.StringIO()
