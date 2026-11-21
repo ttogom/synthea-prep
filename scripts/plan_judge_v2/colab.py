@@ -11,7 +11,7 @@ import json
 JUDGE_KEYS = {"RESULTS_PATH", "PATIENTS_PATH", "LABELS_PATH", "VARIANTS", "GENERATOR_MODELS", "OUTPUT_DIR",
               "RUN_NAME", "BACKEND", "JUDGE_MODEL", "JUDGE_REVISION", "DTYPE", "MAX_MODEL_LEN",
               "GPU_MEMORY_UTILIZATION", "CHAT_TEMPLATE_KWARGS", "ENGINE_ARGS", "BATCH_SIZE", "MAX_ATTEMPTS",
-              "LIMIT", "WRITE_CSV", "OWNER", "TAKEOVER_STALE", "DRY_RUN"}
+              "LIMIT", "SAMPLE", "WRITE_CSV", "OWNER", "TAKEOVER_STALE", "DRY_RUN", "COUNT_TOKENS"}
 
 
 def _engine_args(engine_args):
@@ -42,11 +42,15 @@ def judge_argv(config):
         argv += ["--generator-models", *config["GENERATOR_MODELS"]]
     if config.get("LIMIT") is not None:
         argv += ["--limit", str(config["LIMIT"])]
+    if config.get("SAMPLE") is not None:
+        argv += ["--sample", str(config["SAMPLE"])]
     for pair in _engine_args(config.get("ENGINE_ARGS")):
         argv += ["--engine-arg", pair]
     for key, flag in (("WRITE_CSV", "--csv"), ("TAKEOVER_STALE", "--takeover-stale"), ("DRY_RUN", "--dry-run")):
         if config.get(key):
             argv.append(flag)
+    if config.get("DRY_RUN") and config.get("COUNT_TOKENS"):  # token counting is a dry-run check only
+        argv.append("--count-tokens")
     return argv
 
 

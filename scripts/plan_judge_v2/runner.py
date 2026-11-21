@@ -7,6 +7,7 @@ every batch, so an interrupted run resumes where it stopped.
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -14,7 +15,9 @@ import sys
 import time
 
 from scripts.plan_judge_v2 import protocol
-from scripts.plan_judge_v2.backends import Request, build_backend, parse_engine_args, redact
+from scripts.plan_judge_v2.backends import (
+    Request, build_backend, chat_token_ids, load_tokenizer, parse_engine_args, redact,
+)
 from scripts.plan_judge_v2.inputs import describe_input, file_signature, load_by_id, scan_results, sha256_file
 from scripts.plan_judge_v2.store import (
     CSV_FILE, MANIFEST, MANIFEST_VERSION, ROW_VERSION, JudgmentStore, Lease, LeaseHeld, LeaseLost,
@@ -51,6 +54,7 @@ def _row(manifest, writer_id, item, status, reason, **fields):
            "reasons": list(item.reasons), "source": item.source, "attempt": 0,
            "prompt_sha256": None, "raw_response": None, "finish_reason": None, "parsed": None,
            "credits": None, "coverage": None, "harmful_count": None, "penalized": None,
+           "prompt_tokens": None, "output_tokens": None,
            "error": None, "judged_at": utc_now()}
     row.update(fields)
     return row
@@ -66,7 +70,8 @@ def _no_call_row(manifest, writer_id, item):
 
 def _call_row(manifest, writer_id, item, messages, result, attempt):
     fields = {"attempt": attempt, "prompt_sha256": protocol.messages_sha256(messages),
-              "raw_response": result.text, "finish_reason": result.finish_reason}
+              "raw_response": result.text, "finish_reason": result.finish_reason,
+              "prompt_tokens": result.prompt_tokens, "output_tokens": result.output_tokens}
     if result.error is not None:
         return _row(manifest, writer_id, item, "error", "request_failed", error=result.error, **fields)
     try:
@@ -132,6 +137,48 @@ def export_csv(directory, manifest, rows):
     atomic_write_text(Path(directory) / CSV_FILE, buffer.getvalue())
 
 
+def token_summary(values):
+    """count/mean/p50/p95/max of the known values (None entries are skipped)."""
+    values = sorted(v for v in values if v is not None)
+    if not values:
+        return None
+    pick = lambda q: values[min(len(values) - 1, int(round(q * (len(values) - 1))))]  # noqa: E731
+    return {"count": len(values), "mean": round(sum(values) / len(values), 1), "p50": pick(0.5),
+            "p95": pick(0.95), "max": values[-1]}
+
+
+def _timing(session, rows_this_session, durations):
+    """Separate model load, first (warm-up) batch, and steady-state generation.
+
+    durations are the unrounded generate() times, one per entry in session["batches"].
+    """
+    batches = session["batches"]
+    generation = sum(durations)
+    steady = batches[1:]
+    steady_seconds = sum(durations[1:])
+    output_tokens = sum(b["output_tokens"] or 0 for b in batches)
+    finish = {}
+    for row in rows_this_session:
+        finish[row["finish_reason"]] = finish.get(row["finish_reason"], 0) + 1
+    return {
+        "model_load_seconds": session.get("model_load_seconds"),
+        "generation_seconds": round(generation, 3),
+        "generation_plans_per_second": round(session["calls"] / generation, 4) if generation else None,
+        "first_batch_seconds": batches[0]["seconds"] if batches else None,
+        "steady_state_plans_per_second": (round(sum(b["plans"] for b in steady) / steady_seconds, 4)
+                                          if steady_seconds else None),
+        "output_tokens_per_second": round(output_tokens / generation, 1) if generation else None,
+        "wall_plans_per_second_including_load": (round(session["calls"] / session["elapsed_seconds"], 4)
+                                                 if session.get("elapsed_seconds") else None),
+        "prompt_tokens": token_summary(r["prompt_tokens"] for r in rows_this_session),
+        "output_tokens": token_summary(r["output_tokens"] for r in rows_this_session),
+        "output_tokens_at_limit": sum(1 for r in rows_this_session
+                                      if r["output_tokens"] is not None
+                                      and r["output_tokens"] >= protocol.DECODING["max_new_tokens"]),
+        "finish_reasons": finish,
+    }
+
+
 class _LazyBackend:
     """Load model weights the first time a variant actually needs a call."""
 
@@ -147,9 +194,14 @@ class _LazyBackend:
         return self.backend
 
 
+def sample_order(item, seed):
+    """Stable pseudo-random rank of a Plan; the same seed always selects the same subset."""
+    return hashlib.sha256(f"{seed}\0{item.patient_id}\0{item.generator_model}".encode()).hexdigest()
+
+
 def judge_variant(variant, items, patients, *, inputs, selection, backend, lazy, out_root, writer_id,
                   owner=None, batch_size=32, max_attempts=3, limit=None, write_csv=False,
-                  takeover_stale=False, lease_options=None, log=print):
+                  takeover_stale=False, lease_options=None, log=print, sample=None, sample_seed="benchmark"):
     directory = Path(out_root) / variant
     directory.mkdir(parents=True, exist_ok=True)
     proposed = {"manifest_version": MANIFEST_VERSION, "protocol": protocol.protocol_identity(),
@@ -163,8 +215,10 @@ def judge_variant(variant, items, patients, *, inputs, selection, backend, lazy,
         final, attempts, _ = summarize(rows, max_attempts)
         session = {"writer_id": writer_id, "owner": owner, "started_at": utc_now(), "finished_at": None,
                    "status": "running", "batch_size": batch_size, "max_attempts": max_attempts, "limit": limit,
+                   "sample": None if sample is None else {"size": sample, "seed": sample_seed},
                    "repaired_tail_bytes": store.repaired_bytes, "calls": 0, "elapsed_seconds": None,
-                   "runtime": None, "counts": None}
+                   "runtime": None, "counts": None, "batches": [], "timing": None}
+        called, durations = [], []
         manifest["sessions"].append(session)
         atomic_write_json(directory / MANIFEST, manifest)
         started = time.monotonic()
@@ -174,9 +228,15 @@ def judge_variant(variant, items, patients, *, inputs, selection, backend, lazy,
             lease.verify()
             store.append(no_call)
             rows.extend(no_call)
+            if sample is not None:
+                # A fixed pseudo-random subset of all pending Plans (finished ones keep their place, so a
+                # resumed benchmark completes the same subset instead of drawing new Plans).
+                chosen = {item.key for item in sorted((i for i in items if i.status == "pending"),
+                                                       key=lambda i: sample_order(i, sample_seed))[:sample]}
             pending = [item for item in sorted(items, key=lambda i: i.key)
                        if item.status == "pending" and item.key not in final
-                       and attempts.get(item.key, 0) < max_attempts]
+                       and attempts.get(item.key, 0) < max_attempts
+                       and (sample is None or item.key in chosen)]
             if limit is not None:
                 pending = pending[:limit]
             work = [(item, _messages(item, patients)) for item in pending]
@@ -185,27 +245,40 @@ def judge_variant(variant, items, patients, *, inputs, selection, backend, lazy,
             log(f"[{variant}] {len(items)} rank-1 Plans: {len(final)} already final, "
                 f"{len(no_call)} recorded without a call, {len(work)} to judge")
             if work:
+                was_loaded = lazy.loaded
                 model = lazy.get()
                 session["runtime"] = model.runtime()
-                if lazy.load_seconds is not None:
-                    session["model_load_seconds"] = lazy.load_seconds
+                if not was_loaded and lazy.load_seconds is not None:
+                    session["model_load_seconds"] = round(lazy.load_seconds, 3)
+                    log(f"[{variant}] model ready in {lazy.load_seconds:.1f}s (download, weight load, engine "
+                        "profiling and CUDA graph capture; excluded from generation throughput)")
             for start in range(0, len(work), batch_size):
                 chunk = work[start:start + batch_size]
                 requests = [Request(messages, protocol.response_schema(len(item.reference_actions),
                                                                        len(item.generated_actions)))
                             for item, messages in chunk]
+                tick = time.monotonic()
                 results = model.generate(requests)
+                seconds = max(time.monotonic() - tick, 1e-9)
                 batch = [_call_row(manifest, writer_id, item, messages, result, attempts.get(item.key, 0) + 1)
                          for (item, messages), result in zip(chunk, results)]
                 lease.verify()  # Never append after another writer took the variant over.
                 store.append(batch)
                 rows.extend(batch)
+                called.extend(batch)
+                durations.append(seconds)
                 session["calls"] += len(batch)
+                output_tokens = sum(r["output_tokens"] or 0 for r in batch)
+                session["batches"].append({
+                    "plans": len(batch), "seconds": round(seconds, 3),
+                    "prompt_tokens": sum(r["prompt_tokens"] or 0 for r in batch) or None,
+                    "output_tokens": output_tokens or None})
                 done = start + len(chunk)
-                rate = done / max(time.monotonic() - started, 1e-9)
-                log(f"[{variant}] judged {done}/{len(work)} ({rate:.2f} Plans/s); "
-                    f"invalid {sum(r['status'] == 'invalid_response' for r in batch)}, "
-                    f"errors {sum(r['status'] == 'error' for r in batch)} in this batch")
+                label = "first batch, includes warm-up" if len(session["batches"]) == 1 else "steady state"
+                log(f"[{variant}] batch {len(session['batches'])} ({label}): {len(batch)} Plans in {seconds:.1f}s "
+                    f"= {len(batch) / seconds:.2f} Plans/s, {output_tokens / seconds:.0f} output tokens/s; "
+                    f"judged {done}/{len(work)}; invalid {sum(r['status'] == 'invalid_response' for r in batch)}, "
+                    f"errors {sum(r['status'] == 'error' for r in batch)}")
             session["status"] = "completed"
         except KeyboardInterrupt:
             session["status"] = "interrupted"
@@ -221,6 +294,15 @@ def judge_variant(variant, items, patients, *, inputs, selection, backend, lazy,
             session["finished_at"] = utc_now()
             session["elapsed_seconds"] = round(time.monotonic() - started, 3)
             session["counts"] = _counts(rows, items, max_attempts)
+            if session["calls"]:
+                session["timing"] = timing = _timing(session, called, durations)
+                rate = lambda value: "n/a" if value is None else f"{value:.3f} Plans/s"  # noqa: E731
+                load = timing["model_load_seconds"]
+                log(f"[{variant}] timing: model load {'n/a (already loaded)' if load is None else f'{load:.1f}s'}; "
+                    f"generation {timing['generation_seconds']:.1f}s for {session['calls']} Plans = "
+                    f"{rate(timing['generation_plans_per_second'])}; steady state after batch 1: "
+                    f"{rate(timing['steady_state_plans_per_second']) if len(session['batches']) > 1 else 'n/a (one batch)'}; "
+                    f"wall {session['elapsed_seconds']:.1f}s including load and I/O")
             if session["status"] != "lease_lost":
                 manifest["counts"] = session["counts"]
                 atomic_write_json(directory / MANIFEST, manifest)
@@ -248,30 +330,59 @@ def build_parser():
     parser.add_argument("--max-model-len", type=int, default=4096)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9, help="vLLM only")
     parser.add_argument("--chat-template-kwargs", default="{}",
-                        help='JSON, e.g. {"enable_thinking": false} for hybrid-reasoning models')
+                        help='JSON passed to the chat template; leave {} for Qwen3-4B-Instruct-2507 (non-thinking only)')
     parser.add_argument("--engine-arg", action="append", default=[], metavar="KEY=JSON",
                         help="Extra vLLM/transformers load argument; part of the judge identity")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--max-attempts", type=int, default=3, help="Attempts per Plan for invalid/error replies")
     parser.add_argument("--limit", type=int, help="Judge at most N pending Plans per variant (smoke tests)")
+    parser.add_argument("--sample", type=int,
+                        help="Benchmark: judge a fixed pseudo-random subset of N pending Plans per variant "
+                             "(representative across conditions, unlike --limit, which takes the first N by id)")
+    parser.add_argument("--sample-seed", default="benchmark", help="Seed for --sample (default: benchmark)")
     parser.add_argument("--csv", action="store_true", help="Also write judgments.csv per variant")
     parser.add_argument("--owner", help="Name shown to teammates if they hit this run's lease")
     parser.add_argument("--takeover-stale", action="store_true",
                         help="Take over a lease whose heartbeat is older than 15 minutes")
     parser.add_argument("--dry-run", action="store_true",
                         help="Validate inputs and report pending work; no model, network, or output writes")
+    parser.add_argument("--count-tokens", action="store_true",
+                        help="With --dry-run and --model: load only the judge tokenizer, report prompt-token "
+                             "counts, and exit 1 if any prompt exceeds --max-model-len minus the output budget")
     parser.add_argument("--skip-final-hash", action="store_true",
                         help="Skip re-hashing results.jsonl at the end (size/mtime are still checked)")
     return parser
 
 
-def run(argv=None, *, backend_factory=None, log=print, lease_options=None):
+def count_prompt_tokens(scan, patients, tokenizer, chat_kwargs, max_model_len, log):
+    """Exact chat-template token counts for every pending prompt; returns how many do not fit."""
+    budget = max_model_len - protocol.DECODING["max_new_tokens"]
+    over = 0
+    for variant, items in scan.items.items():
+        lengths = []
+        for item in items:
+            if item.status == "pending":
+                length = len(chat_token_ids(tokenizer, _messages(item, patients), chat_kwargs))
+                lengths.append(length)
+                if length > budget:
+                    over += 1
+                    log(f"[{variant}] prompt too long: {item.patient_id} / {item.generator_model} has {length} "
+                        f"tokens; budget {budget}")
+        log(f"[{variant}] prompt tokens: {json.dumps(token_summary(lengths))}; budget {budget} "
+            f"(max_model_len {max_model_len} - {protocol.DECODING['max_new_tokens']} output); "
+            f"over budget: {sum(n > budget for n in lengths)}")
+    return over
+
+
+def run(argv=None, *, backend_factory=None, log=print, lease_options=None, tokenizer_factory=None):
     args = build_parser().parse_args(argv)
     for name in ("batch_size", "max_attempts", "max_model_len"):
         if getattr(args, name) < 1:
             raise SystemExit(f"--{name.replace('_', '-')} must be positive")
     if args.limit is not None and args.limit < 0:
         raise SystemExit("--limit must be nonnegative")
+    if args.sample is not None and (args.sample < 1 or args.limit is not None):
+        raise SystemExit("--sample must be positive and cannot be combined with --limit")
     try:
         chat_kwargs = json.loads(args.chat_template_kwargs)
         engine_args = parse_engine_args(args.engine_arg)
@@ -292,7 +403,9 @@ def run(argv=None, *, backend_factory=None, log=print, lease_options=None):
     selection = {"rank": protocol.JUDGED_RANK,
                  "generator_models": sorted(args.generator_models) if args.generator_models else None,
                  "generator_models_expected": sorted(scan.generator_models),
-                 "patients_in_results": scan.patients}
+                 "patients_in_results": scan.patients,
+                 # Part of the output identity: a resume with another sample size or seed is refused.
+                 "sample": None if args.sample is None else {"size": args.sample, "seed": args.sample_seed}}
     out_root = args.out_dir / (args.run_name or default_run_name(args.results, scan.sha256))
     log(f"Protocol {protocol.PROTOCOL_NAME} v{protocol.PROTOCOL_VERSION}; results sha256 {scan.sha256[:12]}; "
         f"variants in file: {', '.join(scan.variants_found)}")
@@ -313,6 +426,20 @@ def run(argv=None, *, backend_factory=None, log=print, lease_options=None):
         example = next((item for items in scan.items.values() for item in items if item.status == "pending"), None)
         if example is not None:
             log("Example prompt:\n" + _messages(example, patients)[0]["content"])
+        if args.count_tokens:
+            if not args.model:
+                log("--count-tokens needs --model (the judge whose tokenizer and chat template are used)")
+                return EXIT_FAILED
+            try:
+                tokenizer = (tokenizer_factory or load_tokenizer)(args.model, args.revision)
+            except Exception as exc:  # noqa: BLE001 - e.g. gated tokenizer without access
+                log(f"Cannot load the {args.model} tokenizer: {type(exc).__name__}: {redact(str(exc))}")
+                return EXIT_FAILED
+            if count_prompt_tokens(scan, patients, tokenizer, chat_kwargs, args.max_model_len, log):
+                log("Some prompts do not fit; raise --max-model-len or shorten inputs before judging.")
+                return EXIT_FAILED
+        elif args.model:
+            log("Prompt tokens not counted; add --count-tokens to check every prompt fits --max-model-len.")
         log(f"Dry run: outputs would go to {out_root}")
         return EXIT_OK
     if not args.model:
@@ -335,6 +462,7 @@ def run(argv=None, *, backend_factory=None, log=print, lease_options=None):
                 variant, items, patients, inputs=inputs, selection=selection, backend=backend, lazy=lazy,
                 out_root=out_root, writer_id=writer_id, owner=args.owner, batch_size=args.batch_size,
                 max_attempts=args.max_attempts, limit=args.limit, write_csv=args.csv,
+                sample=args.sample, sample_seed=args.sample_seed,
                 takeover_stale=args.takeover_stale, lease_options=lease_options, log=log)
             log(f"[{variant}] counts: {json.dumps(counts, sort_keys=True)}")
             if counts["failed_retryable"] or counts["failed_exhausted"] or counts["not_attempted"]:
