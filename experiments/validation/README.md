@@ -9,6 +9,12 @@
 > `partial`. Its gold label is **unchanged**. It is marked `review.status: "disputed"` and
 > `validate` leaves it out of every agreement statistic.
 
+Pilot result, 2026-11-21: Qwen3-4B-Instruct-2507 on the 47 uncontested cases had kappa
+0.867, coverage mean absolute error 0.096, 0 invalid replies, and harmful precision 0.60 and
+recall 0.857. All 4 false positives were off-target care, in 2 cases. See
+[plan_judging_v2.md](../../med_copilot/docs/plan_judging_v2.md#selected-judge-and-pilot-results-2026-11-21).
+The report is marked `preliminary`.
+
 `plan_judge_v2_pilot_cases.jsonl` holds 48 rank-1 cases. They are balanced across 8
 categories and the 6 conditions whose reference Plans can be judged; COPD references are
 record artifacts. The set is for **preliminary model selection only**, a pilot rather than a

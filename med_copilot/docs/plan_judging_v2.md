@@ -246,6 +246,82 @@ It does not run `disputed` cases and leaves them out of every statistic. Current
 cases are preliminary and `less-chf` is disputed; see the
 [pilot README](../../experiments/validation/README.md).
 
+## Selected judge and pilot results (2026-11-21)
+
+**Judge: `Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554`,
+`float16`, `max_model_len` 4,096, batch size 64, at most 3 attempts.** The pinned notebook
+uses these settings for every variant so that all variants are judged identically. MedGemma
+was not compared. Qwen3 passed the preliminary gate, and MedGemma shares the Gemma 3 base
+with the `gemma3_4b` generator, which risks self-preference. Qwen3 shares no base model with
+any generator.
+
+### Quality: 47-case pilot, preliminary labels
+
+Commit `629b8d8`, Colab T4. The labels are project labels approved for preliminary pilot use.
+They are not independently validated by clinicians. The disputed case `less-chf` was excluded.
+
+| Measure | Qwen3 |
+| --- | --- |
+| Invalid replies / request errors | 0 / 0 |
+| Exact item agreement | 0.809 |
+| Quadratic-weighted kappa | 0.867 |
+| Coverage mean absolute error | 0.096 |
+| Separation, correct minus worst wrong category | 0.681 |
+| Harmful precision / recall | 0.60 (6 of 10 flags) / 0.857 (6 of 7) |
+| Harmful false-positive items | 4, in 2 `off_target` cases |
+
+The 4 false positives are:
+
+- **`offtarget-viral` G1, "Antibiotics".** Flagged as contraindicated for viral pharyngitis.
+  The gold label counts it as off-target, not harmful.
+- **`offtarget-htn` G1–G3: oxygen, dexamethasone, and a CBC with inflammatory markers.** These
+  are care for a different condition. The CBC explanation itself says "not harmful per se".
+
+The harmful-action check sometimes confuses off-target or unrecorded care with harmful care.
+
+### Speed: 256-Plan benchmark
+
+Commit `629b8d8`, Colab T4. The sample was `--sample 256 --sample-seed benchmark` on base
+`llm_only`. Its conditions and reference-action counts match production.
+
+| Measure | Value |
+| --- | --- |
+| Model load (download, weights, profiling, CUDA graphs) | 263.9 s |
+| Generation, 256 Plans | 323.9 s; first batch (warm-up) 125.3 s |
+| Batch rates | 0.51 (warm-up), 0.80, 0.99, 1.20 Plans/s |
+| Steady state after batch 1 | 0.967 Plans/s; 50.3 output tokens/s |
+| Prompt tokens | mean 1,158, p95 1,455, max 1,821 |
+| Output tokens | mean 63.7, p95 143, max 222; 0 at the 384 limit; 256 `stop` |
+| Outcome | 255 parsed, 1 `invalid_response`, left as failed/retryable |
+
+Batch rates rise during a run because prompts are sent longest first. A full run therefore
+averages an estimated **0.88 Plans/s**, below the steady-state figure. Every variant has about 9,200
+pending Plans (`agentic_both` has 8,742), so each takes **about 3 hours on a T4** (2.6–3.3 h),
+and two in a row take 5–6 hours. All 7 variants total 64,175 Plans and about 20 GPU-hours.
+Agentic prompts (commit `19131c7`, sha12 `ced879e17502`) were counted with the Qwen tokenizer:
+maximum 2,014 tokens, none over budget.
+
+The invalid reply gave `{"ref": 2, "match": "partial", "generated": []}`. The parser
+correctly rejects a partial match with no citation. At temperature 0 a retry will probably
+repeat it, so expect about 0.4% of Plans to end `failed_exhausted`. Report them as failed;
+do not drop them.
+
+For comparison, protocol 1 judged the 2026-11-12 base run (114,144 Plans, ranks 1–3) with
+Qwen2.5-14B on one Mac. It took at least 13.1 hours of logged judging over 24 sessions, and
+2.6 days from start to finish. On one device protocol 2 is slower per Plan, but it judges only
+rank 1 and can run one variant per person in parallel.
+
+### Reporting rules
+
+- **Coverage is the primary metric.**
+- **Harmful flags and the penalized score are exploratory only.** Report them with the pilot
+  precision and recall.
+- **Do not report a harmful-action rate without manual review** of a sample of flagged items.
+  Most gold harmful items in the pilot are constructed, and real harm is rarer, so precision
+  on real Plans is likely below 0.60.
+- **The rubric and protocol are unchanged.** A fix for false positives belongs in a future
+  protocol version with a fresh validation set, not in tuning on these 47 cases.
+
 ## Tests
 
 ```bash
@@ -258,13 +334,15 @@ failures present at `92b4dfe` were fixed on `main` before this branch was rebase
 
 ## Known limitations
 
-- Protocol 2 has had one 20-Plan GPU smoke test (T4, `vllm==0.34.0`), all acute bacterial
-  sinusitis Plans with one reference action, the easiest case. Throughput is not yet measured
-  on a representative sample. The vLLM adapter handles both the `GuidedDecodingParams` and
-  `StructuredOutputsParams` APIs.
+- **GPU testing so far:** a 20-Plan smoke test and a 256-Plan representative benchmark (T4,
+  `vllm==0.34.0`); see the results above. The vLLM adapter handles both the
+  `GuidedDecodingParams` and `StructuredOutputsParams` APIs.
+- **Quality was checked on 47 preliminary project labels only,** not independently
+  validated clinician labels. The harmful-action check over-flags off-target care; see the
+  reporting rules above.
 - Prompt sizes, counted with the Qwen3-4B-Instruct-2507 tokenizer for all 36,970 pending
   Plans of the four base variants of the 2026-11-12 run: median 1,130 tokens, p99 1,642,
   maximum 2,004. Every prompt fits `max_model_len` 4,096 with the 384-token output budget.
-  Agentic inputs have not been counted; run `--dry-run --count-tokens` on them first.
+  Agentic inputs (all 27,205 pending Plans) peak at 2,014 tokens, also within budget.
 - The transformers backend has no guided decoding, so expect more invalid replies.
 - Rank-1 judging does not assess the plans for rank-2 or rank-3 diagnoses.
