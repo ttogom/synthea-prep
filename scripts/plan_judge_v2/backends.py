@@ -12,6 +12,7 @@ Hugging Face libraries from HF_TOKEN in the environment and never recorded.
 from dataclasses import dataclass
 import json
 import os
+import time
 
 from scripts.plan_judge_v2.protocol import DECODING
 
@@ -27,6 +28,29 @@ class Result:
     text: str | None
     finish_reason: str | None = None
     error: dict | None = None
+    prompt_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+def chat_token_ids(tokenizer, messages, chat_template_kwargs=None):
+    """Token ids of the rendered chat prompt.
+
+    transformers 5 returns a BatchEncoding from apply_chat_template(tokenize=True)
+    (len() == number of keys), while 4.x returns a list; normalise both.
+    """
+    ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=True,
+                                        **(chat_template_kwargs or {}))
+    if hasattr(ids, "keys"):
+        ids = ids["input_ids"]
+    if ids and isinstance(ids[0], list):  # batched form for a single conversation
+        ids = ids[0]
+    return list(ids)
+
+
+def load_tokenizer(model_id, revision=None):
+    """Tokenizer only (no weights), for dry-run prompt-token counts."""
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(model_id, revision=revision)
 
 
 SECRET_ENV = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HUGGINGFACE_HUB_TOKEN")
@@ -57,8 +81,8 @@ class FakeBackend:
 
     name = "fake"
 
-    def __init__(self, responder, *, model_id="fake/judge", revision="fake-revision"):
-        self.responder = responder
+    def __init__(self, responder, *, model_id="fake/judge", revision="fake-revision", load_delay=0.0):
+        self.responder, self.load_delay = responder, load_delay
         self.model_id, self.revision = model_id, revision
         self.batches = []
         self.loaded = False
@@ -72,6 +96,8 @@ class FakeBackend:
         return {"gpu": None, "libraries": {}}
 
     def load(self):
+        if self.load_delay:
+            time.sleep(self.load_delay)  # stands in for weight loading and CUDA graph capture
         self.loaded = True
 
     def generate(self, requests):
@@ -122,9 +148,8 @@ class _HubBackend:
         return None
 
     def _too_long(self, tokenizer, messages):
-        ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=True,
-                                            **self.chat_template_kwargs)
-        return len(ids) + DECODING["max_new_tokens"] > self.max_model_len, len(ids)
+        length = len(chat_token_ids(tokenizer, messages, self.chat_template_kwargs))
+        return length + DECODING["max_new_tokens"] > self.max_model_len, length
 
 
 class VllmBackend(_HubBackend):
@@ -181,7 +206,11 @@ class VllmBackend(_HubBackend):
             else:
                 for index, output in zip(runnable, outputs):
                     completion = output.outputs[0]
-                    results[index] = Result(completion.text, completion.finish_reason)
+                    prompt_ids = getattr(output, "prompt_token_ids", None)
+                    output_ids = getattr(completion, "token_ids", None)
+                    results[index] = Result(completion.text, completion.finish_reason,
+                                            prompt_tokens=len(prompt_ids) if prompt_ids is not None else None,
+                                            output_tokens=len(output_ids) if output_ids is not None else None)
         return results
 
 
@@ -245,10 +274,14 @@ class TransformersBackend(_HubBackend):
         # Chat models may stop on several ids (Gemma: <end_of_turn>); padding follows a stop.
         stops = self.model.generation_config.eos_token_id
         stops = set(stops if isinstance(stops, list) else [stops]) | {self.tokenizer.pad_token_id}
-        for index, tokens in zip(runnable, new_tokens):
-            finished = any(token in stops for token in tokens.tolist())
+        prompt_lengths = batch["attention_mask"].sum(dim=1).tolist()
+        for position, (index, tokens) in enumerate(zip(runnable, new_tokens)):
+            ids = tokens.tolist()
+            stop_at = next((i for i, token in enumerate(ids) if token in stops), None)
             text = self.tokenizer.decode(tokens, skip_special_tokens=True)
-            results[index] = Result(text, "stop" if finished else "length")
+            results[index] = Result(text, "length" if stop_at is None else "stop",
+                                    prompt_tokens=int(prompt_lengths[position]),
+                                    output_tokens=len(ids) if stop_at is None else stop_at + 1)
         return results
 
 

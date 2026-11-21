@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.plan_judge_v2 import colab, protocol, runner, validate_models  # noqa: E402
-from scripts.plan_judge_v2.backends import FakeBackend, Result, VllmBackend, redact  # noqa: E402
+from scripts.plan_judge_v2.backends import FakeBackend, Result, VllmBackend, chat_token_ids, redact  # noqa: E402
 from scripts.plan_judge_v2.inputs import scan_results  # noqa: E402
 from scripts.plan_judge_v2.store import (  # noqa: E402
     LEASE, Lease, LeaseHeld, LeaseLost, OutputConflict, atomic_write_json, open_manifest,
@@ -579,6 +579,167 @@ class ManifestTests(unittest.TestCase):
                 open_manifest(directory, {**proposed, "variant": "w"})
 
 
+class InstrumentationTests(Harness):
+    def run_with(self, *extra, responder=full_reply, load_delay=0.0, tokenizer_factory=None):
+        def factory(name, model, **options):
+            backend = FakeBackend(responder, model_id=model, revision="rev-1", load_delay=load_delay)
+            self.backends.append(backend)
+            return backend
+        return runner.run(self.fx.argv(*extra), backend_factory=factory, log=self.logs.append,
+                          lease_options=FAST_LEASE, tokenizer_factory=tokenizer_factory)
+
+    def test_generation_throughput_excludes_model_load(self):
+        self.assertEqual(self.run_with("--batch-size", "3", load_delay=0.3), runner.EXIT_OK)
+        session = self.fx.manifest()["sessions"][-1]
+        timing = session["timing"]
+        self.assertGreaterEqual(timing["model_load_seconds"], 0.3)
+        self.assertLess(timing["generation_seconds"], 0.3)
+        self.assertGreaterEqual(session["elapsed_seconds"], timing["model_load_seconds"])
+        self.assertEqual([b["plans"] for b in session["batches"]], [3, 1])
+        self.assertEqual(timing["first_batch_seconds"], session["batches"][0]["seconds"])
+        self.assertIsNotNone(timing["steady_state_plans_per_second"])
+        self.assertLess(timing["wall_plans_per_second_including_load"], timing["generation_plans_per_second"])
+        log = "\n".join(self.logs)
+        self.assertIn("model ready in", log)
+        self.assertIn("batch 1 (first batch, includes warm-up)", log)
+        self.assertIn("batch 2 (steady state)", log)
+        self.assertIn("timing: model load", log)
+
+    def test_only_the_session_that_loaded_the_model_reports_load_time(self):
+        def factory(name, model, **options):
+            backend = FakeBackend(full_reply, model_id=model, revision="rev-1", load_delay=0.05)
+            self.backends.append(backend)
+            return backend
+        runner.run(self.fx.argv(variants=("llm_only", "agentic_both")), backend_factory=factory,
+                   log=self.logs.append, lease_options=FAST_LEASE)
+        first = self.fx.manifest("llm_only")["sessions"][-1]["timing"]
+        second = self.fx.manifest("agentic_both")["sessions"][-1]["timing"]
+        self.assertGreaterEqual(first["model_load_seconds"], 0.05)
+        self.assertIsNone(second["model_load_seconds"])  # model was already loaded for llm_only
+        self.assertIsNotNone(second["generation_plans_per_second"])
+        self.assertIn("model load n/a (already loaded)", "\n".join(self.logs))
+
+    def test_rows_and_session_record_token_counts(self):
+        def responder(messages, schema):
+            return Result(full_reply(messages, schema), "stop", prompt_tokens=len(messages[0]["content"]) // 4,
+                          output_tokens=40)
+        self.assertEqual(self.run_with("--csv", responder=responder), runner.EXIT_OK)
+        called = [r for r in self.fx.rows() if r["attempt"] >= 1]
+        self.assertEqual(len(called), 4)
+        self.assertTrue(all(r["output_tokens"] == 40 and r["prompt_tokens"] > 0 for r in called))
+        no_call = [r for r in self.fx.rows() if r["attempt"] == 0]
+        self.assertTrue(all(r["prompt_tokens"] is None and r["output_tokens"] is None for r in no_call))
+        timing = self.fx.manifest()["sessions"][-1]["timing"]
+        self.assertEqual(timing["output_tokens"], {"count": 4, "mean": 40.0, "p50": 40, "p95": 40, "max": 40})
+        self.assertEqual(timing["output_tokens_at_limit"], 0)
+        self.assertEqual(timing["finish_reasons"], {"stop": 4})
+        with open(self.fx.variant_dir() / "judgments.csv", newline="") as handle:
+            self.assertEqual(len(list(csv.DictReader(handle))), 8)
+
+    def test_replies_at_the_output_limit_are_counted(self):
+        def responder(messages, schema):
+            return Result('{"reference_items": [', "length", prompt_tokens=10,
+                          output_tokens=protocol.DECODING["max_new_tokens"])
+        self.run_with("--max-attempts", "1", responder=responder)
+        timing = self.fx.manifest()["sessions"][-1]["timing"]
+        self.assertEqual(timing["output_tokens_at_limit"], 4)
+        self.assertEqual(timing["finish_reasons"], {"length": 4})
+        self.assertTrue(all(r["reason"] == "truncated_response" for r in self.fx.rows() if r["attempt"]))
+
+    def tokenizer(self, *, per_char=1):
+        class Tokenizer:
+            def apply_chat_template(self, messages, **kwargs):
+                ids = list(range(len(messages[0]["content"]) // per_char))
+                return {"input_ids": ids, "attention_mask": [1] * len(ids)}  # transformers 5 shape
+        return lambda model, revision: Tokenizer()
+
+    def test_dry_run_counts_prompt_tokens_without_loading_weights(self):
+        code = self.run_with("--dry-run", "--count-tokens", "--max-model-len", "100000",
+                             tokenizer_factory=self.tokenizer())
+        self.assertEqual(code, runner.EXIT_OK)
+        log = "\n".join(self.logs)
+        self.assertRegex(log, r"\[llm_only\] prompt tokens: \{\"count\": 4, .*\"max\": \d+\}; budget 99616")
+        self.assertIn("over budget: 0", log)
+        self.assertFalse(self.backends[0].loaded if self.backends else False)
+        self.assertFalse(self.fx.out.exists())
+
+    def test_dry_run_token_check_fails_when_a_prompt_does_not_fit(self):
+        code = self.run_with("--dry-run", "--count-tokens", "--max-model-len", "1000",
+                             tokenizer_factory=self.tokenizer())
+        self.assertEqual(code, runner.EXIT_FAILED)
+        self.assertIn("prompt too long: p1", "\n".join(self.logs))
+        self.assertIn("Some prompts do not fit", "\n".join(self.logs))
+
+    def test_count_tokens_needs_a_model(self):
+        argv = [a for a in self.fx.argv("--dry-run", "--count-tokens") if a not in ("--model", "fake/judge")]
+        self.assertEqual(runner.run(argv, log=self.logs.append, tokenizer_factory=self.tokenizer()),
+                         runner.EXIT_FAILED)
+        self.assertIn("--count-tokens needs --model", "\n".join(self.logs))
+
+
+class SampleTests(Harness):
+    def judged(self, variant="llm_only"):
+        return {(r["patient_id"], r["generator_model"]) for r in self.fx.rows(variant) if r["attempt"] >= 1}
+
+    def test_sample_is_a_fixed_subset_and_resume_completes_it(self):
+        self.assertEqual(self.run_judge("--sample", "2", "--max-attempts", "1",
+                                        responder=lambda m, s: "not json"), runner.EXIT_INCOMPLETE)
+        first = self.judged()
+        self.assertEqual(len(first), 2)
+        # Same seed: a resumed run retries exactly the same 2 Plans, never new ones.
+        self.temp2 = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp2.cleanup)
+        other = Fixture(self.temp2.name)
+        self.fx, original = other, self.fx
+        self.run_judge("--sample", "2")
+        self.assertEqual(self.judged(), first)  # same inputs + seed -> same subset in a fresh directory
+        self.fx = original
+        # Exit 2 like --limit: the unsampled Plans are still pending by design.
+        self.assertEqual(self.run_judge("--sample", "2", "--max-attempts", "2"), runner.EXIT_INCOMPLETE)
+        self.assertEqual(self.judged(), first)
+        scored = {(r["patient_id"], r["generator_model"]) for r in self.fx.rows()
+                  if r["status"] == "scored" and r["attempt"] >= 1}
+        self.assertEqual(scored, first)
+        session = self.fx.manifest()["sessions"][-1]
+        self.assertEqual(session["sample"], {"size": 2, "seed": "benchmark"})
+
+    def test_sample_is_part_of_the_output_identity(self):
+        self.assertEqual(self.run_judge("--sample", "2"), runner.EXIT_INCOMPLETE)
+        self.assertEqual(self.fx.manifest()["selection"]["sample"], {"size": 2, "seed": "benchmark"})
+        rows_before = len(self.fx.rows())
+        for extra in (("--sample", "3"), ("--sample", "2", "--sample-seed", "other"), ()):
+            with self.subTest(extra=extra):
+                self.logs.clear()
+                self.assertEqual(self.run_judge(*extra), runner.EXIT_FAILED)
+                log = "\n".join(self.logs)
+                self.assertIn("belongs to a different judging run", log)
+                self.assertIn("selection.sample", log)
+        self.assertEqual(len(self.fx.rows()), rows_before)  # nothing appended by refused runs
+        self.assertEqual(self.run_judge("--sample", "2"), runner.EXIT_INCOMPLETE)  # same config resumes
+
+    def test_unsampled_runs_record_no_sample(self):
+        self.run_judge()
+        self.assertIsNone(self.fx.manifest()["selection"]["sample"])
+
+    def test_sample_differs_from_limit_and_by_seed(self):
+        pending = [(p, m) for p in ("p1", "p2", "p4") for m in ("gen_a", "gen_b")
+                   if (p, m) not in {("p4", "gen_a"), ("p4", "gen_b")}]
+        seen = set()
+        for seed in ("a", "b", "c", "d", "e", "f"):
+            items = [type("I", (), {"patient_id": p, "generator_model": m})() for p, m in pending]
+            seen.add(tuple(sorted((i.patient_id, i.generator_model)
+                                  for i in sorted(items, key=lambda i: runner.sample_order(i, seed))[:2])))
+        self.assertGreater(len(seen), 1)
+
+    def test_sample_and_limit_cannot_be_combined(self):
+        with self.assertRaises(SystemExit):
+            self.run_judge("--sample", "2", "--limit", "2")
+
+    def test_colab_sample_key(self):
+        argv = colab.judge_argv({**ColabTests.CONFIG, "LIMIT": None, "SAMPLE": 256})
+        self.assertEqual(runner.build_parser().parse_args(argv[1:]).sample, 256)
+
+
 class BackendTests(unittest.TestCase):
     def test_redact_removes_tokens(self):
         with patch.dict(os.environ, {"HF_TOKEN": "hf_abcdefgh123"}):
@@ -591,7 +752,9 @@ class BackendTests(unittest.TestCase):
 
         class Output:
             def __init__(self, text):
-                self.outputs = [type("Completion", (), {"text": text, "finish_reason": "stop"})()]
+                self.prompt_token_ids = list(range(12))
+                self.outputs = [type("Completion", (), {"text": text, "finish_reason": "stop",
+                                                        "token_ids": [1, 2, 3]})()]
 
         class Engine:
             def __init__(self):
@@ -605,16 +768,41 @@ class BackendTests(unittest.TestCase):
                 return [Output("{}") for _ in conversations]
 
         backend = VllmBackend("org/model", revision="main", max_model_len=500, resolver=lambda m, r: "abc123",
-                              chat_template_kwargs={"enable_thinking": False})
+                              chat_template_kwargs={"example_flag": True})
         backend.llm = Engine()
         with patch.object(VllmBackend, "sampling_params", staticmethod(lambda schema: schema)):
             from scripts.plan_judge_v2.backends import Request
             results = backend.generate([Request([{"role": "user", "content": "x" * 10}], {}),
                                         Request([{"role": "user", "content": "x" * 400}], {})])
         self.assertEqual(results[0].text, "{}")
+        self.assertEqual((results[0].prompt_tokens, results[0].output_tokens), (12, 3))
         self.assertEqual(results[1].error["type"], "PromptTooLong")
-        self.assertEqual(backend.llm.calls, [(1, 1, {"enable_thinking": False})])
+        self.assertEqual(backend.llm.calls, [(1, 1, {"example_flag": True})])
         self.assertEqual(backend.identity()["revision_resolved"], "abc123")
+
+
+    def test_chat_token_ids_handles_transformers_4_and_5_return_types(self):
+        class Tokenizer:
+            def __init__(self, shape):
+                self.shape = shape
+
+            def apply_chat_template(self, messages, **kwargs):
+                ids = list(range(len(messages[0]["content"])))
+                return {"list": ids, "dict": {"input_ids": ids, "attention_mask": [1] * len(ids)},
+                        "batched": {"input_ids": [ids]}}[self.shape]
+        messages = [{"role": "user", "content": "x" * 400}]
+        for shape in ("list", "dict", "batched"):
+            with self.subTest(shape=shape):
+                self.assertEqual(len(chat_token_ids(Tokenizer(shape), messages)), 400)
+        # The too-long guard must see 400 tokens, not the 2 keys of a transformers 5 BatchEncoding.
+        backend = VllmBackend("org/model", max_model_len=500, resolver=lambda m, r: "abc")
+        self.assertEqual(backend._too_long(Tokenizer("dict"), messages), (True, 400))
+
+    def test_colab_dependency_is_an_exact_pin(self):
+        lines = [line.strip() for line in (ROOT / "requirements-colab-judge.txt").read_text().splitlines()
+                 if line.strip() and not line.startswith("#")]
+        self.assertEqual(len(lines), 1)
+        self.assertRegex(lines[0], r"^vllm==\d+\.\d+\.\d+$")
 
 
 class ColabTests(unittest.TestCase):
@@ -622,7 +810,7 @@ class ColabTests(unittest.TestCase):
               "VARIANTS": ["llm_only", "agentic_both"], "GENERATOR_MODELS": ["gpt_4o_mini"], "OUTPUT_DIR": "/d/out",
               "RUN_NAME": None, "BACKEND": "vllm", "JUDGE_MODEL": "Qwen/Qwen3-4B-Instruct-2507",
               "JUDGE_REVISION": "abc", "DTYPE": "float16", "MAX_MODEL_LEN": 4096, "GPU_MEMORY_UTILIZATION": 0.85,
-              "CHAT_TEMPLATE_KWARGS": {"enable_thinking": False},
+              "CHAT_TEMPLATE_KWARGS": {"example_flag": True},
               "ENGINE_ARGS": {"limit_mm_per_prompt": {"image": 0}}, "BATCH_SIZE": 64, "MAX_ATTEMPTS": 3,
               "LIMIT": 20, "WRITE_CSV": True, "OWNER": "Alan", "TAKEOVER_STALE": False, "DRY_RUN": False}
 
@@ -634,9 +822,15 @@ class ColabTests(unittest.TestCase):
         self.assertEqual(args.generator_models, ["gpt_4o_mini"])
         self.assertEqual((args.model, args.revision, args.dtype, args.limit), ("Qwen/Qwen3-4B-Instruct-2507", "abc",
                                                                                 "float16", 20))
-        self.assertEqual(json.loads(args.chat_template_kwargs), {"enable_thinking": False})
+        self.assertEqual(json.loads(args.chat_template_kwargs), {"example_flag": True})
         self.assertEqual(args.engine_arg, ['limit_mm_per_prompt={"image": 0}'])
         self.assertTrue(args.csv and not args.dry_run and not args.takeover_stale)
+
+    def test_count_tokens_is_passed_only_for_dry_runs(self):
+        dry = colab.judge_argv({**self.CONFIG, "DRY_RUN": True, "COUNT_TOKENS": True})
+        self.assertIn("--count-tokens", dry)
+        self.assertTrue(runner.build_parser().parse_args(dry[1:]).count_tokens)
+        self.assertNotIn("--count-tokens", colab.judge_argv({**self.CONFIG, "COUNT_TOKENS": True}))
 
     def test_unknown_config_keys_are_rejected(self):
         with self.assertRaises(ValueError):

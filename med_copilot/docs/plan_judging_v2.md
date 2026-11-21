@@ -103,6 +103,10 @@ run, up to `--max-attempts`.
 # Validate inputs and print one prompt; no model, network, or output writes
 python judge_plans_v2.py judge --results RUN/results.jsonl --variants llm_only agentic_both \
   --out-dir OUT --dry-run
+# Also count every prompt with the judge tokenizer (downloads the tokenizer only, no weights);
+# exits 1 if any prompt exceeds --max-model-len minus the 384-token output budget
+python judge_plans_v2.py judge --results RUN/results.jsonl --variants all --out-dir OUT \
+  --model Qwen/Qwen3-4B-Instruct-2507 --dry-run --count-tokens
 # Judge on a GPU (Colab: notebooks/plan_judge_v2_colab.ipynb builds this command)
 python judge_plans_v2.py judge --results RUN/results.jsonl --variants all --out-dir OUT \
   --model Qwen/Qwen3-4B-Instruct-2507 --csv --owner "Your name"
@@ -110,6 +114,12 @@ python judge_plans_v2.py --version
 ```
 
 `--results` accepts base or agentic `run_experiments.py` output (schema 4, with `variants`).
+`--limit N` judges the first N pending Plans by patient id, which suits smoke tests but samples
+a single condition. `--sample N` judges a fixed pseudo-random subset of N pending Plans per
+variant (seeded by `--sample-seed`), representative across conditions, for benchmarks; a
+resumed run completes the same subset. The sample size and seed are part of the output identity
+(`selection.sample` in the manifest), so resuming with another sample, or none, is refused; give
+each benchmark its own `--out-dir`. Both options leave the rest pending, so the run exits 2.
 `--patients` and `--labels` default to `experiments/input/test_so.jsonl` and
 `test_labels.jsonl`, the files the runs were generated from.
 
@@ -127,6 +137,10 @@ Exit status:
 
 Open [notebooks/plan_judge_v2_colab.ipynb](../../notebooks/plan_judge_v2_colab.ipynb) on a GPU
 runtime. An L4 or A100 is recommended. A T4 lacks bfloat16, so set `DTYPE = "float16"`.
+Tested on 2026-11-20: T4, Python 3.13.16, `vllm==0.34.0`, `Qwen/Qwen3-4B-Instruct-2507`,
+20/20 Plans judged with guided JSON and 0 invalid replies. `vllm==0.10.1.1` does not install
+on Colab's Python 3.13. Qwen3-4B-Instruct-2507 supports only non-thinking mode, so keep
+`CHAT_TEMPLATE_KWARGS = {}` (do not pass `enable_thinking`).
 
 1. Add a Colab Secret named `HF_TOKEN`. MedGemma is gated: accept its licence on Hugging
    Face with the same account first.
@@ -158,11 +172,21 @@ OUT/<run directory>__<results sha12>/<variant>/
   - Judge: backend, Hugging Face model id, requested revision and resolved commit, dtype,
     `max_model_len`, guided decoding, chat-template and engine arguments.
   - One `sessions` entry per invocation: writer, owner, status, batch size, call count,
-    GPU and library versions, model load time, elapsed time and counts.
+    GPU and library versions, `batches` (Plans, seconds and tokens per `generate` call),
+    elapsed time, counts and `timing`.
+  - `timing` separates startup from throughput: `model_load_seconds` (download, weight load,
+    vLLM profiling and CUDA graph capture; only the session that loaded the model reports
+    it), `generation_seconds` and `generation_plans_per_second` (all `generate` calls),
+    `first_batch_seconds`, `steady_state_plans_per_second` (batches after the first, which
+    carries warm-up), `output_tokens_per_second`, `wall_plans_per_second_including_load`,
+    prompt- and output-token summaries, `output_tokens_at_limit` and `finish_reasons`.
+    The log prints the same split per batch and per variant.
 - **Each row in `judgments.jsonl` holds only the per-Plan data.**
   - Fields: `run_id`, `writer_id`, `patient_id`, `generator_model`, `rank`, `status`, `reason`,
-    `reasons`, `source`, `attempt`, `prompt_sha256`, `raw_response`, `finish_reason`, `parsed`, `credits`,
-    `coverage`, `harmful_count`, `penalized`, `error` and `judged_at`.
+    `reasons`, `source`, `attempt`, `prompt_sha256`, `raw_response`, `finish_reason`,
+    `prompt_tokens`, `output_tokens`, `parsed`, `credits`, `coverage`, `harmful_count`,
+    `penalized`, `error` and `judged_at`. Token counts come from the backend (vLLM's
+    prompt and completion token ids) and are `null` for rows recorded without a call.
   - The first `scored` or `unavailable` row for a key is final. `invalid_response` and
     `error` rows count as attempts.
 - **Results can't mix across runs.** On resume, the saved manifest must match the protocol,
@@ -229,8 +253,13 @@ failures present at `92b4dfe` were fixed on `main` before this branch was rebase
 
 ## Known limitations
 
-- Protocol 2 has not yet been run on a GPU. `requirements-colab-judge.txt` pins
-  `vllm==0.10.1.1`. The vLLM adapter handles both its `GuidedDecodingParams` API and the
-  newer `StructuredOutputsParams` API, but it has only been tested offline against a stub.
+- Protocol 2 has had one 20-Plan GPU smoke test (T4, `vllm==0.34.0`), all acute bacterial
+  sinusitis Plans with one reference action, the easiest case. Throughput is not yet measured
+  on a representative sample. The vLLM adapter handles both the `GuidedDecodingParams` and
+  `StructuredOutputsParams` APIs.
+- Prompt sizes, counted with the Qwen3-4B-Instruct-2507 tokenizer for all 36,970 pending
+  Plans of the four base variants of the 2026-11-12 run: median 1,130 tokens, p99 1,642,
+  maximum 2,004. Every prompt fits `max_model_len` 4,096 with the 384-token output budget.
+  Agentic inputs have not been counted; run `--dry-run --count-tokens` on them first.
 - The transformers backend has no guided decoding, so expect more invalid replies.
 - Rank-1 judging does not assess the plans for rank-2 or rank-3 diagnoses.
