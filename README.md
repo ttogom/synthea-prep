@@ -64,6 +64,20 @@ python judge_treatment_plans.py experiments/output/<run-directory>
 python judge_treatment_plans.py experiments/output/<run-directory> --concurrency 8 --context-length 4096
 ```
 
+### Plan judging protocol 2 (rank 1, one call per Plan, Colab GPU)
+
+New Plan analyses use `judge_plans_v2.py` with a 3–4B Hugging Face judge, normally from
+[notebooks/plan_judge_v2_colab.ipynb](notebooks/plan_judge_v2_colab.ipynb). It reads a base or
+agentic `results.jsonl` without modifying it and writes one resumable output directory per
+variant. The primary score is coverage; harmful actions are reported separately. See
+[med_copilot/docs/plan_judging_v2.md](med_copilot/docs/plan_judging_v2.md). Its offline tests
+run with the standard library only:
+
+```bash
+python tests/test_plan_judge_v2.py
+python judge_plans_v2.py judge --results experiments/output/<run-directory>/results.jsonl --variants all --out-dir <out> --dry-run
+```
+
 `run_experiments.py` is the concurrent runner. It reuses four isolated CPU evidence
 workers, overlaps hosted requests with preparation, and drains each local model's
 whole-cohort queue with four simultaneous requests before switching models.
