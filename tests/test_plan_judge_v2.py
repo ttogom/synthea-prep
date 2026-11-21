@@ -855,8 +855,18 @@ class ColabTests(unittest.TestCase):
         exec(sources[0], namespace)  # noqa: S102 - the config cell is plain assignments
         config_keys = {key for key in colab.JUDGE_KEYS if key != "DRY_RUN"}
         self.assertTrue(config_keys <= set(namespace), config_keys - set(namespace))
-        self.assertIsNone(namespace["JUDGE_MODEL"])
+        # Pinned for the team: a full code commit, the selected judge at a fixed revision, identical settings.
+        self.assertRegex(namespace["REPO_REF"], r"^[0-9a-f]{40}$")
+        self.assertEqual((namespace["JUDGE_MODEL"], namespace["JUDGE_REVISION"], namespace["DTYPE"]),
+                         ("Qwen/Qwen3-4B-Instruct-2507", "cdbee75f17c01a7cc42f958dc650907174af0554", "float16"))
+        self.assertEqual((namespace["MAX_MODEL_LEN"], namespace["BATCH_SIZE"], namespace["MAX_ATTEMPTS"]), (4096, 64, 3))
+        self.assertEqual(namespace["CHAT_TEMPLATE_KWARGS"], {})
+        self.assertIsNone(namespace["LIMIT"])
+        self.assertIsNone(namespace["SAMPLE"])
+        self.assertFalse(namespace["TAKEOVER_STALE"])
+        self.assertEqual(namespace["VARIANTS"], [])  # each person sets their own assigned variant
         self.assertEqual(namespace["MODE"], "dry_run")
+        self.assertIn("Set VARIANTS", "".join(sources))
         self.assertIn('userdata.get("HF_TOKEN")', "".join(sources))
         self.assertNotRegex("".join(sources), r"hf_[A-Za-z0-9]{10,}")
         self.assertTrue(all(cell.get("outputs", []) == [] for cell in notebook["cells"]))
