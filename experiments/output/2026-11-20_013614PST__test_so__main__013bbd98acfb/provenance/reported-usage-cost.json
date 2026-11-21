@@ -1,0 +1,204 @@
+{
+  "observed_at_pst": "2026-11-20T19:44:48-08:00",
+  "prepared_patient_count": 2244,
+  "completed_hosted_output_count": 7000,
+  "usage": {
+    "preparation_gpt": {
+      "responses": 49943,
+      "input_tokens": 203006812,
+      "output_tokens": 7932319,
+      "estimated_usd": 35.2104132
+    },
+    "final_gpt": {
+      "responses": 7000,
+      "input_tokens": 12838045,
+      "output_tokens": 846870,
+      "estimated_usd": 2.43382875
+    },
+    "embedding": {
+      "responses": 12086,
+      "input_tokens": 583670,
+      "estimated_usd": 0.0116734
+    }
+  },
+  "missing_or_malformed_usage": 1,
+  "captured_usage_estimated_usd": 37.65591535,
+  "usd_per_million_tokens": {
+    "gpt_4o_mini_input": 0.15,
+    "gpt_4o_mini_output": 0.6,
+    "text_embedding_3_small_input": 0.02
+  },
+  "measured_usage": {
+    "responses": 69030,
+    "local_cache_hits": 0,
+    "by_model": {
+      "gpt-4o-mini-2024-07-18": {
+        "responses": 56944,
+        "reported_tokens": {
+          "prompt_tokens": 215844857,
+          "completion_tokens": 8779189,
+          "total_tokens": 224624046,
+          "cached_tokens": 55531776
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 1,
+          "completion_tokens": 1,
+          "total_tokens": 1,
+          "cached_tokens": 1
+        }
+      },
+      "text-embedding-3-small": {
+        "responses": 12086,
+        "reported_tokens": {
+          "prompt_tokens": 583670,
+          "completion_tokens": 0,
+          "total_tokens": 583670,
+          "cached_tokens": 0
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 12086,
+          "total_tokens": 0,
+          "cached_tokens": 12086
+        }
+      }
+    },
+    "by_stage": {
+      "keyword_extraction": {
+        "responses": 7706,
+        "reported_tokens": {
+          "prompt_tokens": 1260952,
+          "completion_tokens": 766255,
+          "total_tokens": 2027207,
+          "cached_tokens": 0
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "cached_tokens": 0
+        }
+      },
+      "agent_control": {
+        "responses": 30153,
+        "reported_tokens": {
+          "prompt_tokens": 70037715,
+          "completion_tokens": 1678599,
+          "total_tokens": 71716314,
+          "cached_tokens": 42634496
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "cached_tokens": 0
+        }
+      },
+      "guideline_query_embedding": {
+        "responses": 12086,
+        "reported_tokens": {
+          "prompt_tokens": 583670,
+          "completion_tokens": 0,
+          "total_tokens": 583670,
+          "cached_tokens": 0
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 12086,
+          "total_tokens": 0,
+          "cached_tokens": 12086
+        }
+      },
+      "guideline_evidence": {
+        "responses": 12085,
+        "reported_tokens": {
+          "prompt_tokens": 131708145,
+          "completion_tokens": 5487465,
+          "total_tokens": 137195610,
+          "cached_tokens": 12896256
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 1,
+          "completion_tokens": 1,
+          "total_tokens": 1,
+          "cached_tokens": 1
+        }
+      },
+      "final": {
+        "responses": 7000,
+        "reported_tokens": {
+          "prompt_tokens": 12838045,
+          "completion_tokens": 846870,
+          "total_tokens": 13684915,
+          "cached_tokens": 1024
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "cached_tokens": 0
+        }
+      }
+    },
+    "by_variant": {
+      "agentic_patient_retrieval": {
+        "responses": 15412,
+        "reported_tokens": {
+          "prompt_tokens": 21142575,
+          "completion_tokens": 1286596,
+          "total_tokens": 22429171,
+          "cached_tokens": 7074560
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "cached_tokens": 0
+        }
+      },
+      "agentic_guidelines": {
+        "responses": 32781,
+        "reported_tokens": {
+          "prompt_tokens": 129408992,
+          "completion_tokens": 4805919,
+          "total_tokens": 134214911,
+          "cached_tokens": 28367744
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 1,
+          "completion_tokens": 8767,
+          "total_tokens": 1,
+          "cached_tokens": 8767
+        }
+      },
+      "agentic_both": {
+        "responses": 20837,
+        "reported_tokens": {
+          "prompt_tokens": 65876960,
+          "completion_tokens": 2686674,
+          "total_tokens": 68563634,
+          "cached_tokens": 20089472
+        },
+        "missing_usage_fields": {
+          "prompt_tokens": 0,
+          "completion_tokens": 3320,
+          "total_tokens": 0,
+          "cached_tokens": 3320
+        }
+      }
+    }
+  },
+  "api_usage_file": "provenance/api-usage.jsonl",
+  "price_sources": [
+    "https://developers.openai.com/api/docs/models/gpt-4o-mini",
+    "https://developers.openai.com/api/docs/models/text-embedding-3-small"
+  ],
+  "limitations": [
+    "Reported-token pricing estimate, not provider invoice; uncached rates",
+    "Responses never durably saved cannot be included",
+    "Missing provider usage is reported as unknown, never estimated; SDK retries with no returned usage are unobservable",
+    "Local GraphRAG cache hits are recorded but excluded from new API usage; provider prompt-cache tokens remain included",
+    "Local model usage is excluded from API-credit costs; electricity/hardware costs are not estimated"
+  ],
+  "deduplication": "Canonical preparation captures and final hosted model response captures only; nested variants/results ignored; unique response IDs counted once where available; provider request IDs used when response IDs are absent; ID-less captures counted per stable canonical occurrence; per-variant views can overlap for shared responses and are not additive"
+}
