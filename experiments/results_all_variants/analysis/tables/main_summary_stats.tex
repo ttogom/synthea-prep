@@ -1,0 +1,47 @@
+\begin{table*}[!b]
+\centering
+\small
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllclc@{}}
+\toprule
+\multirow{2}{*}{Generator Model} & \multirow{2}{*}{Configuration} & \multicolumn{2}{c}{Diagnoses} & \multicolumn{2}{c}{Treatment Plans} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+ & & Mean & 95\% CI & Mean & 95\% CI \\
+\midrule
+GPT-4o mini & No retrieval & $0.7583$ & {\scriptsize $[0.75, 0.77]$} & $0.2944$ & {\scriptsize $[0.28, 0.31]$} \\[2pt]
+ & Sim. patient retrieval & $0.8087^{**}$ & {\scriptsize $[0.80, 0.82]$} & $0.3746^{**}$ & {\scriptsize $[0.36, 0.39]$} \\
+ & Guideline retrieval & $0.7491$ & {\scriptsize $[0.74, 0.76]$} & $0.4052^{**}$ & {\scriptsize $[0.39, 0.42]$} \\
+ & Both & $0.7847^{**}$ & {\scriptsize $[0.78, 0.79]$} & $\mathbf{0.4348}^{**}$ & {\scriptsize $[0.42, 0.45]$} \\
+ & Agentic sim. patient retrieval & $\mathbf{0.8201}^{**}$ & {\scriptsize $[0.81, 0.83]$} & $0.3616^{**}$ & {\scriptsize $[0.35, 0.38]$} \\
+ & Agentic guideline retrieval & $0.7335$ & {\scriptsize $[0.73, 0.74]$} & $0.2934$ & {\scriptsize $[0.28, 0.31]$} \\
+ & Agentic both & $0.7689^{*}$ & {\scriptsize $[0.76, 0.78]$} & $0.3351^{**}$ & {\scriptsize $[0.32, 0.35]$} \\
+\midrule
+Gemma 3 4B & No retrieval & $0.6412$ & {\scriptsize $[0.63, 0.65]$} & $0.2235$ & {\scriptsize $[0.21, 0.24]$} \\[2pt]
+ & Sim. patient retrieval & $0.5009$ & {\scriptsize $[0.49, 0.51]$} & $0.1586$ & {\scriptsize $[0.15, 0.17]$} \\
+ & Guideline retrieval & $\mathbf{0.6931}^{**}$ & {\scriptsize $[0.68, 0.70]$} & $\mathbf{0.2862}^{**}$ & {\scriptsize $[0.27, 0.30]$} \\
+ & Both & $0.6799^{**}$ & {\scriptsize $[0.67, 0.69]$} & $0.2467^{**}$ & {\scriptsize $[0.24, 0.26]$} \\
+ & Agentic sim. patient retrieval & $0.5058$ & {\scriptsize $[0.49, 0.52]$} & $0.1547$ & {\scriptsize $[0.14, 0.17]$} \\
+ & Agentic guideline retrieval & $0.6877^{**}$ & {\scriptsize $[0.68, 0.70]$} & $0.2413^{*}$ & {\scriptsize $[0.23, 0.25]$} \\
+ & Agentic both & $0.6817^{**}$ & {\scriptsize $[0.67, 0.69]$} & $0.2473^{**}$ & {\scriptsize $[0.24, 0.26]$} \\
+\midrule
+Llama 3.2 3B & No retrieval & $0.4966$ & {\scriptsize $[0.49, 0.51]$} & $0.1635$ & {\scriptsize $[0.15, 0.17]$} \\[2pt]
+ & Sim. patient retrieval & $0.5088^{*}$ & {\scriptsize $[0.50, 0.52]$} & $0.1966^{**}$ & {\scriptsize $[0.19, 0.21]$} \\
+ & Guideline retrieval & $\mathbf{0.6638}^{**}$ & {\scriptsize $[0.65, 0.67]$} & $\mathbf{0.3369}^{**}$ & {\scriptsize $[0.33, 0.35]$} \\
+ & Both & $0.5924^{**}$ & {\scriptsize $[0.58, 0.60]$} & $0.3010^{**}$ & {\scriptsize $[0.29, 0.31]$} \\
+ & Agentic sim. patient retrieval & $0.5330^{**}$ & {\scriptsize $[0.52, 0.55]$} & $0.2104^{**}$ & {\scriptsize $[0.20, 0.22]$} \\
+ & Agentic guideline retrieval & $0.6341^{**}$ & {\scriptsize $[0.62, 0.64]$} & $0.1931^{**}$ & {\scriptsize $[0.18, 0.20]$} \\
+ & Agentic both & $0.6225^{**}$ & {\scriptsize $[0.61, 0.63]$} & $0.2489^{**}$ & {\scriptsize $[0.24, 0.26]$} \\
+\midrule
+Ministral 3 3B & No retrieval & $0.5347$ & {\scriptsize $[0.52, 0.54]$} & $0.2918$ & {\scriptsize $[0.28, 0.30]$} \\[2pt]
+ & Sim. patient retrieval & $0.5650^{**}$ & {\scriptsize $[0.55, 0.58]$} & $0.3250^{**}$ & {\scriptsize $[0.31, 0.34]$} \\
+ & Guideline retrieval & $0.6038^{**}$ & {\scriptsize $[0.59, 0.61]$} & $0.3843^{**}$ & {\scriptsize $[0.37, 0.40]$} \\
+ & Both & $0.6023^{**}$ & {\scriptsize $[0.59, 0.61]$} & $0.3813^{**}$ & {\scriptsize $[0.37, 0.39]$} \\
+ & Agentic sim. patient retrieval & $0.5640^{**}$ & {\scriptsize $[0.55, 0.57]$} & $0.3141^{**}$ & {\scriptsize $[0.30, 0.33]$} \\
+ & Agentic guideline retrieval & $0.5993^{**}$ & {\scriptsize $[0.59, 0.61]$} & $\mathbf{0.3928}^{**}$ & {\scriptsize $[0.38, 0.40]$} \\
+ & Agentic both & $\mathbf{0.6240}^{**}$ & {\scriptsize $[0.61, 0.63]$} & $0.3865^{**}$ & {\scriptsize $[0.37, 0.40]$} \\
+\bottomrule
+\end{tabular*}
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\caption{Mean diagnosis and treatment-plan scores by generator and retrieval configuration. Both scores range from 0 to 1; higher scores are better. $^{*}p<0.05$, $^{**}p<0.01$: significant improvement over "No retrieval" configuration within the same generator and outcome.}
+\label{tab:main-results}
+\end{table*}
