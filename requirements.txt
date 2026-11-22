@@ -1,5 +1,5 @@
-# Runtime dependencies for scripts/run_med_copilot.py; use Python 3.11.
-# Keep this file updated when the runner's dependencies change.
+# Dependencies for the experiment pipeline and saved-result analysis; use Python 3.11.
+# Keep this file updated when pipeline or analysis dependencies change.
 
 # Patient retrieval, reranking, and clinical NLP
 numpy==1.26.4
@@ -45,6 +45,9 @@ tqdm==4.70.1
 typer==0.27.2
 typing-extensions==4.16.0
 umap-learn==0.5.7
+
+# Independent statistical reference checks for saved-result analysis
+statsmodels==0.14.6
 
 # Azure backends are imported by GraphRAG factories even with local storage.
 azure-core==1.41.0

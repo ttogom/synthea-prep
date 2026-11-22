@@ -5,7 +5,10 @@ Start with `experiment_results.csv`: one row per condition-example `id`, generat
 `source_run` identifies the original experiment. The raw sources stay in their
 original run directories; `sources.yaml` lists their repository-relative paths.
 
-## Rebuild (from the repository root, in the medcopilot environment)
+## Rebuild from saved results
+
+Run from the repository root with the dependencies in
+[requirements.txt](../../requirements.txt) installed:
 
 ```bash
 python scripts/analysis/build_analysis_dataset.py

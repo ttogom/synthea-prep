@@ -2,7 +2,9 @@
 
 ## Combined seven-variant results
 
-The default command-line workflow now builds `experiments/results_all_variants/`:
+Run from the repository root with the dependencies in
+[requirements.txt](../../requirements.txt) installed. The default command-line
+workflow builds `experiments/results_all_variants/`:
 
 ```bash
 python scripts/analysis/build_analysis_dataset.py
@@ -33,7 +35,7 @@ they should not be used to mix protocol-1 scores into the combined analysis.
 The earlier APIs remain available for explicitly selected historical exports.
 The dataset builder now targets the seven-variant comparison; it does not rebuild
 the old protocol-1 CSV. To refresh statistics/tables from an existing old export,
-run from `synthea-prep` with the `medcopilot` environment active:
+run from the repository root:
 
 ```bash
 # Compute the three downstream statistics CSVs.
