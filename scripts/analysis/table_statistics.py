@@ -14,6 +14,22 @@ from scipy.stats import t as student_t
 VARIANTS = ("llm_only", "patient_retrieval", "guidelines", "patient_retrieval_guidelines")
 
 
+VARIANT_LABELS = {
+    "llm_only": "No retrieval", "patient_retrieval": "Sim. patient retrieval",
+    "guidelines": "Guideline retrieval", "patient_retrieval_guidelines": "Both",
+    "agentic_patient_retrieval": "Agentic sim. patient retrieval",
+    "agentic_guidelines": "Agentic guideline retrieval", "agentic_both": "Agentic both",
+}
+
+
+def active_variants(results):
+    """Keep the historical four-arm order and append the selected agentic arms."""
+    unknown = set(results["variant"]) - set(VARIANT_LABELS)
+    if unknown:
+        raise ValueError(f"Unknown retrieval configuration: {sorted(unknown)}")
+    return VARIANTS + tuple(v for v in VARIANT_LABELS if v not in VARIANTS and v in set(results.variant))
+
+
 BASELINE_TEST_VARIANTS = ("patient_retrieval", "guidelines")
 
 
@@ -79,14 +95,17 @@ def _with_exploratory_two_sided_checks(summary, family_columns, effect_column):
     return output
 
 
-def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
+def summarize_main_results(results, bootstrap_samples=1000, seed=20261114, *, available_scores=False):
     """Return main-results means, pointwise 95% CIs, raw/adjusted p-values, and stars.
 
+    With available_scores=True, means/bootstrap intervals use observed scores
+    and tests use observed pairs; coverage_complete remains descriptive. The
+    historical default requires complete eligible cohorts.
     Input is the normalized, validated output of load_scored_results, with any
-    unvalidated Plan judge scores already masked. Missing eligible scores are
-    never dropped to obtain a selectively complete cohort. The null is
+    unvalidated Plan judge scores already masked. In the historical mode,
+    missing eligible scores suppress means and comparisons. The null is
     mean(retrieval - baseline) <= 0; the alternative is a positive difference.
-    Separate exploratory two-sided columns reuse the same three-comparison
+    Separate exploratory two-sided columns reuse the same baseline-comparison
     family per model/outcome and do not determine the reported stars.
     """
     if isinstance(bootstrap_samples, bool) or not isinstance(bootstrap_samples, int) or bootstrap_samples < 2:
@@ -96,8 +115,7 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
         raise ValueError("Pass the normalized frame returned by load_scored_results.")
     if results.empty or results.duplicated(["id", "model", "variant"]).any():
         raise ValueError("Require nonempty, unique case/model/variant rows.")
-    if set(results["variant"]) - set(VARIANTS):
-        raise ValueError("Unknown retrieval configuration.")
+    variants = active_variants(results)
     metadata = results.drop_duplicates("id").set_index("id").sort_index()
     rng = np.random.default_rng(seed)
     weights_by_cohort = {}
@@ -107,21 +125,11 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
             cohort = metadata if metric == "diagnosis" else metadata.loc[metadata["plan_eligible"]]
             pivot = results.loc[results["model"].eq(model)].pivot(
                 index="id", columns="variant", values=metric,
-            ).reindex(index=cohort.index, columns=VARIANTS)
-            patients = cohort["patient_uuid"].to_numpy()
-            codes, unique = pd.factorize(patients, sort=True)
-            n_patients, n_cases = len(unique), len(cohort)
-            counts = np.bincount(codes, minlength=n_patients)
-            weights = None
-            if n_patients >= 2:
-                key = tuple(unique)
-                if key not in weights_by_cohort:
-                    weights_by_cohort[key] = rng.multinomial(
-                        n_patients, np.full(n_patients, 1 / n_patients), size=bootstrap_samples,
-                    )
-                weights = weights_by_cohort[key]
+            ).reindex(index=cohort.index, columns=variants)
+            n_cases = len(cohort)
+            n_patients = cohort["patient_uuid"].nunique()
             family = []
-            for variant in VARIANTS:
+            for variant in variants:
                 values = pivot[variant]
                 n_scored = int(values.notna().sum())
                 complete = n_cases > 0 and n_scored == n_cases
@@ -135,21 +143,32 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
                     "baseline_delta": np.nan, "test_statistic": np.nan,
                     "test_df": np.nan, "p_value": np.nan, "p_value_holm": np.nan,
                     "test_status": "baseline" if variant == "llm_only" else "incomplete" if n_cases else "unavailable",
-                    "stars": "", "family_size": 3,
+                    "stars": "", "family_size": len(variants) - 1,
                 }
-                if complete:
-                    array = values.to_numpy(dtype=float)
+                if complete or (available_scores and n_scored):
+                    used = values.dropna()
+                    patients = cohort.loc[used.index, "patient_uuid"].to_numpy()
+                    codes, unique = pd.factorize(patients, sort=True)
+                    record["n_patients"] = len(unique)
+                    array = used.to_numpy(dtype=float)
                     record["mean_score"] = float(array.mean())
-                    if weights is not None:
-                        sums = np.bincount(codes, weights=array, minlength=n_patients)
-                        means = (weights @ sums) / (weights @ counts)
+                    if len(unique) >= 2:
+                        key = tuple(unique)
+                        if key not in weights_by_cohort:
+                            weights_by_cohort[key] = rng.multinomial(
+                                len(unique), np.full(len(unique), 1 / len(unique)), size=bootstrap_samples)
+                        counts = np.bincount(codes, minlength=len(unique))
+                        sums = np.bincount(codes, weights=array, minlength=len(unique))
+                        means = (weights_by_cohort[key] @ sums) / (weights_by_cohort[key] @ counts)
                         low, high = np.quantile(means, [0.025, 0.975])
                         record.update(mean_ci_low=float(low), mean_ci_high=float(high))
-                    if variant != "llm_only" and n_pairs == n_cases:
-                        delta = array - pivot["llm_only"].to_numpy(dtype=float)
-                        statistic, df, pvalue, status = _paired_cluster_test(delta, patients)
-                        record.update(baseline_delta=float(delta.mean()), test_statistic=statistic,
-                                      test_df=df, p_value=pvalue, test_status=status)
+                if variant != "llm_only" and n_pairs and (available_scores or n_pairs == n_cases):
+                    paired = pivot[[variant, "llm_only"]].dropna()
+                    delta = (paired[variant] - paired["llm_only"]).to_numpy(dtype=float)
+                    paired_patients = cohort.loc[paired.index, "patient_uuid"].to_numpy()
+                    statistic, df, pvalue, status = _paired_cluster_test(delta, paired_patients)
+                    record.update(baseline_delta=float(delta.mean()), test_statistic=statistic,
+                                  test_df=df, p_value=pvalue, test_status=status)
                 family.append(record)
             for record, adjusted in zip(family[1:], _holm_adjust([r["p_value"] for r in family[1:]])):
                 record["p_value_holm"] = float(adjusted)
@@ -162,19 +181,23 @@ def summarize_main_results(results, bootstrap_samples=1000, seed=20261114):
 
 
 def summarize_generator_retrieval_gains(results, metrics=("diagnosis", "plan"),
-                                    include_model_average=False):
+                                    include_model_average=False, *, available_scores=False, average_only=False):
     """Test single-source retrieval against no retrieval for each model/outcome.
 
     Pass normalized rank-1 rows from load_scored_results. The null is that the
     condition-example mean retrieval-minus-baseline difference is <= 0; the
     alternative is > 0. Patient-UUID clusters preserve dependence across a
-    patient's condition examples. Cmain-results standard errors use G-1 Student-t df.
+    patient's condition examples. Standard errors use G-1 Student-t df.
 
     Holm correction includes both requested comparisons across every model
     within each requested outcome (eight tests for four models). Incomplete
     or degenerate tests stay unavailable, not nonsignificant, and retain their
     place in the correction family. No complete-case subset is substituted.
 
+    average_only=True selects all retrieval variants, builds within-record
+    equal-generator means, and excludes individual-generator tests before Holm
+    correction. available_scores=True uses only observed pairs. The historical
+    defaults below retain the original two-source, complete-cohort behavior.
     With include_model_average, also test the equal-generator average gain.
     Average paired scores across the fixed generators within each case before
     clustering by patient; do not treat generators as independent replicates.
@@ -184,15 +207,20 @@ def summarize_generator_retrieval_gains(results, metrics=("diagnosis", "plan"),
     """
     if not isinstance(include_model_average, bool):
         raise ValueError("include_model_average must be a boolean.")
-    comparisons = tuple((variant, "llm_only") for variant in BASELINE_TEST_VARIANTS)
+    if not isinstance(average_only, bool):
+        raise ValueError("average_only must be a boolean.")
+    variants = active_variants(results)
+    comparisons = tuple((variant, "llm_only") for variant in
+                        (variants[1:] if average_only else BASELINE_TEST_VARIANTS))
     summary = _summarize_paired_significance(
-        results, metrics, comparisons, "greater", include_model_average=include_model_average,
+        results, metrics, comparisons, "greater", include_model_average=include_model_average or average_only,
+        available_scores=available_scores, average_only=average_only,
     )
     return _with_exploratory_two_sided_checks(summary, ("metric",), "mean_difference")
 
 
 def _summarize_paired_significance(results, metrics, comparisons, alternative,
-                                 include_model_average=False):
+                                 include_model_average=False, available_scores=False, average_only=False):
     """Shared pairing, eligibility, clustering, and outcome-wise multiplicity."""
     if isinstance(metrics, str) or not metrics or len(set(metrics)) != len(metrics):
         raise ValueError("metrics must be a nonempty sequence of distinct outcome names.")
@@ -206,8 +234,7 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
         raise ValueError("Require nonempty rows with populated case and patient identities.")
     if results.duplicated(["id", "model", "variant"]).any():
         raise ValueError("Require unique case/model/variant rows.")
-    if set(results["variant"]) - set(VARIANTS):
-        raise ValueError("Unknown retrieval configuration.")
+    variants = active_variants(results)
     if not results["plan_eligible"].isin([True, False]).all():
         raise ValueError("plan_eligible must contain boolean eligibility values.")
     if results.groupby("id")[["patient_uuid", "plan_eligible"]].nunique().gt(1).any().any():
@@ -219,11 +246,13 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
     metadata = results.drop_duplicates("id").set_index("id").sort_index()
     models = sorted(results["model"].unique())
     n_generators = len(models)
+    if average_only and (n_generators != 4 or set(results.variant) != set(VARIANT_LABELS)):
+        raise ValueError('Average-only analysis requires four generators and all seven variants')
     if include_model_average:
         if MODEL_AVERAGE in models:
             raise ValueError(f"{MODEL_AVERAGE} is reserved for the generated average row.")
         case_variants = pd.MultiIndex.from_product(
-            [metadata.index, VARIANTS], names=["id", "variant"],
+            [metadata.index, variants], names=["id", "variant"],
         )
         average = case_variants.to_frame(index=False)
         average["model"] = MODEL_AVERAGE
@@ -234,14 +263,14 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
             scores = scores.reindex(index=case_variants, columns=models)
             average[metric] = scores.mean(axis=1, skipna=False).to_numpy()
         results = pd.concat([results, average], ignore_index=True)
-        models = [MODEL_AVERAGE, *models]
+        models = [MODEL_AVERAGE] if average_only else [MODEL_AVERAGE, *models]
     rows = []
     for model in models:
         for metric in metrics:
             cohort = metadata if metric == "diagnosis" else metadata.loc[metadata["plan_eligible"]]
             pivot = results.loc[results["model"].eq(model)].pivot(
                 index="id", columns="variant", values=metric,
-            ).reindex(index=cohort.index, columns=VARIANTS)
+            ).reindex(index=cohort.index, columns=variants)
             n_cases = len(cohort)
             for variant, reference_variant in comparisons:
                 baseline = pivot[reference_variant]
@@ -263,10 +292,15 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
                 }
                 if include_model_average:
                     row["n_generators_averaged"] = n_generators if model == MODEL_AVERAGE else 1
-                if complete:
-                    delta = retrieval.to_numpy(dtype=float) - baseline.to_numpy(dtype=float)
+                if complete or (available_scores and n_pairs):
+                    paired = pd.DataFrame({"baseline": baseline, "retrieval": retrieval}).dropna()
+                    delta = (paired.retrieval - paired.baseline).to_numpy(dtype=float)
+                    paired_patients = cohort.loc[paired.index, "patient_uuid"].to_numpy()
+                    row.update(mean_baseline=float(paired.baseline.mean()),
+                               mean_retrieval=float(paired.retrieval.mean()),
+                               n_patients=len(set(paired_patients)))
                     statistic, df, pvalue, status = _paired_cluster_test(
-                        delta, cohort["patient_uuid"].to_numpy(), alternative=alternative,
+                        delta, paired_patients, alternative=alternative,
                     )
                     row.update(mean_difference=float(delta.mean()), test_statistic=statistic,
                                test_df=df, p_value=pvalue, test_status=status)
@@ -287,7 +321,7 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
     return summary
 
 
-def summarize_group_retrieval_gains(results):
+def summarize_group_retrieval_gains(results, *, available_scores=False):
     """Return four-arm group means and one-sided baseline tests for group.
 
     Three retrieval configurations times three condition groups form a nine-test
@@ -308,7 +342,9 @@ def summarize_group_retrieval_gains(results):
     # tests below are reported, not these overall validation results.
     validated = _summarize_paired_significance(
         results, ("diagnosis", "plan"), (("patient_retrieval", "llm_only"),), "greater",
+        available_scores=available_scores,
     )
+    variants = active_variants(results)
     metadata = results.drop_duplicates("id").set_index("id").sort_index()
     rows = []
     for model in sorted(validated["model"].unique()):
@@ -320,11 +356,11 @@ def summarize_group_retrieval_gains(results):
                     cohort = cohort.loc[cohort["plan_eligible"]]
                 pivot = results.loc[results["model"].eq(model)].pivot(
                     index="id", columns="variant", values=metric,
-                ).reindex(index=cohort.index, columns=VARIANTS)
+                ).reindex(index=cohort.index, columns=variants)
                 baseline = pivot["llm_only"]
                 n_eligible = len(cohort)
                 n_baseline = int(baseline.notna().sum())
-                for variant in VARIANTS[1:]:
+                for variant in variants[1:]:
                     retrieval = pivot[variant]
                     n_retrieval = int(retrieval.notna().sum())
                     n_pairs = int((baseline.notna() & retrieval.notna()).sum())
@@ -335,17 +371,23 @@ def summarize_group_retrieval_gains(results):
                         "n_eligible": n_eligible, "n_baseline": n_baseline,
                         "n_retrieval": n_retrieval, "n_pairs": n_pairs,
                         "n_patients": cohort["patient_uuid"].nunique(),
-                        "mean_baseline": float(baseline.mean()) if n_eligible and n_baseline == n_eligible else np.nan,
-                        "mean_retrieval": float(retrieval.mean()) if n_eligible and n_retrieval == n_eligible else np.nan,
+                        "mean_baseline": float(baseline.mean()) if n_baseline and (available_scores or n_baseline == n_eligible) else np.nan,
+                        "mean_retrieval": float(retrieval.mean()) if n_retrieval and (available_scores or n_retrieval == n_eligible) else np.nan,
+                        "paired_mean_baseline": np.nan, "paired_mean_retrieval": np.nan,
                         "coverage_complete": complete, "mean_difference": np.nan,
                         "test_statistic": np.nan, "test_df": np.nan, "p_value": np.nan,
-                        "p_value_holm": np.nan, "family_size": 9, "stars": "",
+                        "p_value_holm": np.nan, "family_size": (len(variants) - 1) * len(groups), "stars": "",
                         "test_status": "incomplete" if n_eligible else "unavailable",
                     }
-                    if complete:
-                        differences = retrieval.to_numpy(dtype=float) - baseline.to_numpy(dtype=float)
+                    if complete or (available_scores and n_pairs):
+                        paired = pd.DataFrame({"baseline": baseline, "retrieval": retrieval}).dropna()
+                        differences = (paired.retrieval - paired.baseline).to_numpy(dtype=float)
+                        paired_patients = cohort.loc[paired.index, "patient_uuid"].to_numpy()
+                        record.update(paired_mean_baseline=float(paired.baseline.mean()),
+                                      paired_mean_retrieval=float(paired.retrieval.mean()),
+                                      n_patients=len(set(paired_patients)))
                         statistic, df, pvalue, status = _paired_cluster_test(
-                            differences, cohort["patient_uuid"].to_numpy(), alternative="greater",
+                            differences, paired_patients, alternative="greater",
                         )
                         record.update(mean_difference=float(differences.mean()), test_statistic=statistic,
                                       test_df=df, p_value=pvalue, test_status=status)
@@ -355,10 +397,10 @@ def summarize_group_retrieval_gains(results):
                 if record["mean_difference"] > 0:
                     record["stars"] = "**" if adjusted < 0.01 else "*" if adjusted < 0.05 else ""
             rows.extend(family)
-    return _with_history_gain_contrasts(pd.DataFrame(rows), results)
+    return _with_history_gain_contrasts(pd.DataFrame(rows), results, available_scores=available_scores)
 
 
-def _with_history_gain_contrasts(summary, results):
+def _with_history_gain_contrasts(summary, results, *, available_scores=False):
     """Append direct between-group tests without changing table rows or stars.
 
     For each generator/outcome, regress the paired case gain on two group
@@ -397,8 +439,8 @@ def _with_history_gain_contrasts(summary, results):
                     "history_n_eligible": n_history, "history_n_pairs": history_pairs,
                     "comparison_n_eligible": n_group, "comparison_n_pairs": group_pairs,
                     "n_patients": n_patients, "coverage_complete": complete,
-                    "history_gain": float(values[history].mean()) if n_history and history_pairs == n_history else np.nan,
-                    "comparison_gain": float(values[~history].mean()) if n_group and group_pairs == n_group else np.nan,
+                    "history_gain": float(np.nanmean(values[history])) if history_pairs and (available_scores or history_pairs == n_history) else np.nan,
+                    "comparison_gain": float(np.nanmean(values[~history])) if group_pairs and (available_scores or group_pairs == n_group) else np.nan,
                     "estimate": np.nan, "standard_error": np.nan,
                     "ci_low": np.nan, "ci_high": np.nan,
                     "test_statistic": np.nan, "test_df": np.nan,
@@ -406,7 +448,14 @@ def _with_history_gain_contrasts(summary, results):
                     "family_size": 2 * len(models),
                     "test_status": "unavailable" if not n_history or not n_group else "incomplete",
                 }
-                if complete:
+                if complete or (available_scores and history_pairs and group_pairs):
+                    observed = np.isfinite(values)
+                    cohort = cohort.loc[observed]
+                    history, values = history[observed], values[observed]
+                    n_history, n_group = int(history.sum()), int((~history).sum())
+                    codes, patients = pd.factorize(cohort.patient_uuid, sort=True)
+                    n_patients = len(patients)
+                    record["n_patients"] = n_patients
                     estimate = record["history_gain"] - record["comparison_gain"]
                     record["estimate"] = estimate
                     # Each group needs patient replication of its own.

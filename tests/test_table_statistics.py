@@ -14,6 +14,7 @@ from statsmodels.stats.multitest import multipletests
 # Direct test execution starts in tests/; resolve project modules first.
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
+from scripts.analysis import table_statistics as stats
 from scripts.analysis.table_statistics import (
     VARIANTS, MODEL_AVERAGE, _holm_adjust, summarize_main_results,
     summarize_group_retrieval_gains, summarize_generator_retrieval_gains,
@@ -553,6 +554,133 @@ class ModelAverageSignificanceTests(unittest.TestCase):
                 summarize_generator_retrieval_gains(fixture(), include_model_average=flag)
         with self.assertRaisesRegex(ValueError, "reserved"):
             summarize_generator_retrieval_gains(fixture().assign(model=MODEL_AVERAGE), include_model_average=True)
+
+
+ALL_MODELS = ("gpt_4o_mini", "ollama_gemma3_4b", "ollama_llama3_2_3b", "ollama_ministral_3_3b")
+
+def normalized_fixture():
+    rows = []
+    for i in range(24):
+        for m, model in enumerate(ALL_MODELS):
+            for v, variant in enumerate(stats.VARIANT_LABELS):
+                score = 0.2 + 0.004 * i + 0.012 * m + v * (0.012 + 0.0006 * i)
+                rows.append({'id': str(i), 'patient_uuid': str(i // 2), 'model': model,
+                             'variant': variant, 'bin': ("history", "acute", "control")[i % 3],
+                             'diagnosis': score, 'plan': score * 0.8 + 0.03,
+                             'plan_eligible': i != 23})
+    return pd.DataFrame(rows)
+
+
+class AvailableScoreStatisticsTests(unittest.TestCase):
+    def test_average_never_silently_drops_a_generator_or_variant(self):
+        frame = normalized_fixture()
+        for incomplete in (frame.loc[frame.model.ne(ALL_MODELS[0])],
+                           frame.loc[frame.variant.ne('agentic_both')]):
+            with self.subTest(rows=len(incomplete)), self.assertRaisesRegex(ValueError, 'four generators'):
+                stats.summarize_generator_retrieval_gains(incomplete, average_only=True, available_scores=True)
+
+    def test_all_missing_outcomes_keep_schema_and_planned_families_without_inference(self):
+        frame = normalized_fixture().assign(diagnosis=np.nan, plan=np.nan)
+        main = stats.summarize_main_results(frame, 16, available_scores=True)
+        average = stats.summarize_generator_retrieval_gains(frame, average_only=True, available_scores=True)
+        group = stats.summarize_group_retrieval_gains(frame, available_scores=True)
+        self.assertEqual((len(main), len(average), len(group)), (56, 12, 144))
+        for output, estimate, family_size in ((main, 'mean_score', 6), (average, 'mean_difference', 6),
+                                               (group, 'mean_difference', 18)):
+            self.assertTrue(output[estimate].isna().all())
+            self.assertTrue(output.p_value_holm.isna().all())
+            self.assertTrue(output.n_pairs.eq(0).all())
+            self.assertTrue(output.family_size.eq(family_size).all())
+        self.assertTrue(group[['paired_mean_baseline', 'paired_mean_retrieval']].isna().all().all())
+
+    def test_model_average_pairs_and_holm_match_independent_clustered_ols(self):
+        frame = normalized_fixture()
+        frame.loc[frame.id.eq('0') & frame.variant.eq('agentic_both') & frame.model.eq(ALL_MODELS[0]), 'plan'] = np.nan
+        frame.loc[frame.id.eq('2') & frame.variant.eq('llm_only') & frame.model.eq(ALL_MODELS[1]), 'plan'] = np.nan
+        frame = frame.loc[~(frame.id.eq('4') & frame.variant.eq('agentic_guidelines') & frame.model.eq(ALL_MODELS[2]))]
+        output = stats.summarize_generator_retrieval_gains(frame, average_only=True, available_scores=True)
+        self.assertEqual(len(output), 12)
+        self.assertEqual(set(output.model), {'model_average'})
+        for metric in ('diagnosis', 'plan'):
+            expected_pvalues = []
+            block = output.loc[output.metric.eq(metric)]
+            for row in block.itertuples():
+                eligible = frame.loc[frame.plan_eligible] if metric == 'plan' else frame
+                pivot = eligible.pivot(index=['id', 'variant'], columns='model', values=metric).reindex(columns=ALL_MODELS)
+                means = pivot.mean(axis=1, skipna=False).unstack('variant')
+                pair = means[[row.variant, 'llm_only']].dropna()
+                delta = pair[row.variant] - pair.llm_only
+                patients = eligible.drop_duplicates('id').set_index('id').loc[pair.index, 'patient_uuid']
+                fit = sm.OLS(delta, np.ones((len(delta), 1))).fit(
+                    cov_type='cluster', cov_kwds={'groups': patients, 'use_correction': True}, use_t=True)
+                self.assertEqual(row.n_pairs, len(pair))
+                self.assertEqual(row.test_df, patients.nunique() - 1)
+                self.assertEqual(row.n_generators_averaged, 4)
+                self.assertAlmostEqual(row.mean_difference, delta.mean())
+                self.assertAlmostEqual(row.p_value, student_t.sf(fit.tvalues.iloc[0], patients.nunique() - 1))
+                expected_pvalues.append(row.p_value)
+            np.testing.assert_allclose(block.p_value_holm, multipletests(expected_pvalues, method='holm')[1])
+            self.assertTrue(block.family_size.eq(6).all())
+        plan = output.loc[output.metric.eq('plan') & output.variant.eq('agentic_both')].iloc[0]
+        self.assertEqual(plan.n_pairs, 21)  # 23 eligible - missing baseline - missing retrieval.
+
+
+    def test_missing_comparison_retains_average_only_family(self):
+        frame = normalized_fixture()
+        frame.loc[frame.variant.eq('agentic_both'), 'plan'] = np.nan
+        out = stats.summarize_generator_retrieval_gains(frame, average_only=True, available_scores=True)
+        plan = out.loc[out.metric.eq('plan')]
+        self.assertTrue(plan.family_size.eq(6).all())
+        missing = plan.variant.eq('agentic_both')
+        self.assertTrue(plan.loc[missing, 'p_value'].isna().all())
+        expected = multipletests(plan.p_value.fillna(1), method='holm')[1]
+        np.testing.assert_allclose(plan.loc[~missing, 'p_value_holm'], expected[~missing])
+
+
+    def test_main_means_include_zero_and_use_only_available_pairs(self):
+        frame = normalized_fixture()
+        mask = frame.model.eq(ALL_MODELS[0]) & frame.variant.eq('agentic_both')
+        frame.loc[mask & frame.id.eq('0'), 'plan'] = 0
+        frame.loc[mask & frame.id.eq('2'), 'plan'] = np.nan
+        out = stats.summarize_main_results(frame, 64, seed=17, available_scores=True)
+        row = out.loc[out.model.eq(ALL_MODELS[0]) & out.variant.eq('agentic_both') & out.metric.eq('plan')].iloc[0]
+        values = frame.loc[mask & frame.plan_eligible, 'plan']
+        self.assertFalse(row.coverage_complete)
+        self.assertAlmostEqual(row.mean_score, values.mean())
+        self.assertEqual(row.n_scored, values.notna().sum())
+        self.assertEqual(row.n_pairs, row.n_scored)
+        self.assertTrue(np.isfinite(row.mean_ci_low))
+        self.assertEqual(row.family_size, 6)
+        pd.testing.assert_frame_equal(out, stats.summarize_main_results(frame, 64, seed=17, available_scores=True))
+
+
+    def test_group_deltas_and_history_contrasts_use_available_pairs(self):
+        frame = normalized_fixture()
+        frame.loc[frame.id.eq('0') & frame.variant.eq('patient_retrieval') & frame.model.eq(ALL_MODELS[0]), 'plan'] = np.nan
+        out = stats.summarize_group_retrieval_gains(frame, available_scores=True)
+        row = out.loc[out.model.eq(ALL_MODELS[0]) & out.variant.eq('patient_retrieval') & out.metric.eq('plan')
+                      & out.group.eq('history')].iloc[0]
+        subset = frame.loc[frame.model.eq(ALL_MODELS[0]) & frame.bin.eq('history') & frame.plan_eligible]
+        pair = subset.pivot(index='id', columns='variant', values='plan')[['llm_only', 'patient_retrieval']].dropna()
+        self.assertFalse(row.coverage_complete)
+        self.assertAlmostEqual(row.mean_difference, (pair.patient_retrieval - pair.llm_only).mean())
+        self.assertAlmostEqual(row.paired_mean_retrieval - row.paired_mean_baseline, row.mean_difference)
+        self.assertEqual(row.family_size, 18)
+        contrast = out.loc[out.model.eq(ALL_MODELS[0]) & out.variant.eq('patient_retrieval') & out.metric.eq('plan')
+                           & out.group.eq('acute')].iloc[0]
+        cohort = frame.loc[frame.model.eq(ALL_MODELS[0]) & frame.plan_eligible & frame.bin.isin(['history', 'acute'])]
+        pivot = cohort.pivot(index='id', columns='variant', values='plan')[['llm_only', 'patient_retrieval']].dropna()
+        metadata = cohort.drop_duplicates('id').set_index('id').loc[pivot.index]
+        delta = pivot.patient_retrieval - pivot.llm_only
+        design = np.column_stack([metadata.bin.eq('history'), metadata.bin.eq('acute')]).astype(float)
+        fit = sm.OLS(delta, design).fit(cov_type='cluster', cov_kwds={'groups': metadata.patient_uuid,
+                                                                  'use_correction': True}, use_t=True)
+        test = fit.t_test([1, -1])
+        self.assertAlmostEqual(contrast.history_contrast_estimate, float(test.effect[0]))
+        self.assertAlmostEqual(contrast.history_contrast_standard_error, float(test.sd[0, 0]))
+        self.assertEqual(contrast.history_contrast_test_status, 'tested')
+
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

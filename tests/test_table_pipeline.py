@@ -263,6 +263,80 @@ class TablePipelineTests(unittest.TestCase):
         self.assertTrue((self.report/'main_results.tex').exists())
         self.assertFalse((self.report/'group_retrieval_gains.tex').exists())
 
+    def combined_rows(self):
+        rows = []
+        for base in self.rows():
+            if base['model'] != MODEL or base['variant'] != 'llm_only':
+                continue
+            for m, model in enumerate(analysis.MODEL_LABELS):
+                for v, variant in enumerate(analysis.ALL_VARIANT_LABELS):
+                    rows.append(dict(base, model=model, variant=variant, plan1_protocol_version=2, plan1_rank=1,
+                                     diagnosis1_status='scored', diagnosis1_reason='', generation_status='completed',
+                                     generation_error_type='', variant_error_type='',
+                                     biolord_score_diagnosis1=base['biolord_score_diagnosis1'] + m * .001 + v * .01))
+        return pd.DataFrame(rows)
+
+    def test_combined_requires_all_model_variant_slots_before_writing(self):
+        data = self.combined_rows()
+        for incomplete in (data.loc[data.model.ne(MODEL)], data.loc[data.variant.ne('agentic_both')], data.iloc[1:]):
+            incomplete.to_csv(self.csv, index=False)
+            with self.subTest(rows=len(incomplete)), self.assertRaisesRegex(ValueError, 'every record/model/variant'):
+                analysis.generate_table_statistics(self.csv, bootstrap_samples=16, combined=True)
+            self.assertFalse(self.analysis.exists())
+
+    def test_combined_masks_failed_scores_and_retains_exact_failure_reasons(self):
+        data = self.combined_rows()
+        ids = data.id.unique()[:4]
+        target = data.model.eq(MODEL) & data.variant.eq('agentic_guidelines')
+        for patient_id, field, error in ((ids[0], 'generation_error_type', 'ContextWindowExceeded'),
+                                         (ids[1], 'variant_error_type', 'AgentValidationError')):
+            mask = target & data.id.eq(patient_id)
+            data.loc[mask, 'diagnosis1_status'] = 'not_scored'
+            data.loc[mask, 'generation_status'] = 'not_processed'
+            data.loc[mask, field] = error
+        data.loc[target & data.id.eq(ids[2]), 'diagnosis1_status'] = 'not_scored'
+        data.loc[target & data.id.eq(ids[3]), ['biolord_score_diagnosis1', 'plan1_score']] = 0.
+        failed_plan = target & data.id.eq(ids[0])
+        data.loc[failed_plan, 'plan1_status'] = 'invalid_response'
+        data.loc[failed_plan, 'plan1_reason'] = 'invalid_response'
+        data.to_csv(self.csv, index=False)
+        loaded = analysis.load_scored_results(self.csv)
+        self.assertTrue(loaded.loc[target & data.id.isin(ids[:3]), 'diagnosis'].isna().all())
+        self.assertTrue(loaded.loc[failed_plan, 'plan'].isna().all())
+        self.assertEqual(loaded.loc[target & data.id.eq(ids[3]), 'diagnosis'].item(), 0)
+        summaries = analysis.generate_table_statistics(self.csv, bootstrap_samples=16, combined=True)
+        coverage = summaries['coverage_and_failures']
+        diagnosis = coverage.loc[coverage.level.eq('overall') & coverage.model.eq(MODEL)
+                                 & coverage.variant.eq('agentic_guidelines') & coverage.metric.eq('diagnosis')]
+        self.assertEqual(set(diagnosis.reason) - {''},
+                         {'ContextWindowExceeded', 'AgentValidationError', 'score_missing'})
+        self.assertEqual(diagnosis.n_status_reason.sum(), data.id.nunique())
+        self.assertTrue(diagnosis.n_failed.eq(3).all())
+        self.assertFalse(list(self.analysis.glob('*manifest*')))
+
+    def test_combined_source_change_does_not_replace_existing_outputs(self):
+        self.combined_rows().to_csv(self.csv, index=False)
+        self.analysis.mkdir()
+        sentinel = self.analysis / 'main_summary_stats.csv'
+        sentinel.write_text('existing statistics\n')
+        with patch.object(analysis, '_sha256', side_effect=['before', 'after']):
+            with self.assertRaisesRegex(RuntimeError, 'source CSV changed'):
+                analysis.generate_table_statistics(self.csv, bootstrap_samples=16, combined=True)
+        self.assertEqual(sentinel.read_text(), 'existing statistics\n')
+        self.assertEqual(list(self.analysis.iterdir()), [sentinel])
+
+    def test_default_renderer_never_falls_back_to_legacy_csv_or_updates_report(self):
+        # Even when only a legacy filename exists, the default combined path must fail safely.
+        self.analysis.mkdir()
+        (self.analysis / 'main_results.csv').write_text('old protocol data\n')
+        with patch.object(exporter, 'DEFAULT_ANALYSIS', self.analysis):
+            with self.assertRaises(FileNotFoundError) as error:
+                exporter.main(['--report-dir', str(self.report)])
+        self.assertIn('main_summary_stats.csv', str(error.exception))
+        self.assertFalse(self.report.exists())
+        self.assertFalse((self.analysis / 'tables').exists())
+        self.assertFalse((self.analysis / 'figures').exists())
+
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

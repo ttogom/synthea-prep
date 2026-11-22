@@ -11,6 +11,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from scripts.analysis import table_rendering as rendering
+from scripts.analysis.table_statistics import VARIANT_LABELS
 
 
 class RetrievalGainRenderingTests(unittest.TestCase):
@@ -252,6 +253,98 @@ class TableRenderingTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 rendering.render_main_results_table(invalid)
+
+class AvailableScoreRenderingTests(unittest.TestCase):
+    def setUp(self):
+        self.averages = pd.DataFrame([
+            {'model': 'model_average', 'variant': variant, 'metric': metric,
+             'baseline_variant': 'llm_only', 'mean_difference': .08, 'p_value_holm': .02,
+             'family_size': 6, 'n_generators_averaged': 4, 'coverage_complete': False}
+            for variant in VARIANT_LABELS if variant != 'llm_only' for metric in rendering.METRICS])
+        self.main = pd.DataFrame([
+            {'model': model, 'variant': variant, 'metric': metric, 'mean_score': .5,
+             'mean_ci_low': .4, 'mean_ci_high': .6, 'baseline_delta': .1,
+             'p_value_holm': .02, 'coverage_complete': False}
+            for model in rendering.MODEL_LABELS for variant in VARIANT_LABELS for metric in rendering.METRICS])
+        self.groups = pd.DataFrame([
+            {'model': model, 'variant': variant, 'metric': metric, 'group': group,
+             'mean_baseline': .4, 'mean_retrieval': .5, 'paired_mean_baseline': .41,
+             'paired_mean_retrieval': .49, 'mean_difference': .08, 'p_value_holm': .02,
+             'coverage_complete': False}
+            for model in rendering.MODEL_LABELS for variant in VARIANT_LABELS if variant != 'llm_only'
+            for metric in rendering.METRICS for group in rendering.GROUPS])
+
+    def test_all_seven_variants_and_partial_means_are_displayed(self):
+        main = rendering.render_main_results_table(self.main, available_scores=True)
+        gains = rendering.render_generator_retrieval_gains_table(self.averages, available_scores=True)
+        groups = rendering.render_group_retrieval_gains_table(self.groups, available_scores=True)
+        for variant in VARIANT_LABELS:
+            label = VARIANT_LABELS[variant]
+            self.assertIn(label, main)
+            self.assertIn(label, groups)
+            if variant != 'llm_only':
+                self.assertIn(label, gains)
+        self.assertIn(r'0.5000', main)
+        self.assertEqual(gains.count(r'$+0.0800^{*}$'), 12)
+        self.assertIn(r'0.5000 & $+0.0800^{*}$', groups)
+        self.assertEqual(groups.count(r'\begin{table*}'), 4)
+        # Raw arm means differ by .1, but matched-pair gains are .08.
+        self.assertNotIn('+0.1000', groups)
+
+    def test_empty_outcomes_render_dashes_without_fabricated_zeros_or_stars(self):
+        main = self.main.assign(mean_score=np.nan, mean_ci_low=np.nan, mean_ci_high=np.nan,
+                                baseline_delta=np.nan, p_value_holm=np.nan)
+        averages = self.averages.assign(mean_difference=np.nan, p_value_holm=np.nan)
+        groups = self.groups.assign(mean_baseline=np.nan, mean_retrieval=np.nan,
+                                    paired_mean_baseline=np.nan, paired_mean_retrieval=np.nan,
+                                    mean_difference=np.nan, p_value_holm=np.nan)
+        for renderer, data in ((rendering.render_main_results_table, main),
+                               (rendering.render_generator_retrieval_gains_table, averages),
+                               (rendering.render_group_retrieval_gains_table, groups)):
+            with self.subTest(renderer=renderer.__name__):
+                text = renderer(data, available_scores=True)
+                self.assertIn('--', text)
+                self.assertNotIn('nan', text)
+                self.assertNotIn('0.0000', text)
+                self.assertNotIn('^{*}', text.split(r'\caption{', 1)[0])
+
+    def test_average_renderer_rejects_wrong_weighting_family_and_incomplete_rows(self):
+        for data in (self.averages.assign(n_generators_averaged=3),
+                     self.averages.assign(family_size=10), self.averages.assign(model='gpt_4o_mini'),
+                     self.averages.iloc[1:], pd.concat([self.averages, self.averages.iloc[:1]]),
+                     self.averages.loc[self.averages.variant.ne('agentic_both')].assign(family_size=5),
+                     self.averages.assign(mean_difference=np.inf), self.averages.assign(p_value_holm=-.1)):
+            with self.subTest(rows=len(data)), self.assertRaises(ValueError):
+                rendering.render_generator_retrieval_gains_table(data, available_scores=True)
+
+    def test_group_renderer_rejects_inconsistent_paired_or_baseline_means(self):
+        bad_baseline = self.groups.copy()
+        bad_baseline.loc[0, 'mean_baseline'] = .3
+        for data in (bad_baseline, self.groups.assign(paired_mean_retrieval=.5),
+                     self.groups.assign(paired_mean_retrieval=1.1), self.groups.iloc[1:],
+                     pd.concat([self.groups, self.groups.iloc[:1]])):
+            with self.subTest(rows=len(data)), self.assertRaises(ValueError):
+                rendering.render_group_retrieval_gains_table(data, available_scores=True)
+
+    def test_rounding_keeps_unrounded_significance_and_removes_negative_zero(self):
+        self.averages['p_value_holm'] = .001
+        self.averages.loc[self.averages.metric.eq('diagnosis'), 'mean_difference'] = .000049
+        self.averages.loc[self.averages.metric.eq('plan'), 'mean_difference'] = -.000049
+        text = rendering.render_generator_retrieval_gains_table(self.averages, available_scores=True)
+        self.assertEqual(text.count(r'$+0.0000^{**}$ & $+0.0000$'), 6)
+        self.assertNotIn('-0.0000', text)
+
+    def test_history_contrasts_with_partial_coverage_remain_available(self):
+        data = self.groups.loc[self.groups.variant.eq('patient_retrieval')
+                               & self.groups.group.isin(['acute', 'control'])].copy()
+        for field, value in {'reference_group': 'history', 'family_size': 8, 'estimate': .03,
+                             'p_value_holm': .02, 'test_status': 'tested', 'coverage_complete': False}.items():
+            data['history_contrast_' + field] = value
+        text = rendering.render_history_gains_over_others_table(data, available_scores=True)
+        self.assertEqual(text.count(r'$+0.030^{*}$'), 16)
+        with self.assertRaises(ValueError):
+            rendering.render_history_gains_over_others_table(data)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

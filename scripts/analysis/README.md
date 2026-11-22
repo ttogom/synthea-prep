@@ -1,21 +1,50 @@
 # Regenerating the report tables
 
-Run from `synthea-prep` with the `medcopilot` environment active:
+## Combined seven-variant results
+
+The default command-line workflow now builds `experiments/results_all_variants/`:
 
 ```bash
-# Once saved treatment-plan judging results are ready, refresh the experiment CSV.
 python scripts/analysis/build_analysis_dataset.py
-
-# Compute the three downstream statistics CSVs.
 python scripts/analysis/summarize_experiment_results.py --csv-only
-
-# Render all four tables and update their copies in the report's figures folder.
-python scripts/analysis/render_tables.py
+python scripts/analysis/render_tables.py --analysis-only
 ```
 
-The default run is `experiments/output/2026-11-12_022701PST__test_so__main`.
-The export step reads saved results; none of these commands runs model inference
-or judging. `results.jsonl` and `run.json` are read only.
+The committed `sources.yaml` identifies the inputs; the dataset README documents
+its columns and statistical rules. The builder reads the two original experiment
+JSONLs and the seven per-run `plan_judging_v2/` exports. Protocol-1 treatment
+evaluations and the old experiment CSV are excluded. All three ranked predictions
+and diagnosis metrics are exported; treatment judging covers rank 1 only.
+
+`main_summary_stats.csv` replaces the main-results filename in this workflow.
+Generator gains contain **only** equal-generator averages: all four generator
+scores in both arms are required per record before paired patient-clustered tests.
+Missing scores are excluded from means and paired tests, while genuine zeros are
+retained. The new `coverage_and_failures.csv` exposes statuses, denominators and
+failure reasons. Details and correction families are in the dataset
+README. No new provenance manifests or midterm report copies are written.
+
+The historical four-variant APIs retain their original defaults for reproducibility.
+The instructions below describe that earlier workflow and its saved artifacts;
+they should not be used to mix protocol-1 scores into the combined analysis.
+
+## Historical four-variant workflow
+
+The earlier APIs remain available for explicitly selected historical exports.
+The dataset builder now targets the seven-variant comparison; it does not rebuild
+the old protocol-1 CSV. To refresh statistics/tables from an existing old export,
+run from `synthea-prep` with the `medcopilot` environment active:
+
+```bash
+# Compute the three downstream statistics CSVs.
+python scripts/analysis/summarize_experiment_results.py --results-csv experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv --csv-only
+
+# Render all four tables and update their copies in the report's figures folder.
+python scripts/analysis/render_tables.py --analysis-dir experiments/output/2026-11-12_022701PST__test_so__main/analysis
+```
+
+These commands select the saved November 12 export explicitly; none runs model
+inference or judging. `results.jsonl` and `run.json` are read only.
 
 The three statistics CSVs under `analysis/` supply four tables. Each table has a
 generated `.tex` under `analysis/tables/` and a report copy under
@@ -32,11 +61,11 @@ statistics CSV instead of duplicating its data:
 For a formatting-only change, rerun the render command. To regenerate one table:
 
 ```bash
-python scripts/analysis/render_tables.py --table main_results
-python scripts/analysis/render_tables.py --table generator_retrieval_gains
-python scripts/analysis/render_tables.py --table group_retrieval_gains
-python scripts/analysis/render_tables.py --table history_gains_over_others
+python scripts/analysis/render_tables.py --analysis-dir experiments/output/2026-11-12_022701PST__test_so__main/analysis --table main_results
 ```
+
+Other table names are `generator_retrieval_gains`, `group_retrieval_gains`, and
+`history_gains_over_others`.
 
 Rendering consumes the saved CSVs; it does not recompute statistical tests.
 The default updates report copies and touches report `main.tex` so an enabled
@@ -51,7 +80,8 @@ artifacts; report synchronization remains an explicit render command.
 
 ## Code map
 
-- `build_analysis_dataset.py`: saved experiment JSONL and labels → experiment CSV.
+- `build_analysis_dataset.py`: source-configured experiment JSONLs, labels, and
+  protocol-2 judge exports → the two combined datasets.
 - `summarize_experiment_results.py`: validated rank-1 scores, eligibility and judge
   reporting policy → the three statistics CSVs. Previously committed diagnosis-only
   helper APIs remain available, but the CLI generates only the selected tables.
@@ -138,6 +168,7 @@ chain from the experiment export to the report tables.
 python tests/test_table_statistics.py
 python tests/test_table_rendering.py
 python tests/test_table_pipeline.py
+python tests/test_combined_analysis.py
 ```
 
 These include independent statistical reference checks, incomplete/complete Plan

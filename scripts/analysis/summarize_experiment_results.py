@@ -1,4 +1,4 @@
-"""Generate three saved statistics CSVs for the report tables.
+"""Generate saved statistics CSVs for the report tables and failure coverage.
 
 The older diagnosis-only summary helper APIs below are retained from the
 committed version. The CLI generates statistics and renders the selected report tables.
@@ -23,13 +23,14 @@ if str(ROOT) not in sys.path:
 
 from scripts.analysis.render_tables import generate_tables
 from scripts.analysis.table_statistics import (
+    VARIANT_LABELS as ALL_VARIANT_LABELS,
     summarize_main_results,
     summarize_generator_retrieval_gains,
     summarize_group_retrieval_gains,
 )
 
 
-RESULTS = "experiments/output/2026-11-12_022701PST__test_so__main/experiment_results.csv"
+RESULTS = "experiments/results_all_variants/experiment_results.csv"
 
 
 DECIMAL_PLACES = 4
@@ -48,6 +49,7 @@ VARIANT_LABELS = {
     "guidelines": "Baselines + Guideline RAG",
     "patient_retrieval": "Baselines + Sim. Patient Retrieval",
     "patient_retrieval_guidelines": "Baselines + Guideline RAG + Sim. Patient Retrieval",
+    **{key: value for key, value in ALL_VARIANT_LABELS.items() if key.startswith("agentic_")},
 }
 
 
@@ -286,7 +288,7 @@ REQUIRED_SCORE_COLUMNS = (
 
 def load_scored_results(results_path):
     """Load raw rank-1 outcomes; a missing judgement is never a zero score."""
-    results = pd.read_csv(results_path)
+    results = pd.read_csv(results_path, low_memory=False, keep_default_na=False, na_values=[''])
     missing = set(REQUIRED_SCORE_COLUMNS) - set(results)
     if missing:
         raise ValueError(f"Missing table result columns: {sorted(missing)}")
@@ -311,6 +313,8 @@ def load_scored_results(results_path):
         lambda value: match.group(1).lower() if (match := _UUID_SUFFIX.search(value)) else value
     )
     results["diagnosis"] = pd.to_numeric(results["biolord_score_diagnosis1"], errors="raise")
+    if 'diagnosis1_status' in results:
+        results['diagnosis'] = results.diagnosis.where(results.diagnosis1_status.eq('scored'))
     plan_score = pd.to_numeric(results["plan1_score"], errors="raise")
     results["plan"] = plan_score.where(results["plan1_status"].eq("scored"))
     # Reference availability is a case property, independent of generation/judge failures.
@@ -327,6 +331,52 @@ def load_scored_results(results_path):
     return results
 
 
+def summarize_coverage_and_failures(results):
+    """Count primary-outcome statuses without dropping failed or unavailable slots.
+
+    Counts/rates use result rows as their explicit denominator; all_models pools
+    slots, not independent patients. Only primary reasons define disjoint rows.
+    """
+    rows = []
+    model_blocks = [("all_models", results), *list(results.groupby("model", sort=False))]
+    for model, block in model_blocks:
+        for level, columns in (("overall", ["variant"]), ("group", ["variant", "bin"]),
+                               ("condition", ["variant", "bin", "condition_label"])):
+            for keys, frame in block.groupby(columns, sort=False):
+                keys = keys if isinstance(keys, tuple) else (keys,)
+                identity = dict(zip(columns, keys))
+                for metric, status_col, reason_col in (
+                        ("diagnosis", "diagnosis1_status", "diagnosis1_reason"),
+                        ("plan", "plan1_status", "plan1_reason")):
+                    status = frame[status_col].fillna("not_scored").astype(str)
+                    missing = frame[metric].isna()
+                    status = status.mask(missing & status.eq("scored"), "missing_score")
+                    reason = frame[reason_col].fillna("").astype(str)
+                    if metric == 'diagnosis':
+                        fallback = frame.generation_error_type.fillna(frame.variant_error_type).fillna('')
+                        fallback = fallback.mask(fallback.eq(''), 'generation_not_completed').where(
+                            frame.generation_status.fillna('').ne('completed'), 'score_missing')
+                        reason = reason.mask(missing & reason.eq(''), fallback)
+                    n_total, n_scored = len(frame), int((~missing).sum())
+                    n_unavailable = int(status.eq("unavailable").sum())
+                    n_failed = int((missing & status.ne("unavailable")).sum())
+                    denominator = n_total - n_unavailable
+                    events = pd.DataFrame({"status": status, "reason": reason})
+                    for (event_status, event_reason), count in events.value_counts(sort=False).items():
+                        rows.append({"level": level, "model": model, "bin": "all",
+                                     "condition_label": "all", **identity, "metric": metric,
+                                     "status": event_status, "reason": event_reason,
+                                     "n_status_reason": int(count), "status_reason_rate": count / n_total,
+                                     "n_expected": n_total, "n_records": frame.id.nunique(),
+                                     "n_eligible": int(frame.plan_eligible.sum()) if metric == "plan" else n_total,
+                                     "n_scored": n_scored, "n_missing": n_total - n_scored,
+                                     "n_unavailable": n_unavailable, "n_failed": n_failed,
+                                     "failure_denominator_excluding_unavailable": denominator,
+                                     "failure_rate_excluding_unavailable": n_failed / denominator if denominator else np.nan,
+                                     "n_generation_not_completed": int(frame.generation_status.fillna("not_processed").ne("completed").sum())})
+    return pd.DataFrame(rows)
+
+
 def _sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -335,17 +385,40 @@ def _sha256(path):
     return digest.hexdigest()
 
 
-def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1000, seed=20261114):
-    """Generate only the CSVs required by the three report tables.
+def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1000, seed=20261114,
+                              *, combined=False):
+    """Generate combined statistics or retain the historical four-arm workflow.
 
     Read source and run metadata without changing them. Snapshot fingerprints
     connect the saved statistics to the experiment; abort if the CSV changes
-    while calculations are running. Never publish incomplete eligible cohorts.
+    while calculations are running. Combined means use available scores; the
+    historical workflow requires complete eligible cohorts.
     """
     results_path = Path(results_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else results_path.parent / 'analysis'
     source_hash = _sha256(results_path)
     results = load_scored_results(results_path)
+    if combined:
+        required = {"plan1_protocol_version", "plan1_rank", "diagnosis1_status", "diagnosis1_reason",
+                    "generation_status", "generation_error_type", "variant_error_type"}
+        if required - set(results) or not results.plan1_protocol_version.eq(2).all() or not results.plan1_rank.eq(1).all():
+            raise ValueError("Combined analysis requires protocol-2 rank-1 judgments")
+        if (set(results.model) != set(MODEL_LABELS) or set(results.variant) != set(ALL_VARIANT_LABELS)
+                or len(results) != results.id.nunique() * len(MODEL_LABELS) * len(ALL_VARIANT_LABELS)):
+            raise ValueError('Combined analysis requires every record/model/variant slot for four models and seven variants')
+        summaries = {
+            'main_summary_stats': summarize_main_results(results, bootstrap_samples, seed, available_scores=True),
+            'generator_retrieval_gains': summarize_generator_retrieval_gains(
+                results, available_scores=True, average_only=True),
+            'group_retrieval_gains': summarize_group_retrieval_gains(results, available_scores=True),
+            'coverage_and_failures': summarize_coverage_and_failures(results),
+        }
+        if source_hash != _sha256(results_path):
+            raise RuntimeError('The source CSV changed during analysis')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for name, frame in summaries.items():
+            frame.to_csv(output_dir / f'{name}.csv', index=False, na_rep='')
+        return summaries
     run_path = results_path.with_name('run.json')
     run_bytes = run_path.read_bytes() if run_path.exists() else None
     run = json.loads(run_bytes) if run_bytes is not None else {}
@@ -451,14 +524,16 @@ def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--results-csv', type=Path, default=ROOT / RESULTS)
-    parser.add_argument('--csv-only', action='store_true', help='Regenerate the three statistics CSVs without rendering TeX.')
+    parser.add_argument('--csv-only', action='store_true', help='Regenerate statistics CSVs without rendering TeX.')
     args = parser.parse_args(argv)
-    manifest = generate_table_statistics(args.results_csv)
+    combined = (args.results_csv.resolve() == (ROOT / RESULTS).resolve()
+                or 'plan1_protocol_version' in pd.read_csv(args.results_csv, nrows=0).columns)
+    manifest = generate_table_statistics(args.results_csv, combined=combined)
     analysis_dir = args.results_csv.expanduser().resolve().parent / 'analysis'
-    print(f'Saved statistics and provenance to {analysis_dir}')
+    print(f'Saved statistics to {analysis_dir}')
     if not args.csv_only:
         # All imports remain at module scope; this renderer only consumes the saved CSVs.
-        generate_tables(analysis_dir)
+        generate_tables(analysis_dir, combined=combined)
     return manifest
 
 

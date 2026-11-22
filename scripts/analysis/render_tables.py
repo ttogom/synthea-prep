@@ -1,8 +1,9 @@
 """Render the four report tables from three saved statistics CSVs.
 
-Run after summarize_experiment_results.py --csv-only. By default all four
-experiment artifacts and report copies are updated. Use --table to select one,
-or --analysis-only to leave the report untouched. No statistical tests or judging are run.
+Run after summarize_experiment_results.py --csv-only. The combined workflow
+writes only experiment artifacts. Explicitly selected historical analysis
+directories can also update report copies unless --analysis-only is set.
+Use --table to select one. No statistical tests or judging are run.
 """
 
 import argparse
@@ -28,7 +29,7 @@ from scripts.analysis.table_rendering import (
 )
 
 
-DEFAULT_ANALYSIS = ROOT / 'experiments/output/2026-11-12_022701PST__test_so__main/analysis'
+DEFAULT_ANALYSIS = ROOT / 'experiments/results_all_variants/analysis'
 DEFAULT_REPORT_DIR = ROOT.parent / 'CSCI-566-Midterm-Report/figures'
 TABLES = {
     'main_results': render_main_results_table,
@@ -42,7 +43,7 @@ TABLE_INPUTS = {name: name for name in TABLES}
 TABLE_INPUTS['history_gains_over_others'] = 'group_retrieval_gains'
 
 
-def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=None):
+def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=None, *, combined=False):
     """Save selected TeX files, optional report copies, and byte-level provenance.
 
     Validate every selected CSV before changing any table. A single-table refresh
@@ -55,10 +56,22 @@ def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=
         raise ValueError('Select distinct table names from: ' + ', '.join(TABLES))
     prepared = {}
     for name in names:
-        source = analysis_dir / f'{TABLE_INPUTS[name]}.csv'
+        input_name = 'main_summary_stats' if combined and name == 'main_results' else TABLE_INPUTS[name]
+        source = analysis_dir / f'{input_name}.csv'
         snapshot = source.read_bytes()
         scores = pd.read_csv(StringIO(snapshot.decode('utf-8-sig')))
-        prepared[name] = (source, snapshot, TABLES[name](scores).encode('utf-8'))
+        prepared[name] = (source, snapshot, (TABLES[name](scores, available_scores=True) if combined
+                                             else TABLES[name](scores)).encode('utf-8'))
+    if combined:
+        (analysis_dir / 'figures').mkdir(parents=True, exist_ok=True)
+        outputs = {}
+        for name, (_, _, snippet) in prepared.items():
+            output_name = 'main_summary_stats' if name == 'main_results' else name
+            destination = analysis_dir / 'tables' / f'{output_name}.tex'
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(snippet)
+            outputs[name] = {'table': destination}
+        return outputs
     manifest_path = analysis_dir / 'table_exports_manifest.json'
     previous = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     records = previous.get('tables', {})
@@ -104,7 +117,10 @@ def main(argv=None):
     parser.add_argument('--report-dir', type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument('--analysis-only', action='store_true', help='Write experiment TeX files without updating report copies.')
     args = parser.parse_args(argv)
-    outputs = generate_tables(args.analysis_dir, args.table, None if args.analysis_only else args.report_dir)
+    combined = (args.analysis_dir.resolve() == DEFAULT_ANALYSIS.resolve()
+                or (args.analysis_dir / 'main_summary_stats.csv').exists())
+    outputs = generate_tables(args.analysis_dir, args.table, None if args.analysis_only else args.report_dir,
+                              combined=combined)
     for name, paths in outputs.items():
         print(f"Saved {name}: {paths['table']}")
         if 'report' in paths:

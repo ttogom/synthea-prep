@@ -7,6 +7,8 @@ or recompute significance. Formatting and approved captions live here.
 import numpy as np
 import pandas as pd
 
+from scripts.analysis.table_statistics import active_variants, VARIANT_LABELS
+
 
 MODEL_LABELS = {
     "gpt_4o_mini": "GPT-4o mini", "ollama_gemma3_4b": "Gemma 3 4B",
@@ -46,7 +48,91 @@ def _models(summary):
     return [model for model in MODEL_LABELS if model in present] + sorted(present - set(MODEL_LABELS))
 
 
-def render_main_results_table(scores):
+def _gain(value, pvalue):
+    if pd.isna(value):
+        return '--'
+    stars = ('**' if pvalue < 0.01 else '*' if pvalue < 0.05 else '') if value > 0 else ''
+    suffix = '^{' + stars + '}' if stars else ''
+    value = 0.0 if abs(value) < 0.00005 else value
+    return f'${value:+.4f}{suffix}$'
+
+
+def _render_average_gains(data):
+    """The combined workflow has one model-average comparison per variant/outcome."""
+    required = {'model', 'variant', 'metric', 'baseline_variant', 'mean_difference',
+                'p_value_holm', 'family_size', 'n_generators_averaged'}
+    if required - set(data) or data.empty or data.duplicated(['variant', 'metric']).any():
+        raise ValueError('Require distinct model-average gain rows')
+    variants = active_variants(data)[1:]
+    if (set(data.variant) != set(VARIANT_LABELS) - {'llm_only'}
+            or not data.model.eq('model_average').all() or not data.baseline_variant.eq('llm_only').all()
+            or not set(data.metric).issubset(METRICS)
+            or not data.family_size.eq(len(variants)).all()
+            or not data.n_generators_averaged.eq(4).all()):
+        raise ValueError('Invalid average-only comparison family')
+    if set(zip(data.variant, data.metric)) != {(v, m) for v in variants for m in METRICS}:
+        raise ValueError('Missing average comparison')
+    if (not data.mean_difference.dropna().between(-1, 1).all()
+            or not data.p_value_holm.dropna().between(0, 1).all()):
+        raise ValueError('Invalid gain or p-value')
+    lines = [r'\begin{table*}[t]', r'\centering', r'\small', r'\begin{tabular}{lll}',
+             r'\toprule', r'Configuration & Diagnosis $\Delta$ & Treatment $\Delta$ \\', r'\midrule']
+    for variant in variants:
+        cells = [_tex(VARIANT_LABELS[variant])]
+        for metric in METRICS:
+            row = data.loc[data.variant.eq(variant) & data.metric.eq(metric)].iloc[0]
+            cells.append(_gain(row.mean_difference, row.p_value_holm))
+        lines.append(' & '.join(cells) + r' \\')
+    lines += [r'\bottomrule', r'\end{tabular}',
+              r'\caption{Equal-generator average gains over No retrieval. Average within each record before paired patient-clustered testing; incomplete pairs are excluded. Stars use one-sided Holm-adjusted improvement tests.}',
+              r'\label{tab:retrieval-gains}', r'\end{table*}']
+    return '\n'.join(lines) + '\n'
+
+
+def _render_available_groups(data):
+    """Split the seven-variant group results into one compact table per generator."""
+    required = {'model', 'variant', 'metric', 'group', 'mean_baseline', 'mean_retrieval',
+                'mean_difference', 'p_value_holm', 'paired_mean_baseline', 'paired_mean_retrieval'}
+    if required - set(data) or data.empty or data.duplicated(['model', 'variant', 'metric', 'group']).any():
+        raise ValueError('Require distinct group gain rows')
+    variants = active_variants(data)
+    if not set(data.group).issubset(GROUPS) or not set(data.metric).issubset(METRICS):
+        raise ValueError('Unknown group/outcome')
+    for column in ('mean_baseline', 'mean_retrieval', 'paired_mean_baseline',
+                   'paired_mean_retrieval', 'p_value_holm'):
+        if not data[column].dropna().between(0, 1).all():
+            raise ValueError('Invalid group mean or p-value')
+    paired = data.loc[data.mean_difference.notna()]
+    if not np.allclose(paired.paired_mean_retrieval - paired.paired_mean_baseline,
+                       paired.mean_difference, rtol=0, atol=1e-12):
+        raise ValueError('Group differences must match paired means')
+    lines = []
+    for model in _models(data):
+        lines += [r'\begin{table*}[t]', r'\centering', r'\scriptsize', r'\begin{tabular}{llllll}',
+                  r'\toprule', r'Group & Configuration & Diagnosis & $\Delta$ & Treatment & $\Delta$ \\', r'\midrule']
+        for group in GROUPS:
+            for variant in variants:
+                cells = [group.title(), _tex(VARIANT_LABELS[variant])]
+                for metric in METRICS:
+                    block = data.loc[data.model.eq(model) & data.group.eq(group) & data.metric.eq(metric)]
+                    if len(block) != len(variants) - 1 or set(block.variant) != set(variants[1:]):
+                        raise ValueError('Missing group comparison')
+                    if block.mean_baseline.nunique(dropna=False) != 1:
+                        raise ValueError('Group comparisons must share the same baseline mean')
+                    row = block.iloc[0] if variant == 'llm_only' else block.loc[block.variant.eq(variant)].iloc[0]
+                    mean = row.mean_baseline if variant == 'llm_only' else row.mean_retrieval
+                    cells += ['--' if pd.isna(mean) else f'{mean:.4f}',
+                              '--' if variant == 'llm_only' else _gain(row.mean_difference, row.p_value_holm)]
+                lines.append(' & '.join(cells) + r' \\')
+            lines.append(r'\midrule')
+        lines += [r'\bottomrule', r'\end{tabular}',
+                  r'\caption{' + _tex(MODEL_LABELS.get(model, model)) +
+                  r': group means use available scores; gains use matched pairs. Stars use one-sided Holm-adjusted improvement tests.}',
+                  r'\end{table*}']
+    return '\n'.join(lines) + '\n'
+
+
+def render_main_results_table(scores, *, available_scores=False):
     """Render main-results means, mean CIs, and baseline-improvement significance stars."""
     columns = {"model", "variant", "metric", "mean_score", "coverage_complete",
                "mean_ci_low", "mean_ci_high", "baseline_delta", "p_value_holm"}
@@ -58,7 +144,7 @@ def render_main_results_table(scores):
     data["coverage_complete"] = data["coverage_complete"].map(_truth)
     numeric = ["mean_score", "mean_ci_low", "mean_ci_high", "baseline_delta", "p_value_holm"]
     data[numeric] = data[numeric].apply(pd.to_numeric, errors="raise")
-    valid = data.loc[data["coverage_complete"], "mean_score"]
+    valid = data.loc[data["mean_score"].notna() if available_scores else data["coverage_complete"], "mean_score"]
     if not np.isfinite(valid).all() or not valid.between(0, 1).all():
         raise ValueError("Complete means must be finite scores in [0, 1].")
     bounds = data[["mean_ci_low", "mean_ci_high"]]
@@ -71,12 +157,7 @@ def render_main_results_table(scores):
         raise ValueError("Require ordered mean CI bounds in [0, 1].")
     if not data["p_value_holm"].dropna().between(0, 1).all():
         raise ValueError("Adjusted p-values must lie in [0, 1].")
-    variants = (
-        ("llm_only", "No retrieval"),
-        ("patient_retrieval", "Sim. patient retrieval"),
-        ("guidelines", "Guideline retrieval"),
-        ("patient_retrieval_guidelines", "Both"),
-    )
+    variants = tuple((v, VARIANT_LABELS[v]) for v in active_variants(data))
     lines = [
         r"\begin{table*}[!b]", r"\centering", r"\small",
         r"\setlength{\tabcolsep}{2pt}",
@@ -91,7 +172,7 @@ def render_main_results_table(scores):
             lines.append(r"\midrule")
         best = {
             metric: data.loc[data["model"].eq(model) & data["metric"].eq(metric)
-                             & data["coverage_complete"], "mean_score"].max()
+                             & (data["mean_score"].notna() if available_scores else data["coverage_complete"]), "mean_score"].max()
             for metric in METRICS
         }
         for index, (variant, label) in enumerate(variants):
@@ -102,7 +183,7 @@ def render_main_results_table(scores):
                 if len(row) != 1:
                     raise ValueError(f"Missing overall mean for {model}/{variant}/{metric}.")
                 row = row.iloc[0]
-                if not row["coverage_complete"]:
+                if (pd.isna(row["mean_score"]) if available_scores else not row["coverage_complete"]):
                     cells += ["--", "--"]
                     continue
                 stars = ""
@@ -127,13 +208,15 @@ def render_main_results_table(scores):
     return "\n".join(lines) + "\n"
 
 
-def render_generator_retrieval_gains_table(summary):
+def render_generator_retrieval_gains_table(summary, *, available_scores=False):
     """Render two single-column panels with equal-generator average tests.
 
     Accept the saved baseline-significance CSV schema. An omitted outcome or
     incomplete eligible-score coverage is displayed as --, never as zero.
     Round displayed gains only; significance uses the unrounded adjusted p-value.
     """
+    if available_scores:
+        return _render_average_gains(summary)
     required = {"model", "metric", "variant", "baseline_variant", "mean_difference",
                 "coverage_complete", "p_value_holm", "family_size", "n_generators_averaged"}
     if required - set(summary):
@@ -215,7 +298,7 @@ def render_generator_retrieval_gains_table(summary):
     return "\n".join(lines) + "\n"
 
 
-def render_history_gains_over_others_table(scores):
+def render_history_gains_over_others_table(scores, *, available_scores=False):
     """Render the saved direct group-gain contrasts in two one-column panels.
 
     Read history_contrast_* columns from group_retrieval_gains.csv. Each effect
@@ -246,7 +329,7 @@ def render_history_gains_over_others_table(scores):
     numeric = [prefix + field for field in ("estimate", "p_value_holm", "family_size")]
     data[numeric] = data[numeric].apply(pd.to_numeric, errors="raise")
     data[prefix + "coverage_complete"] = data[prefix + "coverage_complete"].map(_truth)
-    effects = data.loc[data[prefix + "coverage_complete"], prefix + "estimate"]
+    effects = data.loc[data[prefix + "estimate"].notna() if available_scores else data[prefix + "coverage_complete"], prefix + "estimate"]
     if not np.isfinite(effects).all() or not effects.between(-2, 2).all():
         raise ValueError("Complete gain contrasts must be finite differences in [-2, 2].")
     if not data[prefix + "p_value_holm"].dropna().between(0, 1).all():
@@ -258,7 +341,7 @@ def render_history_gains_over_others_table(scores):
         raise ValueError("Unknown History contrast test status.")
     tested = data[prefix + "test_status"].eq("tested")
     if (tested != data[prefix + "p_value_holm"].notna()).any() or (
-            tested & ~data[prefix + "coverage_complete"]).any():
+            tested & ~data[prefix + "coverage_complete"] & (not available_scores)).any():
         raise ValueError("Tested History contrasts require complete coverage and adjusted p-values.")
     lines = [
         "% Generated from group_retrieval_gains.csv; regenerate rather than editing numerical cells.",
@@ -278,7 +361,8 @@ def render_history_gains_over_others_table(scores):
             cells = [_tex(MODEL_LABELS.get(model, model))]
             for metric in METRICS:
                 selected = data.loc[data.model.eq(model) & data.group.eq(group) & data.metric.eq(metric)]
-                if selected.empty or not selected.iloc[0][prefix + "coverage_complete"]:
+                if selected.empty or (pd.isna(selected.iloc[0][prefix + "estimate"]) if available_scores
+                                      else not selected.iloc[0][prefix + "coverage_complete"]):
                     cells.append("--")
                     continue
                 row = selected.iloc[0]
@@ -299,8 +383,10 @@ def render_history_gains_over_others_table(scores):
     return "\n".join(lines) + "\n"
 
 
-def render_group_retrieval_gains_table(scores):
+def render_group_retrieval_gains_table(scores, *, available_scores=False):
     """Render group raw baseline scores and starred retrieval-minus-baseline deltas."""
+    if available_scores:
+        return _render_available_groups(scores)
     variants = ("patient_retrieval", "guidelines", "patient_retrieval_guidelines")
     required = {"model", "metric", "group", "variant", "mean_baseline", "mean_retrieval",
                 "mean_difference", "p_value_holm", "coverage_complete"}
