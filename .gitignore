@@ -88,6 +88,12 @@ med_copilot/docs/evaluation_literature_review.md
 !/experiments/output/*/provenance/reported-usage-cost.json
 !/experiments/output/*/provenance/recovery-incidents.json
 !/experiments/output/*/provenance/api-usage.jsonl
+# Plan judge v2 outputs: manifest and judgments only; .lease and anything else stay local.
+!/experiments/output/*/plan_judging_v2/
+/experiments/output/*/plan_judging_v2/*/*
+!/experiments/output/*/plan_judging_v2/*/manifest.json
+!/experiments/output/*/plan_judging_v2/*/judgments.jsonl
+!/experiments/output/*/plan_judging_v2/*/judgments.csv
 
 # Runtime coordination outside experiment output directories.
 /med_copilot/data/patient_retrieval_so/.initialization.lock
