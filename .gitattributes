@@ -6,3 +6,5 @@ experiments/output/2026-11-20_013614PST__test_so__main__013bbd98acfb/results.jso
 experiments/output/2026-11-20_013614PST__test_so__main__013bbd98acfb/results_summary.html filter=lfs diff=lfs merge=lfs -text
 experiments/output/*/plan_judging_v2/**/judgments.csv filter=lfs diff=lfs merge=lfs -text
 experiments/output/*/plan_judging_v2/**/judgments.jsonl filter=lfs diff=lfs merge=lfs -text
+experiments/results_all_variants/experiment_results.csv filter=lfs diff=lfs merge=lfs -text
+experiments/results_all_variants/plan_judgments_v2.csv filter=lfs diff=lfs merge=lfs -text

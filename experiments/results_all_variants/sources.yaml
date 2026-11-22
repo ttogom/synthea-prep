@@ -1,0 +1,21 @@
+labels: experiments/input/test_labels.jsonl
+patients: experiments/input/test_so.jsonl
+models:
+- gpt_4o_mini
+- ollama_gemma3_4b
+- ollama_llama3_2_3b
+- ollama_ministral_3_3b
+protocol_version: 2
+rank: 1
+runs:
+- path: experiments/output/2026-11-12_022701PST__test_so__main
+  variants:
+  - llm_only
+  - patient_retrieval
+  - guidelines
+  - patient_retrieval_guidelines
+- path: experiments/output/2026-11-20_013614PST__test_so__main__013bbd98acfb
+  variants:
+  - agentic_patient_retrieval
+  - agentic_guidelines
+  - agentic_both
