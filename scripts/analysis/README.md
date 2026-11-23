@@ -26,6 +26,10 @@ retained. The new `coverage_and_failures.csv` exposes statuses, denominators and
 failure reasons. Details and correction families are in the dataset
 README. No new provenance manifests or midterm report copies are written.
 
+Combined CSVs explicitly label p-values with `one_sided` or `two_sided` before
+the optional `_holm` suffix, including `history_contrast_p_value_one_sided_holm`.
+The historical export names described below retain their original schema.
+
 For the six direct, two-sided agentic-versus-non-agentic comparisons, run:
 
 ```bash

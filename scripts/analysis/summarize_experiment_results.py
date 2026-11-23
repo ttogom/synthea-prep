@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.analysis.render_tables import generate_tables
 from scripts.analysis.table_statistics import (
+    ONE_SIDED_P_VALUE_COLUMNS,
     VARIANT_LABELS as ALL_VARIANT_LABELS,
     summarize_main_results,
     summarize_generator_retrieval_gains,
@@ -413,6 +414,8 @@ def generate_table_statistics(results_path, output_dir=None, bootstrap_samples=1
             'group_retrieval_gains': summarize_group_retrieval_gains(results, available_scores=True),
             'coverage_and_failures': summarize_coverage_and_failures(results),
         }
+        summaries = {name: frame.rename(columns=ONE_SIDED_P_VALUE_COLUMNS)
+                     for name, frame in summaries.items()}
         if source_hash != _sha256(results_path):
             raise RuntimeError('The source CSV changed during analysis')
         output_dir.mkdir(parents=True, exist_ok=True)

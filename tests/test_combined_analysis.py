@@ -150,6 +150,10 @@ class CombinedExportTests(unittest.TestCase):
         self.assertTrue(pd.isna(failed.plan1_score))
         summaries = analysis.generate_table_statistics(data_path, bootstrap_samples=32, combined=True)
         gains = summaries['generator_retrieval_gains']
+        self.assertIn('p_value_one_sided', gains)
+        self.assertIn('p_value_one_sided_holm', gains)
+        self.assertNotIn('p_value', gains)
+        self.assertNotIn('p_value_holm', gains)
         self.assertEqual(set(gains.model), {'model_average'})
         self.assertTrue(gains.family_size.eq(6).all())
         self.assertTrue(gains.n_generators_averaged.eq(4).all())

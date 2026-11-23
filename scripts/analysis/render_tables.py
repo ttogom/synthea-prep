@@ -27,6 +27,7 @@ from scripts.analysis.table_rendering import (
     render_group_retrieval_gains_table,
     render_history_gains_over_others_table,
 )
+from scripts.analysis.table_statistics import ONE_SIDED_P_VALUE_COLUMNS
 
 
 DEFAULT_ANALYSIS = ROOT / 'experiments/results_all_variants/analysis'
@@ -60,6 +61,10 @@ def generate_tables(analysis_dir=DEFAULT_ANALYSIS, table_names=None, report_dir=
         source = analysis_dir / f'{input_name}.csv'
         snapshot = source.read_bytes()
         scores = pd.read_csv(StringIO(snapshot.decode('utf-8-sig')))
+        if combined:
+            if any(old in scores and new in scores for old, new in ONE_SIDED_P_VALUE_COLUMNS.items()):
+                raise ValueError('Ambiguous one-sided p-value columns')
+            scores = scores.rename(columns={new: old for old, new in ONE_SIDED_P_VALUE_COLUMNS.items()})
         prepared[name] = (source, snapshot, (TABLES[name](scores, available_scores=True) if combined
                                              else TABLES[name](scores)).encode('utf-8'))
     if combined:

@@ -326,6 +326,86 @@ class TablePipelineTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(), 'existing statistics\n')
         self.assertEqual(list(self.analysis.iterdir()), [sentinel])
 
+    def combined_pvalue_reference(self):
+        data = self.combined_rows()
+        cases = pd.factorize(data.id)[0] % 8
+        variants = data.variant.map({variant: index for index, variant in enumerate(analysis.ALL_VARIANT_LABELS)})
+        data['biolord_score_diagnosis1'] += variants * cases * .001
+        data['plan1_score'] += variants * (.01 + cases * .001)
+        # Keep untestable comparisons alongside finite p-values in both directions.
+        data.loc[data.variant.eq('agentic_both'), 'plan1_status'] = 'invalid_response'
+        data.loc[data.variant.eq('agentic_both'), 'plan1_reason'] = 'invalid_response'
+        data.to_csv(self.csv, index=False)
+        normalized = analysis.load_scored_results(self.csv)
+        return {
+            'main_summary_stats': analysis.summarize_main_results(normalized, 16, 17, available_scores=True),
+            'generator_retrieval_gains': analysis.summarize_generator_retrieval_gains(
+                normalized, available_scores=True, average_only=True),
+            'group_retrieval_gains': analysis.summarize_group_retrieval_gains(normalized, available_scores=True),
+            'coverage_and_failures': analysis.summarize_coverage_and_failures(normalized),
+        }
+
+    def test_combined_pvalue_names_change_without_changing_any_values(self):
+        original = self.combined_pvalue_reference()
+        mapping = {'p_value': 'p_value_one_sided', 'p_value_holm': 'p_value_one_sided_holm',
+                   'history_contrast_p_value': 'history_contrast_p_value_one_sided',
+                   'history_contrast_p_value_holm': 'history_contrast_p_value_one_sided_holm'}
+        sources = {path: path.read_bytes() for path in (self.csv, self.root / 'run.json', self.root / 'results.jsonl')}
+        # A combined export must not rewrite the independent two-sided comparison CSV.
+        counterparts.generate_agentic_comparisons(self.csv)
+        counterpart_path = self.analysis / counterparts.OUTPUT_NAME
+        sources[counterpart_path] = counterpart_path.read_bytes()
+        summaries = analysis.generate_table_statistics(self.csv, bootstrap_samples=16, seed=17, combined=True)
+        for name, frame in original.items():
+            with self.subTest(name=name):
+                expected = frame.rename(columns=mapping)
+                pd.testing.assert_frame_equal(summaries[name], expected, check_exact=True)
+                path = self.analysis / f'{name}.csv'
+                self.assertEqual(path.read_text(), expected.to_csv(index=False, na_rep=''))
+                saved = pd.read_csv(path)
+                self.assertFalse(set(mapping) & set(saved))
+                for field in saved:
+                    if 'p_value' in field:
+                        self.assertTrue('one_sided' in field or 'two_sided' in field, field)
+                for field in ('p_value_two_sided', 'p_value_two_sided_holm'):
+                    if field in frame:
+                        pd.testing.assert_series_equal(summaries[name][field], frame[field], check_exact=True)
+        self.assertIn('history_contrast_p_value_one_sided_holm', summaries['group_retrieval_gains'])
+        self.assertTrue(summaries['main_summary_stats'].p_value_one_sided.notna().any())
+        self.assertTrue(summaries['main_summary_stats'].p_value_one_sided.isna().any())
+        self.assertEqual(sources, {path: path.read_bytes() for path in sources})
+
+    def test_combined_rendering_is_identical_with_explicit_and_historical_pvalue_names(self):
+        original = self.combined_pvalue_reference()
+        analysis.generate_table_statistics(self.csv, bootstrap_samples=16, seed=17, combined=True)
+        outputs = exporter.generate_tables(self.analysis, combined=True)
+        rendered = {name: paths['table'].read_bytes() for name, paths in outputs.items()}
+        for name, renderer in exporter.TABLES.items():
+            input_name = 'main_summary_stats' if name == 'main_results' else exporter.TABLE_INPUTS[name]
+            self.assertEqual(rendered[name], renderer(original[input_name], available_scores=True).encode('utf-8'))
+        # Existing saved combined CSVs remain readable before the user regenerates them.
+        for name, frame in original.items():
+            frame.to_csv(self.analysis / f'{name}.csv', index=False, na_rep='')
+        outputs = exporter.generate_tables(self.analysis, combined=True)
+        self.assertEqual(rendered, {name: paths['table'].read_bytes() for name, paths in outputs.items()})
+
+    def test_combined_renderer_rejects_ambiguous_pvalue_columns_before_overwriting_tables(self):
+        self.combined_pvalue_reference()
+        analysis.generate_table_statistics(self.csv, bootstrap_samples=16, seed=17, combined=True)
+        outputs = exporter.generate_tables(self.analysis, combined=True)
+        protected = {paths['table']: paths['table'].read_bytes() for paths in outputs.values()}
+        path = self.analysis / 'group_retrieval_gains.csv'
+        original = pd.read_csv(path)
+        for old, new in (('p_value', 'p_value_one_sided'), ('p_value_holm', 'p_value_one_sided_holm'),
+                         ('history_contrast_p_value', 'history_contrast_p_value_one_sided'),
+                         ('history_contrast_p_value_holm', 'history_contrast_p_value_one_sided_holm')):
+            ambiguous = original.copy()
+            ambiguous[old] = ambiguous[new]
+            ambiguous.to_csv(path, index=False)
+            with self.subTest(field=old), self.assertRaisesRegex(ValueError, 'Ambiguous'):
+                exporter.generate_tables(self.analysis, combined=True)
+            self.assertEqual(protected, {destination: destination.read_bytes() for destination in protected})
+
     def test_default_renderer_never_falls_back_to_legacy_csv_or_updates_report(self):
         # Even when only a legacy filename exists, the default combined path must fail safely.
         self.analysis.mkdir()

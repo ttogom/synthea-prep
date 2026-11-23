@@ -39,6 +39,15 @@ SIGNIFICANCE_LEVELS = (0.01, 0.05)
 MODEL_AVERAGE = "model_average"
 
 
+# Explicit public CSV names; generic internal names also serve two-sided tests.
+ONE_SIDED_P_VALUE_COLUMNS = {
+    'p_value': 'p_value_one_sided',
+    'p_value_holm': 'p_value_one_sided_holm',
+    'history_contrast_p_value': 'history_contrast_p_value_one_sided',
+    'history_contrast_p_value_holm': 'history_contrast_p_value_one_sided_holm',
+}
+
+
 def _holm_adjust(pvalues):
     """Adjust the planned family, reserving missing tests with p=1."""
     values = np.asarray(pvalues, dtype=float)

@@ -72,6 +72,11 @@ therefore give different cohorts; these are available-case comparisons.
 Uncertainty and tests cluster by patient UUID, keeping a patient's condition
 examples together. Tests use CR1 errors and G-1 Student-t degrees of freedom.
 Primary tests are one-sided improvement; exploratory two-sided checks are separate.
+All exported p-value names state their direction: `p_value_one_sided` and
+`p_value_one_sided_holm`, or `p_value_two_sided` and `p_value_two_sided_holm`.
+History contrasts use `history_contrast_p_value_one_sided` and
+`history_contrast_p_value_one_sided_holm`. The `_holm` suffix indicates adjustment
+for multiple comparisons.
 Holm families per outcome: six baseline comparisons within each generator for the
 main summary; six model-average comparisons for generator gains; eighteen tests
 (six variants x three groups) within each generator for group gains. The existing
