@@ -219,8 +219,38 @@ def summarize_generator_retrieval_gains(results, metrics=("diagnosis", "plan"),
     return _with_exploratory_two_sided_checks(summary, ("metric",), "mean_difference")
 
 
+def summarize_agentic_counterpart_comparisons(results):
+    """Six two-sided agentic-minus-fixed tests on within-record model averages.
+
+    Require all four generator slots and seven variants. Each pair uses only
+    records with all four scores in both arms; Plan references must be eligible.
+    Cluster by patient UUID and adjust one Holm family across all six tests.
+    """
+    if {'id', 'model', 'variant'} - set(results) or len(results) != results.id.nunique() * 4 * len(VARIANT_LABELS):
+        raise ValueError('Require every record/model/variant slot for four models and seven variants')
+    comparisons = (('agentic_patient_retrieval', 'patient_retrieval'),
+                   ('agentic_guidelines', 'guidelines'),
+                   ('agentic_both', 'patient_retrieval_guidelines'))
+    summary = _summarize_paired_significance(
+        results, ('diagnosis', 'plan'), comparisons, 'two-sided',
+        include_model_average=True, available_scores=True, average_only=True,
+        separate_metric_families=False,
+    )
+    summary.loc[summary.n_pairs.eq(0), 'n_patients'] = 0
+    summary.loc[summary.n_pairs.eq(0), ['mean_baseline', 'mean_retrieval']] = np.nan
+    summary['alternative'] = 'two-sided'
+    renamed = {'baseline_variant': 'nonagentic_variant', 'variant': 'agentic_variant',
+               'mean_baseline': 'mean_nonagentic', 'mean_retrieval': 'mean_agentic',
+               'n_baseline': 'n_nonagentic', 'n_retrieval': 'n_agentic',
+               'p_value': 'p_value_two_sided', 'p_value_holm': 'p_value_two_sided_holm'}
+    renamed.update({column: column.replace('significant_', 'significant_two_sided_', 1)
+                    for column in summary if column.startswith('significant_')})
+    return summary.rename(columns=renamed)
+
+
 def _summarize_paired_significance(results, metrics, comparisons, alternative,
-                                 include_model_average=False, available_scores=False, average_only=False):
+                                 include_model_average=False, available_scores=False, average_only=False,
+                                 separate_metric_families=True):
     """Shared pairing, eligibility, clustering, and outcome-wise multiplicity."""
     if isinstance(metrics, str) or not metrics or len(set(metrics)) != len(metrics):
         raise ValueError("metrics must be a nonempty sequence of distinct outcome names.")
@@ -306,10 +336,10 @@ def _summarize_paired_significance(results, metrics, comparisons, alternative,
                                test_df=df, p_value=pvalue, test_status=status)
                 rows.append(row)
     summary = pd.DataFrame(rows)
-    for metric in metrics:
-        mask = summary["metric"].eq(metric)
-        summary.loc[mask, "p_value_holm"] = _holm_adjust(summary.loc[mask, "p_value"])
-        summary.loc[mask, "family_size"] = int(mask.sum())
+    families = summary.groupby('metric', sort=False) if separate_metric_families else [('all', summary)]
+    for _, family in families:
+        summary.loc[family.index, 'p_value_holm'] = _holm_adjust(family.p_value)
+        summary.loc[family.index, 'family_size'] = len(family)
     summary["family_size"] = summary["family_size"].astype(int)
     for adjustment, p_column in (("raw", "p_value"), ("holm", "p_value_holm")):
         for alpha in SIGNIFICANCE_LEVELS:

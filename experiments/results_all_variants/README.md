@@ -79,3 +79,25 @@ History contrast family is two contrasts across four generators. Missing tests
 retain their family positions. Harmful/penalized scores are secondary and their
 clinical accuracy was not established by this export. COPD references are record
 artifacts, so treatment History summaries cover hypertension only.
+
+## Agentic versus non-agentic significance
+
+```bash
+python scripts/analysis/compare_agentic_variants.py
+```
+
+This separately writes `analysis/agentic_vs_nonagentic_significance.csv`: six
+two-sided tests comparing patient retrieval, guidelines, and both with their
+matching non-agentic variants, for diagnosis and treatment coverage. It reads
+`experiment_results.csv`; existing summary CSVs and tables are left untouched.
+
+Each test averages the four generators within each record before pairing the
+two variants. All four scores must exist in both arms; unavailable treatment
+references are excluded. The CSV includes paired arm means, the signed
+`mean_difference` (agentic minus non-agentic), paired record/patient counts,
+test status, raw `p_value_two_sided`, and `p_value_two_sided_holm`. The tests use
+patient-clustered CR1 errors with G-1 Student-t degrees of freedom and one Holm
+family across **all six tests**, with raw/adjusted 0.01 and 0.05 significance flags.
+Untestable comparisons retain their family positions and have blank p-values
+and flags. These are exploratory comparisons. Paired means can differ from
+the available-case means in `main_summary_stats.csv` because their cohorts differ.

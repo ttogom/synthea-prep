@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from scripts.analysis import summarize_experiment_results as analysis
 from scripts.analysis import render_tables as exporter
+from scripts.analysis import compare_agentic_variants as counterparts
 
 
 MODEL='gpt_4o_mini'
@@ -336,6 +337,71 @@ class TablePipelineTests(unittest.TestCase):
         self.assertFalse(self.report.exists())
         self.assertFalse((self.analysis / 'tables').exists())
         self.assertFalse((self.analysis / 'figures').exists())
+
+    def test_counterpart_cli_saves_only_its_six_comparisons_and_preserves_sources(self):
+        self.combined_rows().to_csv(self.csv, index=False)
+        self.analysis.mkdir()
+        saved_table = self.analysis / 'main_summary_stats.csv'
+        saved_table.write_text('protected existing statistics\n')
+        sources = {path: path.read_bytes() for path in (self.csv, self.root / 'run.json', self.root / 'results.jsonl', saved_table)}
+        # Exercise the no-argument command without pointing it at production artifacts.
+        with patch.object(counterparts, 'ROOT', self.root), patch.object(counterparts, 'RESULTS', self.csv.name):
+            with redirect_stdout(StringIO()) as output:
+                counterparts.main([])
+        destination = self.analysis / 'agentic_vs_nonagentic_significance.csv'
+        scores = pd.read_csv(destination)
+        self.assertEqual(len(scores), 6)
+        self.assertFalse(scores.duplicated(['agentic_variant', 'nonagentic_variant', 'metric']).any())
+        self.assertTrue(scores.family_size.eq(6).all())
+        self.assertTrue(scores.alternative.eq('two-sided').all())
+        self.assertTrue(scores.n_generators_averaged.eq(4).all())
+        self.assertEqual({path.name for path in self.analysis.iterdir()}, {destination.name, saved_table.name})
+        self.assertIn(str(destination), output.getvalue())
+        first = destination.read_bytes()
+        with redirect_stdout(StringIO()):
+            counterparts.main(['--results-csv', str(self.csv)])
+        self.assertEqual(first, destination.read_bytes())
+        self.assertEqual(sources, {path: path.read_bytes() for path in sources})
+
+    def test_counterpart_reader_excludes_stale_failed_scores_and_preserves_zero(self):
+        data = self.combined_rows()
+        ids = data.id.unique()[:3]
+        plan_failure = (data.id.eq(ids[0]) & data.model.eq(MODEL)
+                        & data.variant.eq('agentic_patient_retrieval'))
+        data.loc[plan_failure, 'plan1_status'] = 'invalid_response'  # Stale nonzero score must be masked.
+        diagnosis_failure = data.id.eq(ids[1]) & data.model.eq(MODEL) & data.variant.eq('agentic_both')
+        data.loc[diagnosis_failure, 'diagnosis1_status'] = 'not_scored'
+        data.loc[data.id.eq(ids[2]) & data.variant.eq('agentic_patient_retrieval'), 'plan1_score'] = 0.
+        data.to_csv(self.csv, index=False)
+        scores = counterparts.generate_agentic_comparisons(self.csv)
+        plan = scores.query("agentic_variant == 'agentic_patient_retrieval' and metric == 'plan'").iloc[0]
+        self.assertEqual(plan.n_pairs, data.id.nunique() - 1)
+        expected = data.loc[data.variant.eq('agentic_patient_retrieval') & data.id.ne(ids[0]), 'plan1_score'].mean()
+        self.assertAlmostEqual(plan.mean_agentic, expected)
+        diagnosis = scores.query("agentic_variant == 'agentic_both' and metric == 'diagnosis'").iloc[0]
+        self.assertEqual(diagnosis.n_pairs, data.id.nunique() - 1)
+
+    def test_counterpart_rejects_wrong_protocol_rank_missing_status_and_incomplete_inputs(self):
+        data = self.combined_rows()
+        for invalid in (data.assign(plan1_protocol_version=1), data.assign(plan1_rank=2),
+                        data.drop(columns='diagnosis1_status'), data.drop(columns='plan1_protocol_version'),
+                        data.iloc[1:], data.loc[data.model.ne(MODEL)],
+                        data.loc[data.variant.ne('agentic_both')], data.assign(model='unknown')):
+            invalid.to_csv(self.csv, index=False)
+            with self.subTest(rows=len(invalid)), self.assertRaises(ValueError):
+                counterparts.generate_agentic_comparisons(self.csv)
+            self.assertFalse(self.analysis.exists())
+
+    def test_counterpart_source_change_aborts_without_overwriting_existing_output(self):
+        self.combined_rows().to_csv(self.csv, index=False)
+        self.analysis.mkdir()
+        destination = self.analysis / counterparts.OUTPUT_NAME
+        destination.write_text('keep existing counterpart tests\n')
+        with patch.object(counterparts, 'sha256_file', side_effect=['before', 'after']):
+            with self.assertRaisesRegex(RuntimeError, 'source CSV changed'):
+                counterparts.generate_agentic_comparisons(self.csv)
+        self.assertEqual(destination.read_text(), 'keep existing counterpart tests\n')
+        self.assertEqual(list(self.analysis.iterdir()), [destination])
 
 
 if __name__=='__main__':

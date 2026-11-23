@@ -26,6 +26,18 @@ retained. The new `coverage_and_failures.csv` exposes statuses, denominators and
 failure reasons. Details and correction families are in the dataset
 README. No new provenance manifests or midterm report copies are written.
 
+For the six direct, two-sided agentic-versus-non-agentic comparisons, run:
+
+```bash
+python scripts/analysis/compare_agentic_variants.py
+```
+
+This writes only `analysis/agentic_vs_nonagentic_significance.csv` under the
+combined results directory. It averages all four generators within each record,
+uses matched records and patient-clustered tests, and applies Holm across all six
+comparisons. See the [dataset README](../../experiments/results_all_variants/README.md#agentic-versus-non-agentic-significance)
+for missing-score handling and column definitions.
+
 The historical four-variant APIs retain their original defaults for reproducibility.
 The instructions below describe that earlier workflow and its saved artifacts;
 they should not be used to mix protocol-1 scores into the combined analysis.
@@ -89,6 +101,8 @@ artifacts; report synchronization remains an explicit render command.
   helper APIs remain available, but the CLI generates only the selected tables.
 - `table_statistics.py`: means, patient-cluster confidence intervals, paired tests,
   and multiplicity correction.
+- `compare_agentic_variants.py`: six paired two-sided counterpart comparisons
+  with equal-generator averages and a joint Holm family.
 - `table_rendering.py`: all four LaTeX layouts, captions, rounding, bolding, and stars.
 - `render_tables.py`: CSV-to-TeX export, report synchronization, and export provenance.
 

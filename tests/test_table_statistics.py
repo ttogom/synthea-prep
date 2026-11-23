@@ -682,5 +682,128 @@ class AvailableScoreStatisticsTests(unittest.TestCase):
 
 
 
+class AgenticCounterpartStatisticsTests(unittest.TestCase):
+    def frame(self):
+        data = normalized_fixture()
+        data['plan'] = 1 - data.plan
+        # Different effects/noise across counterparts; some effects are negative.
+        for variant, scale in (('agentic_patient_retrieval', .003), ('agentic_guidelines', -.004),
+                               ('agentic_both', .007)):
+            mask = data.variant.eq(variant)
+            data.loc[mask, 'diagnosis'] += scale * (data.loc[mask, 'id'].astype(int) % 5 - 2)
+            data.loc[mask, 'plan'] += scale * (data.loc[mask, 'id'].astype(int) % 7 - 3)
+        return data
+
+    def test_six_signed_effects_and_two_sided_tests_match_independent_clustered_ols(self):
+        frame = self.frame()
+        # Missing one model invalidates only that case/outcome/counterpart, not the whole cohort.
+        frame.loc[frame.id.eq('0') & frame.model.eq(ALL_MODELS[0])
+                  & frame.variant.eq('agentic_patient_retrieval'), 'diagnosis'] = np.nan
+        frame.loc[frame.id.eq('2') & frame.model.eq(ALL_MODELS[1])
+                  & frame.variant.eq('guidelines'), 'plan'] = np.nan
+        frame.loc[frame.id.eq('4') & frame.model.isin(ALL_MODELS[2:])
+                  & frame.variant.eq('agentic_both'), 'plan'] = np.nan
+        frame.loc[frame.id.eq('6') & frame.variant.eq('agentic_patient_retrieval'), 'plan'] = 0
+        original = frame.copy(deep=True)
+        output = stats.summarize_agentic_counterpart_comparisons(frame)
+        self.assertEqual(len(output), 6)
+        self.assertEqual(set(zip(output.agentic_variant, output.nonagentic_variant)), {
+            ('agentic_patient_retrieval', 'patient_retrieval'), ('agentic_guidelines', 'guidelines'),
+            ('agentic_both', 'patient_retrieval_guidelines')})
+        self.assertTrue(output.n_generators_averaged.eq(4).all())
+        self.assertTrue(output.model.eq('model_average').all())
+        self.assertTrue(output.alternative.eq('two-sided').all())
+        expected_pvalues = []
+        for row in output.itertuples():
+            eligible = frame.loc[frame.plan_eligible] if row.metric == 'plan' else frame
+            scores = eligible.pivot(index=['id', 'variant'], columns='model', values=row.metric)
+            means = scores.reindex(columns=ALL_MODELS).mean(axis=1, skipna=False).unstack('variant')
+            pairs = means[[row.agentic_variant, row.nonagentic_variant]].dropna()
+            differences = pairs[row.agentic_variant] - pairs[row.nonagentic_variant]
+            patients = eligible.drop_duplicates('id').set_index('id').loc[pairs.index, 'patient_uuid']
+            fit = sm.OLS(differences, np.ones((len(differences), 1))).fit(
+                cov_type='cluster', cov_kwds={'groups': patients, 'use_correction': True}, use_t=True)
+            self.assertEqual(row.n_eligible, eligible.id.nunique())
+            self.assertEqual(row.n_pairs, len(pairs))
+            self.assertEqual(row.n_patients, patients.nunique())
+            self.assertEqual(row.test_df, patients.nunique() - 1)
+            self.assertAlmostEqual(row.mean_agentic, pairs[row.agentic_variant].mean())
+            self.assertAlmostEqual(row.mean_nonagentic, pairs[row.nonagentic_variant].mean())
+            self.assertAlmostEqual(row.mean_difference, differences.mean())
+            self.assertAlmostEqual(row.test_statistic, fit.tvalues.iloc[0])
+            self.assertAlmostEqual(row.p_value_two_sided, fit.pvalues.iloc[0])
+            expected_pvalues.append(fit.pvalues.iloc[0])
+        adjusted = multipletests(expected_pvalues, method='holm')[1]
+        np.testing.assert_allclose(output.p_value_two_sided_holm, adjusted, rtol=1e-10)
+        self.assertTrue(output.family_size.eq(6).all())
+        for adjustment, pvalues in (('raw', np.array(expected_pvalues)), ('holm', adjusted)):
+            for alpha in (.01, .05):
+                column = f'significant_two_sided_{adjustment}_{str(alpha).replace(".", "_")}'
+                np.testing.assert_array_equal(output[column].to_numpy(dtype=bool), pvalues < alpha)
+        self.assertTrue(output.mean_difference.gt(0).any())
+        self.assertTrue(output.mean_difference.lt(0).any())
+        pd.testing.assert_frame_equal(frame, original)
+
+    def test_order_invariance_and_no_dependence_on_llm_only_scores(self):
+        frame = self.frame()
+        expected = stats.summarize_agentic_counterpart_comparisons(frame)
+        frame.loc[frame.variant.eq('llm_only'), ['diagnosis', 'plan']] = np.nan
+        pd.testing.assert_frame_equal(expected, stats.summarize_agentic_counterpart_comparisons(
+            frame.sample(frac=1, random_state=13)))
+
+    def test_missing_outcome_reserves_all_six_holm_places_and_never_becomes_zero(self):
+        frame = self.frame().assign(plan=np.nan)
+        output = stats.summarize_agentic_counterpart_comparisons(frame)
+        missing = output.metric.eq('plan')
+        self.assertTrue(output.loc[missing, ['mean_nonagentic', 'mean_agentic', 'mean_difference',
+                                            'p_value_two_sided', 'p_value_two_sided_holm']].isna().all().all())
+        self.assertTrue(output.loc[missing, 'n_pairs'].eq(0).all())
+        self.assertTrue(output.loc[missing, 'n_patients'].eq(0).all())
+        self.assertTrue(output.loc[missing, 'significant_two_sided_holm_0_05'].isna().all())
+        adjusted = multipletests(output.p_value_two_sided.fillna(1), method='holm')[1]
+        np.testing.assert_allclose(output.loc[~missing, 'p_value_two_sided_holm'], adjusted[~missing])
+        self.assertTrue(output.family_size.eq(6).all())
+
+    def test_unavailable_references_and_unpaired_arms_do_not_produce_paired_means(self):
+        frame = self.frame().assign(plan_eligible=False)
+        plans = stats.summarize_agentic_counterpart_comparisons(frame).query("metric == 'plan'")
+        self.assertTrue(plans.n_eligible.eq(0).all())
+        self.assertTrue(plans.test_status.eq('unavailable').all())
+        self.assertTrue(plans.p_value_two_sided.isna().all())
+        frame = self.frame()
+        frame.loc[frame.variant.eq('agentic_both'), 'plan'] = np.nan
+        row = stats.summarize_agentic_counterpart_comparisons(frame).query(
+            "metric == 'plan' and agentic_variant == 'agentic_both'").iloc[0]
+        self.assertEqual(row.n_nonagentic, 23)
+        self.assertEqual(row.n_agentic, 0)
+        self.assertTrue(pd.isna(row.mean_nonagentic))
+        self.assertTrue(pd.isna(row.mean_agentic))
+
+    def test_insufficient_clusters_and_constant_differences_never_claim_significance(self):
+        constant = self.frame().assign(diagnosis=.4, plan=.4)
+        constant.loc[constant.variant.str.startswith('agentic_'), 'diagnosis'] = .5
+        for frame, status in ((constant, 'zero_variance'),
+                              (self.frame().assign(patient_uuid='one-patient'), 'insufficient_patients')):
+            with self.subTest(status=status):
+                output = stats.summarize_agentic_counterpart_comparisons(frame)
+                self.assertTrue(output.test_status.eq(status).all())
+                self.assertTrue(output.p_value_two_sided.isna().all())
+                self.assertTrue(output.p_value_two_sided_holm.isna().all())
+                self.assertTrue(output.significant_two_sided_holm_0_05.isna().all())
+
+    def test_incomplete_slots_duplicate_keys_bad_identity_and_bad_scores_are_rejected(self):
+        frame = self.frame()
+        duplicate = frame.copy()
+        duplicate.iloc[1] = duplicate.iloc[0]
+        inconsistent = frame.copy()
+        inconsistent.loc[0, 'patient_uuid'] = 'wrong-patient'
+        for invalid in (frame.iloc[1:], frame.loc[frame.model.ne(ALL_MODELS[0])],
+                        frame.loc[frame.variant.ne('agentic_both')], duplicate, inconsistent,
+                        frame.assign(diagnosis=np.inf), frame.assign(plan=-.1),
+                        frame.drop(columns='plan_eligible')):
+            with self.subTest(rows=len(invalid)), self.assertRaises(ValueError):
+                stats.summarize_agentic_counterpart_comparisons(invalid)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
