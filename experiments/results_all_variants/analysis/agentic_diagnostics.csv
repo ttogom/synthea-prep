@@ -1,0 +1,198 @@
+section,metric,variant,group,model,value,n,note
+searches,mean_searches_per_case,agentic_patient_retrieval,,,2.24053826745164,2378.0,maximum is max_searches (4)
+searches,mean_searches_per_case,agentic_guidelines,,,3.689451476793249,2370.0,maximum is max_searches (4)
+searches,mean_searches_per_case,agentic_both,,,2.3614564831261102,2252.0,maximum is max_searches (4)
+searches,share_using_all_searches,agentic_guidelines,,,0.7,2370.0,
+searches,share_1_patient_1_guideline_searches,agentic_both,,,0.63898756660746,2252.0,
+searches,share_1_patient_2_guideline_searches,agentic_both,,,0.3605683836589698,2252.0,
+searches,share_1_patient_3_guideline_searches,agentic_both,,,0.0004440497335701599,2252.0,
+patient_choice,same_patient_as_fixed,agentic_patient_retrieval,,,0.0798990748528175,2378.0,agent pick equals the fixed pipeline pick
+patient_choice,agent_pick_same_condition,agentic_patient_retrieval,,,0.6227922624053827,2378.0,reference condition equals target condition
+patient_choice,fixed_pick_same_condition,agentic_patient_retrieval,,,0.5828427249789739,2378.0,reference condition equals target condition
+patient_choice,pick_not_top_of_first_search,agentic_patient_retrieval,,,0.3469301934398654,2378.0,agent did not keep P1
+patient_choice,pick_from_later_search,agentic_patient_retrieval,,,0.19974768713204374,2378.0,pick came after the first search results
+cost,min_agent_calls,agentic_patient_retrieval,,,2.0,2378.0,
+cost,median_agent_calls,agentic_patient_retrieval,,,3.0,2378.0,
+cost,max_agent_calls,agentic_patient_retrieval,,,4.0,2378.0,
+cost,share_with_2_agent_calls,agentic_patient_retrieval,,,0.0021026072329688814,2378.0,
+cost,share_with_3_agent_calls,agentic_patient_retrieval,,,0.7552565180824222,2378.0,
+cost,share_with_4_agent_calls,agentic_patient_retrieval,,,0.2426408746846089,2378.0,
+cost,mean_agent_control_tokens,agentic_patient_retrieval,,,7461.116904962153,2378.0,"GPT-4o-mini agent calls only, including retries"
+cost,median_agent_control_tokens,agentic_patient_retrieval,,,6530.0,2378.0,
+cost,mean_keyword_extraction_tokens,agentic_patient_retrieval,,,555.9339781328848,2378.0,
+cost,mean_graphrag_answer_tokens,agentic_patient_retrieval,,,0.0,2378.0,
+cost,min_agent_calls,agentic_guidelines,,,3.0,2370.0,
+cost,median_agent_calls,agentic_guidelines,,,5.0,2370.0,
+cost,max_agent_calls,agentic_guidelines,,,8.0,2370.0,
+cost,share_with_3_agent_calls,agentic_guidelines,,,0.0004219409282700422,2370.0,
+cost,share_with_4_agent_calls,agentic_guidelines,,,0.07637130801687764,2370.0,
+cost,share_with_5_agent_calls,agentic_guidelines,,,0.45274261603375526,2370.0,
+cost,share_with_6_agent_calls,agentic_guidelines,,,0.4468354430379747,2370.0,
+cost,share_with_7_agent_calls,agentic_guidelines,,,0.023206751054852322,2370.0,
+cost,share_with_8_agent_calls,agentic_guidelines,,,0.0004219409282700422,2370.0,
+cost,mean_agent_control_tokens,agentic_guidelines,,,12063.418143459916,2370.0,"GPT-4o-mini agent calls only, including retries"
+cost,median_agent_control_tokens,agentic_guidelines,,,11216.5,2370.0,
+cost,mean_keyword_extraction_tokens,agentic_guidelines,,,0.0,2370.0,
+cost,mean_graphrag_answer_tokens,agentic_guidelines,,,41768.91223628692,2370.0,
+cost,min_agent_calls,agentic_both,,,3.0,2252.0,
+cost,median_agent_calls,agentic_both,,,4.0,2252.0,
+cost,max_agent_calls,agentic_both,,,7.0,2252.0,
+cost,share_with_3_agent_calls,agentic_both,,,0.35079928952042627,2252.0,
+cost,share_with_4_agent_calls,agentic_both,,,0.36678507992895204,2252.0,
+cost,share_with_5_agent_calls,agentic_both,,,0.26376554174067496,2252.0,
+cost,share_with_6_agent_calls,agentic_both,,,0.015541740674955595,2252.0,
+cost,share_with_7_agent_calls,agentic_both,,,0.003108348134991119,2252.0,
+cost,mean_agent_control_tokens,agentic_both,,,10347.850799289521,2252.0,"GPT-4o-mini agent calls only, including retries"
+cost,median_agent_control_tokens,agentic_both,,,9556.5,2252.0,
+cost,mean_keyword_extraction_tokens,agentic_both,,,296.83658969804617,2252.0,
+cost,mean_graphrag_answer_tokens,agentic_both,,,15568.90186500888,2252.0,
+cost,mean_keyword_extraction_tokens,patient_retrieval,,,725.6396131202691,2378.0,fixed controller tokens
+cost,mean_guideline_question_tokens,guidelines,,,1307.764087468461,2378.0,fixed controller tokens
+cost,mean_graphrag_answer_tokens,guidelines,,,11910.000420521446,2378.0,one GraphRAG search per case
+guideline_text,median_guideline_bytes,agentic_guidelines,,,7248.5,2370.0,
+guideline_text,median_guideline_bytes,guidelines,,,2493.5,2370.0,same cases as the agentic row
+diagnosis_rule,mean_rejected_questions_per_case,agentic_guidelines+agentic_both,,,0.3178277801817395,4622.0,question named a diagnosis and had to be rewritten
+failures,failed_cases,agentic_both,diagnosis_term_rule,,3.0,,
+failures,failed_cases,agentic_both,guideline_byte_budget,,122.0,,
+failures,failed_cases,agentic_both,other_error,,1.0,,
+failures,failed_cases,agentic_guidelines,diagnosis_term_rule,,3.0,,
+failures,failed_cases,agentic_guidelines,guideline_byte_budget,,4.0,,
+failures,failed_cases,agentic_guidelines,other_error,,1.0,,
+failures,failed_cases_total,all_agentic,,,134.0,,
+question_focus,share_treatment_questions,agentic_guidelines,,,0.7385635864592863,8744.0,keyword rule TREATMENT_QUESTION
+question_focus,share_cause_questions,agentic_guidelines,,,0.07467978042086001,8744.0,keyword rule CAUSE_QUESTION
+question_focus,share_treatment_questions,guidelines,,,0.49516400336417155,9512.0,keyword rule TREATMENT_QUESTION
+question_focus,share_cause_questions,guidelines,,,0.4797098402018503,9512.0,keyword rule CAUSE_QUESTION
+conditions,cases,,acute viral pharyngitis,,815.0,2378.0,
+conditions,cases,,streptococcal sore throat,,603.0,2378.0,
+conditions,cases,,essential hypertension,,367.0,2378.0,
+conditions,cases,,acute infective cystitis,,328.0,2378.0,
+conditions,cases,,chronic congestive heart failure,,155.0,2378.0,
+conditions,cases,,chronic obstructive pulmonary disease,,65.0,2378.0,
+conditions,cases,,acute bacterial sinusitis,,45.0,2378.0,
+conditions,reference_plan_share,,viral pharyngitis,,0.9582822085889571,815.0,Throat culture (procedure)
+conditions,reference_plan_share,,viral pharyngitis,,0.04171779141104295,815.0,Penicillin V Potassium 250 MG Oral Tablet
+conditions,reference_plan_share,,heart failure,,0.7548387096774194,155.0,Electrocardiographic procedure (procedure); Assessment using New York Heart Association Classification (procedure)
+conditions,reference_plan_share,,heart failure,,0.22580645161290322,155.0,Electrocardiographic procedure (procedure); Cardiovascular stress testing (procedure); Assessment using New York Heart Association Classification (procedure)
+conditions,reference_plan_share,,heart failure,,0.01935483870967742,155.0,Electrocardiographic procedure (procedure)
+conditions,reference_plan_share,,hypertension,,0.36239782016348776,367.0,lisinopril 10 MG Oral Tablet; Lifestyle education regarding hypertension (procedure)
+conditions,reference_plan_share,,hypertension,,0.2561307901907357,367.0,Hydrochlorothiazide 25 MG Oral Tablet; Lifestyle education regarding hypertension (procedure)
+conditions,reference_plan_share,,hypertension,,0.20435967302452315,367.0,amLODIPine 2.5 MG Oral Tablet; Lifestyle education regarding hypertension (procedure)
+conditions,reference_plan_share,,sinusitis,,1.0,45.0,Amoxicillin 250 MG / Clavulanate 125 MG Oral Tablet
+plan_by_condition,mean_plan_score,guidelines,viral pharyngitis,all_models,0.433159188690842,3254.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,viral pharyngitis,all_models,0.21727105101413643,3254.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,viral pharyngitis,all_models,-21.58881376767056,3254.0,
+plan_by_condition,share_plans_with_test,guidelines,viral pharyngitis,all_models,0.8451137062077443,3254.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,viral pharyngitis,all_models,0.3967424708051629,3254.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,viral pharyngitis,gpt_4o_mini,0.4784747847478475,813.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,viral pharyngitis,gpt_4o_mini,0.23370233702337023,813.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,viral pharyngitis,gpt_4o_mini,-24.477244772447722,813.0,
+plan_by_condition,share_plans_with_test,guidelines,viral pharyngitis,gpt_4o_mini,0.9003690036900369,813.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,viral pharyngitis,gpt_4o_mini,0.33087330873308735,813.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,viral pharyngitis,ollama_gemma3_4b,0.33783783783783783,814.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,viral pharyngitis,ollama_gemma3_4b,0.13636363636363635,814.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,viral pharyngitis,ollama_gemma3_4b,-20.14742014742015,814.0,
+plan_by_condition,share_plans_with_test,guidelines,viral pharyngitis,ollama_gemma3_4b,0.726044226044226,814.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,viral pharyngitis,ollama_gemma3_4b,0.2665847665847666,814.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,viral pharyngitis,ollama_llama3_2_3b,0.43419434194341944,813.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,viral pharyngitis,ollama_llama3_2_3b,0.0971709717097171,813.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,viral pharyngitis,ollama_llama3_2_3b,-33.702337023370234,813.0,
+plan_by_condition,share_plans_with_test,guidelines,viral pharyngitis,ollama_llama3_2_3b,0.8191881918819188,813.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,viral pharyngitis,ollama_llama3_2_3b,0.1820418204182042,813.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,viral pharyngitis,ollama_ministral_3_3b,0.4821867321867322,814.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,viral pharyngitis,ollama_ministral_3_3b,0.40171990171990174,814.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,viral pharyngitis,ollama_ministral_3_3b,-8.046683046683047,814.0,
+plan_by_condition,share_plans_with_test,guidelines,viral pharyngitis,ollama_ministral_3_3b,0.9348894348894349,814.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,viral pharyngitis,ollama_ministral_3_3b,0.8071253071253072,814.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,heart failure,all_models,0.40894770006301195,529.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,heart failure,all_models,0.2613421550094518,529.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,heart failure,all_models,-14.76055450535602,529.0,
+plan_by_condition,share_plans_with_test,guidelines,heart failure,all_models,0.9848771266540642,529.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,heart failure,all_models,0.6370510396975425,529.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,heart failure,gpt_4o_mini,0.4104683195592287,121.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,heart failure,gpt_4o_mini,0.23347107438016526,121.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,heart failure,gpt_4o_mini,-17.699724517906333,121.0,
+plan_by_condition,share_plans_with_test,guidelines,heart failure,gpt_4o_mini,1.0,121.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,heart failure,gpt_4o_mini,0.5785123966942148,121.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,heart failure,ollama_gemma3_4b,0.4348958333333333,128.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,heart failure,ollama_gemma3_4b,0.27994791666666663,128.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,heart failure,ollama_gemma3_4b,-15.494791666666666,128.0,
+plan_by_condition,share_plans_with_test,guidelines,heart failure,ollama_gemma3_4b,1.0,128.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,heart failure,ollama_gemma3_4b,0.7265625,128.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,heart failure,ollama_llama3_2_3b,0.4355231143552311,137.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,heart failure,ollama_llama3_2_3b,0.2019464720194647,137.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,heart failure,ollama_llama3_2_3b,-23.357664233576642,137.0,
+plan_by_condition,share_plans_with_test,guidelines,heart failure,ollama_llama3_2_3b,0.948905109489051,137.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,heart failure,ollama_llama3_2_3b,0.36496350364963503,137.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,heart failure,ollama_ministral_3_3b,0.3589743589743589,143.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,heart failure,ollama_ministral_3_3b,0.32517482517482516,143.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,heart failure,ollama_ministral_3_3b,-3.3799533799533807,143.0,
+plan_by_condition,share_plans_with_test,guidelines,heart failure,ollama_ministral_3_3b,0.993006993006993,143.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,heart failure,ollama_ministral_3_3b,0.8671328671328671,143.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,hypertension,all_models,0.23764568764568764,1430.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,hypertension,all_models,0.3416666666666667,1430.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,hypertension,all_models,10.402097902097902,1430.0,
+plan_by_condition,share_plans_with_test,guidelines,hypertension,all_models,0.3384615384615385,1430.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,hypertension,all_models,0.08321678321678322,1430.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,hypertension,gpt_4o_mini,0.31824512534818944,359.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,hypertension,gpt_4o_mini,0.40575673166202414,359.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,hypertension,gpt_4o_mini,8.751160631383472,359.0,
+plan_by_condition,share_plans_with_test,guidelines,hypertension,gpt_4o_mini,0.31197771587743733,359.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,hypertension,gpt_4o_mini,0.025069637883008356,359.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,hypertension,ollama_gemma3_4b,0.22439613526570049,345.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,hypertension,ollama_gemma3_4b,0.36714975845410636,345.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,hypertension,ollama_gemma3_4b,14.275362318840578,345.0,
+plan_by_condition,share_plans_with_test,guidelines,hypertension,ollama_gemma3_4b,0.3333333333333333,345.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,hypertension,ollama_gemma3_4b,0.0782608695652174,345.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,hypertension,ollama_llama3_2_3b,0.13105022831050228,365.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,hypertension,ollama_llama3_2_3b,0.19269406392694063,365.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,hypertension,ollama_llama3_2_3b,6.164383561643835,365.0,
+plan_by_condition,share_plans_with_test,guidelines,hypertension,ollama_llama3_2_3b,0.33424657534246577,365.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,hypertension,ollama_llama3_2_3b,0.06575342465753424,365.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,hypertension,ollama_ministral_3_3b,0.27793167128347185,361.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,hypertension,ollama_ministral_3_3b,0.40420129270544786,361.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,hypertension,ollama_ministral_3_3b,12.6269621421976,361.0,
+plan_by_condition,share_plans_with_test,guidelines,hypertension,ollama_ministral_3_3b,0.3739612188365651,361.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,hypertension,ollama_ministral_3_3b,0.1634349030470914,361.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,sinusitis,all_models,0.21388888888888888,180.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,sinusitis,all_models,0.3527777777777778,180.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,sinusitis,all_models,13.88888888888889,180.0,
+plan_by_condition,share_plans_with_test,guidelines,sinusitis,all_models,0.5166666666666667,180.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,sinusitis,all_models,0.16666666666666666,180.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,sinusitis,gpt_4o_mini,0.2222222222222222,45.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,sinusitis,gpt_4o_mini,0.3888888888888889,45.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,sinusitis,gpt_4o_mini,16.666666666666664,45.0,
+plan_by_condition,share_plans_with_test,guidelines,sinusitis,gpt_4o_mini,0.4222222222222222,45.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,sinusitis,gpt_4o_mini,0.0,45.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,sinusitis,ollama_gemma3_4b,0.08888888888888889,45.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,sinusitis,ollama_gemma3_4b,0.3,45.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,sinusitis,ollama_gemma3_4b,21.11111111111111,45.0,
+plan_by_condition,share_plans_with_test,guidelines,sinusitis,ollama_gemma3_4b,0.4,45.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,sinusitis,ollama_gemma3_4b,0.06666666666666667,45.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,sinusitis,ollama_llama3_2_3b,0.24444444444444444,45.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,sinusitis,ollama_llama3_2_3b,0.28888888888888886,45.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,sinusitis,ollama_llama3_2_3b,4.444444444444445,45.0,
+plan_by_condition,share_plans_with_test,guidelines,sinusitis,ollama_llama3_2_3b,0.4888888888888889,45.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,sinusitis,ollama_llama3_2_3b,0.044444444444444446,45.0,keyword rule PLAN_TEST
+plan_by_condition,mean_plan_score,guidelines,sinusitis,ollama_ministral_3_3b,0.3,45.0,
+plan_by_condition,mean_plan_score,agentic_guidelines,sinusitis,ollama_ministral_3_3b,0.43333333333333335,45.0,
+plan_by_condition,plan_change_points,agentic_guidelines-guidelines,sinusitis,ollama_ministral_3_3b,13.333333333333334,45.0,
+plan_by_condition,share_plans_with_test,guidelines,sinusitis,ollama_ministral_3_3b,0.7555555555555555,45.0,keyword rule PLAN_TEST
+plan_by_condition,share_plans_with_test,agentic_guidelines,sinusitis,ollama_ministral_3_3b,0.5555555555555556,45.0,keyword rule PLAN_TEST
+guideline_text,plan_change_points_by_text_quarter,agentic_guidelines-guidelines,Q1_shortest,,-6.857562408223202,2270.0,3268-6802 bytes
+guideline_text,plan_change_points_by_text_quarter,agentic_guidelines-guidelines,Q2,,-7.461538461538461,2275.0,6803-7235 bytes
+guideline_text,plan_change_points_by_text_quarter,agentic_guidelines-guidelines,Q3,,-7.868114015654999,2257.0,7238-7799 bytes
+guideline_text,plan_change_points_by_text_quarter,agentic_guidelines-guidelines,Q4_longest,,-7.0976757869961755,2266.0,7800-8637 bytes
+failures,share_failed_by_group,agentic_both,acute,,0.04187604690117253,1791.0,
+failures,share_failed_by_group,agentic_both,control,,0.05161290322580645,155.0,
+failures,share_failed_by_group,agentic_both,history,,0.09953703703703703,432.0,
+failures,llm_only_diagnosis_failed_cases,llm_only,,gpt_4o_mini,0.7686897045009651,126.0,cases whose agentic_both run failed
+failures,llm_only_diagnosis_other_cases,llm_only,,gpt_4o_mini,0.7576720867958091,2252.0,
+failures,llm_only_diagnosis_failed_cases,llm_only,,ollama_gemma3_4b,0.683968731275838,126.0,cases whose agentic_both run failed
+failures,llm_only_diagnosis_other_cases,llm_only,,ollama_gemma3_4b,0.638761434831423,2252.0,
+failures,llm_only_diagnosis_failed_cases,llm_only,,ollama_llama3_2_3b,0.47427572444134414,126.0,cases whose agentic_both run failed
+failures,llm_only_diagnosis_other_cases,llm_only,,ollama_llama3_2_3b,0.4977974912281612,2252.0,
+failures,llm_only_diagnosis_failed_cases,llm_only,,ollama_ministral_3_3b,0.5222127153336015,126.0,cases whose agentic_both run failed
+failures,llm_only_diagnosis_other_cases,llm_only,,ollama_ministral_3_3b,0.535445929591495,2252.0,
+cohort,cases,,,,2378.0,,
+cohort,patients,,,,2047.0,,
